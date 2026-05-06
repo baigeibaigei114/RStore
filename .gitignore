@@ -1,0 +1,56 @@
+# Maven build output
+target/
+*.jar
+*.war
+*.ear
+
+# Maven wrapper and temporary files
+.mvn/wrapper/maven-wrapper.jar
+*.releaseBackup
+*.versionsBackup
+*.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+
+# Java runtime files
+hs_err_pid*
+replay_pid*
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# VS Code
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Local environment files
+.env
+.env.*
+!.env.example
+application-local.yml
+application-*.local.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Docker local data directories, if bind mounts are introduced later
+docker-data/
+data/

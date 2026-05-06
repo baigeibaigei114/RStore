@@ -1,0 +1,48 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: rs-image-asset-platform
+
+  profiles:
+    active: dev
+
+  datasource:
+    # 后续接入 PostgreSQL/PostGIS 时替换为真实连接信息。
+    url: jdbc:postgresql://localhost:5432/rs_image_asset
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: remote-sensing-images
+
+geoserver:
+  url: http://localhost:8081/geoserver
+  username: admin
+  password: geoserver
+
+elasticsearch:
+  uris: http://localhost:9200
+
+logging:
+  level:
+    com.remotesensing.platform: info
