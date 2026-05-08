@@ -1,0 +1,39 @@
+$kind: http-request
+name: 'Get Image By ID'
+method: GET
+url: '{{baseUrl}}/images/{{imageId}}'
+order: 2000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 200", function () {
+        pm.response.to.have.status(200);
+      });
+
+      let json;
+      try {
+        json = pm.response.json();
+      } catch (e) {
+        pm.test("Response is valid JSON", function () {
+          pm.expect.fail("Invalid JSON response");
+        });
+      }
+
+      pm.test("Envelope has code, message, data", function () {
+        pm.expect(json).to.have.property("code");
+        pm.expect(json).to.have.property("message");
+        pm.expect(json).to.have.property("data");
+      });
+
+      pm.test("Envelope code is 200", function () {
+        pm.expect(json.code).to.eql(200);
+      });
+
+      pm.test("Returned data matches requested imageId when id exists", function () {
+        if (json.data && json.data.id !== undefined && json.data.id !== null) {
+          pm.expect(String(json.data.id)).to.eql(String(pm.environment.get("imageId")));
+        } else {
+          pm.expect(json.data).to.exist;
+        }
+      });

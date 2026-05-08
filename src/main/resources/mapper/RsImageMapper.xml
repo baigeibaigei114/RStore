@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.RsImageMapper">
+
+    <resultMap id="RsImageResultMap" type="com.remotesensing.platform.entity.RsImage">
+        <id property="id" column="id"/>
+        <result property="imageCode" column="image_code"/>
+        <result property="imageName" column="image_name"/>
+        <result property="sensorType" column="sensor_type"/>
+        <result property="satelliteName" column="satellite_name"/>
+        <result property="acquisitionTime" column="acquisition_time"/>
+        <result property="cloudPercent" column="cloud_percent"/>
+        <result property="resolutionMeter" column="resolution_meter"/>
+        <result property="bandCount" column="band_count"/>
+        <result property="projection" column="projection"/>
+        <result property="width" column="width"/>
+        <result property="height" column="height"/>
+        <result property="fileFormat" column="file_format"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="contentType" column="content_type"/>
+        <result property="minioBucket" column="minio_bucket"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="overviewObjectKey" column="overview_object_key"/>
+        <result property="footprintWkt" column="footprint_wkt"/>
+        <result property="centerLon" column="center_lon"/>
+        <result property="centerLat" column="center_lat"/>
+        <result property="description" column="description"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id,
+        image_code,
+        image_name,
+        sensor_type,
+        satellite_name,
+        acquisition_time,
+        cloud_percent,
+        resolution_meter,
+        band_count,
+        projection,
+        width,
+        height,
+        file_format,
+        file_size,
+        content_type,
+        minio_bucket,
+        object_key,
+        overview_object_key,
+        ST_AsText(footprint) AS footprint_wkt,
+        center_lon,
+        center_lat,
+        description,
+        created_at,
+        updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.remotesensing.platform.entity.RsImage"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rs_image (
+            image_code,
+            image_name,
+            sensor_type,
+            satellite_name,
+            acquisition_time,
+            cloud_percent,
+            resolution_meter,
+            band_count,
+            projection,
+            width,
+            height,
+            file_format,
+            file_size,
+            content_type,
+            minio_bucket,
+            object_key,
+            overview_object_key,
+            footprint,
+            center_lon,
+            center_lat,
+            description
+        ) VALUES (
+            #{imageCode},
+            #{imageName},
+            #{sensorType},
+            #{satelliteName},
+            #{acquisitionTime},
+            #{cloudPercent},
+            #{resolutionMeter},
+            #{bandCount},
+            #{projection},
+            #{width},
+            #{height},
+            #{fileFormat},
+            #{fileSize},
+            #{contentType},
+            #{minioBucket},
+            #{objectKey},
+            #{overviewObjectKey},
+            ST_GeomFromText(NULLIF(#{footprintWkt}, ''), 4326),
+            #{centerLon},
+            #{centerLat},
+            #{description}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="RsImageResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_image
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectPage" resultMap="RsImageResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_image
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_image
+    </select>
+
+    <delete id="deleteById">
+        DELETE FROM rs_image
+        WHERE id = #{id}
+    </delete>
+
+    <select id="countByImageCode" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_image
+        WHERE image_code = #{imageCode}
+    </select>
+</mapper>

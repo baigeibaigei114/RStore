@@ -11,6 +11,7 @@
 | 类型 | 技术 | 用途 |
 | --- | --- | --- |
 | 后端框架 | Spring Boot 3 | 构建 REST API 和后端业务服务 |
+| 持久层框架 | MyBatis | 编写可控 SQL，便于扩展 PostGIS 空间查询 |
 | 构建工具 | Maven | 项目依赖管理与构建 |
 | 开发语言 | Java 17 | 后端主语言 |
 | 空间数据库 | PostgreSQL + PostGIS | 存储影像元数据、空间范围、时空索引 |
@@ -35,7 +36,7 @@ src/main/java/com/remotesensing/platform
 ├── entity          # 数据库实体对象
 ├── dto             # 请求参数和服务间数据传输对象
 ├── vo              # 返回给前端的视图对象
-├── mapper          # 数据访问层接口
+├── mapper          # MyBatis 数据访问接口，对应 resources/mapper 中的 XML SQL
 ├── common          # 通用工具和统一返回结果
 └── exception       # 全局异常处理和业务异常
 ```
@@ -114,6 +115,73 @@ docker/postgres/init/01-enable-postgis.sql
 ```
 
 该脚本会自动启用 `postgis` 和 `postgis_topology` 扩展。
+
+如果数据库已经创建过旧版 `rs_image` 表，执行以下升级脚本以支持 GeoTIFF 先上传、后解析空间范围：
+
+```powershell
+psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260508_rs_image_upload.sql
+```
+
+## GeoTIFF 上传接口
+
+接口地址：
+
+```text
+POST http://localhost:8080/api/images/upload
+```
+
+请求类型：`multipart/form-data`
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| file | File | 是 | 仅支持 `.tif` 或 `.tiff` 文件 |
+| name | Text | 是 | 影像名称 |
+| sensor | Text | 否 | 传感器名称 |
+| captureTime | Text | 否 | 拍摄时间，例如 `2026-05-08T10:30:00+08:00` |
+| cloudPercent | Text | 否 | 云量百分比，例如 `12.5` |
+
+Postman 测试方式：
+
+1. 选择 `POST` 请求。
+2. 输入地址：`http://localhost:8080/api/images/upload`。
+3. 在 `Body` 中选择 `form-data`。
+4. 添加 `file` 字段，类型选择 `File`，选择本地 `.tif` 或 `.tiff` 文件。
+5. 添加 `name`、`sensor`、`captureTime`、`cloudPercent` 字段，类型选择 `Text`。
+6. 点击 `Send`。
+
+上传成功后，文件会保存到 MinIO，路径格式为：
+
+```text
+raw/{yyyy}/{MM}/{uuid}_{originalFilename}
+```
+
+数据库只保存 bucket、objectKey、fileSize、contentType 等元数据信息，不保存文件本体。
+
+## 文件预签名 URL
+
+MinIO bucket 默认私有，前端访问原始影像、缩略图或结果文件时，需要通过后端生成临时 URL。
+
+接口地址：
+
+```text
+GET http://localhost:8080/api/files/presigned-url?objectKey=raw/2026/05/example.tif
+```
+
+返回示例：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "objectKey": "raw/2026/05/example.tif",
+    "url": "http://localhost:9000/remote-sensing-images/raw/2026/05/example.tif?...",
+    "expireSeconds": 1800
+  }
+}
+```
+
+默认过期时间为 30 分钟。接口只返回临时访问 URL，不会返回 MinIO 的 `accessKey` 或 `secretKey`。
 
 ## 当前已完成
 

@@ -34,6 +34,34 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- MyBatis 用于编写可控 SQL，适合 PostGIS 空间查询场景。 -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- PostgreSQL 数据库驱动，用于连接 PostgreSQL/PostGIS。 -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- MinIO Java SDK，用于上传 GeoTIFF 文件到对象存储。 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.12</version>
+        </dependency>
+
+        <!-- Lombok 用于减少 getter、setter、构造方法等样板代码。 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- 提供 Spring Boot 测试、JUnit 5、MockMvc 等测试能力。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -47,6 +75,14 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
             </plugin>
         </plugins>
     </build>
