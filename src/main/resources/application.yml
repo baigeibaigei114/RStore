@@ -40,6 +40,12 @@ minio:
   secret-key: minioadmin
   bucket-name: remote-sensing-images
 
+python-worker:
+  python-executable: python
+  parse-metadata-script: python-worker/scripts/parse_metadata.py
+  thumbnail-script: python-worker/scripts/generate_thumbnail.py
+  timeout-seconds: 60
+
 geoserver:
   url: http://localhost:8081/geoserver
   username: admin

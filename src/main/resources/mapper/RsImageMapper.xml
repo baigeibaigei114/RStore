@@ -20,8 +20,10 @@
         <result property="fileFormat" column="file_format"/>
         <result property="fileSize" column="file_size"/>
         <result property="contentType" column="content_type"/>
+        <result property="metadataJson" column="metadata_json"/>
         <result property="minioBucket" column="minio_bucket"/>
         <result property="objectKey" column="object_key"/>
+        <result property="thumbnailObjectKey" column="thumbnail_object_key"/>
         <result property="overviewObjectKey" column="overview_object_key"/>
         <result property="footprintWkt" column="footprint_wkt"/>
         <result property="centerLon" column="center_lon"/>
@@ -47,8 +49,10 @@
         file_format,
         file_size,
         content_type,
+        metadata_json::text AS metadata_json,
         minio_bucket,
         object_key,
+        thumbnail_object_key,
         overview_object_key,
         ST_AsText(footprint) AS footprint_wkt,
         center_lon,
@@ -75,8 +79,10 @@
             file_format,
             file_size,
             content_type,
+            metadata_json,
             minio_bucket,
             object_key,
+            thumbnail_object_key,
             overview_object_key,
             footprint,
             center_lon,
@@ -97,8 +103,10 @@
             #{fileFormat},
             #{fileSize},
             #{contentType},
+            CAST(NULLIF(#{metadataJson}, '') AS jsonb),
             #{minioBucket},
             #{objectKey},
+            #{thumbnailObjectKey},
             #{overviewObjectKey},
             ST_GeomFromText(NULLIF(#{footprintWkt}, ''), 4326),
             #{centerLon},
@@ -137,4 +145,11 @@
         FROM rs_image
         WHERE image_code = #{imageCode}
     </select>
+
+    <update id="updateThumbnailObjectKey">
+        UPDATE rs_image
+        SET thumbnail_object_key = #{thumbnailObjectKey},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
 </mapper>

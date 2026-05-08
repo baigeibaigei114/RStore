@@ -14,7 +14,13 @@ pip install -r requirements.txt
 ## 运行示例
 
 ```powershell
-python parse_geotiff_metadata.py D:\data\sample.tif
+python scripts\parse_metadata.py D:\data\sample.tif
+```
+
+生成缩略图：
+
+```powershell
+python scripts\generate_thumbnail.py D:\data\sample.tif D:\data\sample_thumb.png
 ```
 
 成功输出示例：

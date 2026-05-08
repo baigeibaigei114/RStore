@@ -19,4 +19,6 @@ public interface RsImageMapper {
     int deleteById(@Param("id") Long id);
 
     long countByImageCode(@Param("imageCode") String imageCode);
+
+    int updateThumbnailObjectKey(@Param("id") Long id, @Param("thumbnailObjectKey") String thumbnailObjectKey);
 }

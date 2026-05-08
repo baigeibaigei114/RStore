@@ -51,6 +51,12 @@ desktop.ini
 *.swp
 *.swo
 
+# Python worker local files
+__pycache__/
+*.py[cod]
+python-worker/.venv/
+python-worker/.pytest_cache/
+
 # Docker local data directories, if bind mounts are introduced later
 docker-data/
 data/

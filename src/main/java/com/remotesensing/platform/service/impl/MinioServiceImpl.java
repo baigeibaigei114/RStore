@@ -13,6 +13,8 @@ import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.http.Method;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -71,6 +73,23 @@ public class MinioServiceImpl implements MinioService {
             return new FilePresignedUrlVO(objectKey, url, DEFAULT_PRESIGNED_EXPIRE_SECONDS);
         } catch (Exception exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "生成文件预签名 URL 失败：" + exception.getMessage());
+        }
+    }
+
+    @Override
+    public MinioUploadVO uploadLocalFile(Path filePath, String objectKey, String contentType) {
+        ensureBucketExists();
+        try (InputStream inputStream = Files.newInputStream(filePath)) {
+            long fileSize = Files.size(filePath);
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(minioProperties.getBucketName())
+                    .object(objectKey)
+                    .stream(inputStream, fileSize, -1)
+                    .contentType(contentType)
+                    .build());
+            return new MinioUploadVO(minioProperties.getBucketName(), objectKey, fileSize, contentType);
+        } catch (Exception exception) {
+            throw new BusinessException(ResultCode.FAIL.getCode(), "上传本地文件到 MinIO 失败：" + exception.getMessage());
         }
     }
 

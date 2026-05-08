@@ -20,8 +20,10 @@ CREATE TABLE IF NOT EXISTS rs_image (
     file_format VARCHAR(50) NOT NULL DEFAULT 'GeoTIFF',
     file_size BIGINT,
     content_type VARCHAR(100),
+    metadata_json JSONB,
     minio_bucket VARCHAR(100) NOT NULL,
     object_key VARCHAR(500) NOT NULL,
+    thumbnail_object_key VARCHAR(500),
     overview_object_key VARCHAR(500),
     footprint geometry(Polygon, 4326),
     center_lon NUMERIC(10, 6),
@@ -41,7 +43,9 @@ CREATE TABLE IF NOT EXISTS rs_image (
 COMMENT ON TABLE rs_image IS '影像资产表，保存 GeoTIFF 影像元数据、对象存储路径和空间范围';
 COMMENT ON COLUMN rs_image.image_code IS '影像唯一编码，用于业务侧稳定引用';
 COMMENT ON COLUMN rs_image.object_key IS 'MinIO 中原始影像文件对象路径';
+COMMENT ON COLUMN rs_image.thumbnail_object_key IS 'MinIO 中 PNG 缩略图对象路径';
 COMMENT ON COLUMN rs_image.content_type IS '文件 MIME 类型';
+COMMENT ON COLUMN rs_image.metadata_json IS 'GeoTIFF 解析得到的完整元数据 JSON';
 COMMENT ON COLUMN rs_image.overview_object_key IS 'MinIO 中影像缩略图或概览文件对象路径';
 COMMENT ON COLUMN rs_image.footprint IS '影像覆盖范围，WGS84 坐标系 Polygon；上传后可为空，解析元数据后补全';
 
@@ -49,6 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_rs_image_footprint_gist ON rs_image USING GIST (f
 CREATE INDEX IF NOT EXISTS idx_rs_image_acquisition_time ON rs_image (acquisition_time);
 CREATE INDEX IF NOT EXISTS idx_rs_image_sensor_type ON rs_image (sensor_type);
 CREATE INDEX IF NOT EXISTS idx_rs_image_object_location ON rs_image (minio_bucket, object_key);
+CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_object_key ON rs_image (thumbnail_object_key);
 
 CREATE TABLE IF NOT EXISTS rs_task (
     id BIGSERIAL PRIMARY KEY,

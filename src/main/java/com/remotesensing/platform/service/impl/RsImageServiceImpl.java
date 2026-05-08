@@ -1,13 +1,18 @@
 package com.remotesensing.platform.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
+import com.remotesensing.platform.service.GeoTiffMetadataService;
+import com.remotesensing.platform.service.GeoTiffThumbnailService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import java.math.BigDecimal;
@@ -28,10 +33,20 @@ public class RsImageServiceImpl implements RsImageService {
 
     private final RsImageMapper imageMapper;
     private final MinioService minioService;
+    private final GeoTiffMetadataService geoTiffMetadataService;
+    private final GeoTiffThumbnailService geoTiffThumbnailService;
+    private final ObjectMapper objectMapper;
 
-    public RsImageServiceImpl(RsImageMapper imageMapper, MinioService minioService) {
+    public RsImageServiceImpl(RsImageMapper imageMapper,
+                              MinioService minioService,
+                              GeoTiffMetadataService geoTiffMetadataService,
+                              GeoTiffThumbnailService geoTiffThumbnailService,
+                              ObjectMapper objectMapper) {
         this.imageMapper = imageMapper;
         this.minioService = minioService;
+        this.geoTiffMetadataService = geoTiffMetadataService;
+        this.geoTiffThumbnailService = geoTiffThumbnailService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -62,12 +77,14 @@ public class RsImageServiceImpl implements RsImageService {
         }
 
         MinioUploadVO uploadVO = minioService.uploadGeoTiff(file);
+        GeoTiffMetadataVO metadata = geoTiffMetadataService.parse(file);
         RsImage image = new RsImage();
         image.setImageCode(generateImageCode());
         image.setImageName(name);
         image.setSensorType(sensor);
         image.setAcquisitionTime(captureTime);
         image.setCloudPercent(cloudPercent);
+        fillMetadata(image, metadata);
         image.setFileFormat("GeoTIFF");
         image.setFileSize(uploadVO.getFileSize());
         image.setContentType(uploadVO.getContentType());
@@ -76,6 +93,8 @@ public class RsImageServiceImpl implements RsImageService {
 
         try {
             imageMapper.insert(image);
+            String thumbnailObjectKey = geoTiffThumbnailService.generateAndUpload(file, image.getId());
+            imageMapper.updateThumbnailObjectKey(image.getId(), thumbnailObjectKey);
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录保存失败：" + exception.getMostSpecificCause().getMessage());
         }
@@ -162,8 +181,10 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setFileFormat(image.getFileFormat());
         vo.setFileSize(image.getFileSize());
         vo.setContentType(image.getContentType());
+        vo.setMetadataJson(image.getMetadataJson());
         vo.setMinioBucket(image.getMinioBucket());
         vo.setObjectKey(image.getObjectKey());
+        vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
         vo.setOverviewObjectKey(image.getOverviewObjectKey());
         vo.setFootprintWkt(image.getFootprintWkt());
         vo.setCenterLon(image.getCenterLon());
@@ -191,5 +212,47 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String generateImageCode() {
         return "IMG_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private void fillMetadata(RsImage image, GeoTiffMetadataVO metadata) {
+        image.setWidth(metadata.getWidth());
+        image.setHeight(metadata.getHeight());
+        image.setBandCount(metadata.getBandCount());
+        image.setProjection(metadata.getCrs());
+        if (metadata.getResolution() != null) {
+            image.setResolutionMeter(metadata.getResolution().getX());
+        }
+        if (metadata.getBounds() != null) {
+            image.setFootprintWkt(toPolygonWkt(metadata.getBounds()));
+            image.setCenterLon(center(metadata.getBounds().getLeft(), metadata.getBounds().getRight()));
+            image.setCenterLat(center(metadata.getBounds().getBottom(), metadata.getBounds().getTop()));
+        }
+        image.setMetadataJson(toJson(metadata));
+    }
+
+    private String toPolygonWkt(GeoTiffMetadataVO.Bounds bounds) {
+        BigDecimal left = bounds.getLeft();
+        BigDecimal bottom = bounds.getBottom();
+        BigDecimal right = bounds.getRight();
+        BigDecimal top = bounds.getTop();
+        return "POLYGON(("
+                + left + " " + bottom + ","
+                + right + " " + bottom + ","
+                + right + " " + top + ","
+                + left + " " + top + ","
+                + left + " " + bottom
+                + "))";
+    }
+
+    private BigDecimal center(BigDecimal min, BigDecimal max) {
+        return min.add(max).divide(BigDecimal.valueOf(2));
+    }
+
+    private String toJson(GeoTiffMetadataVO metadata) {
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ResultCode.FAIL.getCode(), "GeoTIFF 元数据 JSON 序列化失败");
+        }
     }
 }

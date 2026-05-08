@@ -157,6 +157,43 @@ raw/{yyyy}/{MM}/{uuid}_{originalFilename}
 
 数据库只保存 bucket、objectKey、fileSize、contentType 等元数据信息，不保存文件本体。
 
+上传接口会同步调用 `python-worker/scripts/parse_metadata.py` 解析 GeoTIFF 元数据，并写入：
+
+| 元数据 | 保存位置 |
+| --- | --- |
+| width | `rs_image.width` |
+| height | `rs_image.height` |
+| bandCount | `rs_image.band_count` |
+| crs | `rs_image.projection` |
+| resolution.x | `rs_image.resolution_meter` |
+| bounds | 转换为 `rs_image.footprint` |
+| 完整元数据 JSON | `rs_image.metadata_json` |
+
+如果 Python 解析失败，接口会返回错误信息，当前不会创建影像数据库记录；临时文件会在解析完成或失败后自动清理。
+
+上传接口还会同步生成 PNG 缩略图：
+
+1. Spring Boot 将 GeoTIFF 复制到本地临时目录。
+2. 调用 `python-worker/scripts/generate_thumbnail.py`。
+3. Python 使用 rasterio 读取影像，优先使用前三个波段生成 RGB 缩略图。
+4. 如果只有单波段，则生成灰度缩略图。
+5. 生成的 PNG 上传到 MinIO。
+6. `rs_image.thumbnail_object_key` 保存缩略图对象路径。
+
+缩略图 objectKey 格式：
+
+```text
+thumbnail/{yyyy}/{MM}/{imageId}.png
+```
+
+缩略图生成异常处理：
+
+- GeoTIFF 读取失败：返回 `GeoTIFF 缩略图生成失败`。
+- Python 脚本超时：返回 `GeoTIFF 缩略图生成超时`。
+- Python 未生成 PNG：返回 `缩略图脚本未生成 PNG 文件`。
+- MinIO 上传失败：返回 `上传本地文件到 MinIO 失败`。
+- 成功或失败后都会清理本地临时 GeoTIFF 和 PNG 文件。
+
 ## 文件预签名 URL
 
 MinIO bucket 默认私有，前端访问原始影像、缩略图或结果文件时，需要通过后端生成临时 URL。

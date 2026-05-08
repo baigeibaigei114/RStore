@@ -26,8 +26,10 @@ public class RsImage {
     private String fileFormat;
     private Long fileSize;
     private String contentType;
+    private String metadataJson;
     private String minioBucket;
     private String objectKey;
+    private String thumbnailObjectKey;
     private String overviewObjectKey;
     private String footprintWkt;
     private BigDecimal centerLon;
