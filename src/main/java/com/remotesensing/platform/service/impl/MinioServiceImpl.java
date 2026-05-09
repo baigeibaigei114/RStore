@@ -42,6 +42,7 @@ public class MinioServiceImpl implements MinioService {
         validateGeoTiff(file);
         ensureBucketExists();
 
+        // 原始影像路径按日期分区，便于后续按时间归档和排查对象存储文件。
         String objectKey = buildObjectKey(file.getOriginalFilename());
         String contentType = resolveContentType(file);
         try (InputStream inputStream = file.getInputStream()) {
@@ -95,6 +96,7 @@ public class MinioServiceImpl implements MinioService {
 
     private void ensureBucketExists() {
         try {
+            // 本地开发环境常从空 MinIO 启动，上传前自动准备 bucket。
             boolean exists = minioClient.bucketExists(BucketExistsArgs.builder()
                     .bucket(minioProperties.getBucketName())
                     .build());
@@ -126,6 +128,7 @@ public class MinioServiceImpl implements MinioService {
 
     private String buildObjectKey(String originalFilename) {
         LocalDate now = LocalDate.now();
+        // 文件名只做路径分隔和空白字符规整，保留原始名称便于人工识别。
         String safeFilename = originalFilename
                 .replace("\\", "_")
                 .replace("/", "_")

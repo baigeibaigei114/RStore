@@ -34,6 +34,9 @@ public class RsImageController {
         return Result.success(imageService.create(createDTO));
     }
 
+    /**
+     * GeoTIFF 上传入口：文件本体进入 MinIO，元数据和缩略图路径进入数据库。
+     */
     @PostMapping("/upload")
     public Result<RsImageVO> upload(@RequestParam("file") MultipartFile file,
                                     @RequestParam("name") String name,

@@ -93,6 +93,7 @@ public class RsImageServiceImpl implements RsImageService {
 
         try {
             imageMapper.insert(image);
+            // 缩略图路径包含 imageId，所以先插入影像记录，再生成并回写缩略图对象路径。
             String thumbnailObjectKey = geoTiffThumbnailService.generateAndUpload(file, image.getId());
             imageMapper.updateThumbnailObjectKey(image.getId(), thumbnailObjectKey);
         } catch (DataIntegrityViolationException exception) {
@@ -223,6 +224,7 @@ public class RsImageServiceImpl implements RsImageService {
             image.setResolutionMeter(metadata.getResolution().getX());
         }
         if (metadata.getBounds() != null) {
+            // rasterio 输出矩形 bounds，数据库侧用 Polygon footprint 支持 PostGIS 空间索引。
             image.setFootprintWkt(toPolygonWkt(metadata.getBounds()));
             image.setCenterLon(center(metadata.getBounds().getLeft(), metadata.getBounds().getRight()));
             image.setCenterLat(center(metadata.getBounds().getBottom(), metadata.getBounds().getTop()));
@@ -250,6 +252,7 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String toJson(GeoTiffMetadataVO metadata) {
         try {
+            // 保留完整元数据，避免后续新增字段时需要立即改表。
             return objectMapper.writeValueAsString(metadata);
         } catch (JsonProcessingException exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "GeoTIFF 元数据 JSON 序列化失败");

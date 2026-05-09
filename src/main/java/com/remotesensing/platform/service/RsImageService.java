@@ -11,6 +11,9 @@ public interface RsImageService {
 
     RsImageVO create(RsImageCreateDTO createDTO);
 
+    /**
+     * 上传 GeoTIFF 后同步完成对象存储、元数据解析、缩略图生成和影像记录创建。
+     */
     RsImageVO upload(MultipartFile file, String name, String sensor, OffsetDateTime captureTime, BigDecimal cloudPercent);
 
     RsImageVO getById(Long id);

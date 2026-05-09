@@ -45,6 +45,7 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
         Path inputFile = null;
         Path thumbnailFile = null;
         try {
+            // 缩略图 objectKey 依赖数据库 imageId，因此该步骤在影像记录插入后执行。
             tempDir = Files.createTempDirectory("rs-thumb-");
             inputFile = tempDir.resolve(buildSafeTempFilename(file.getOriginalFilename()));
             thumbnailFile = tempDir.resolve(imageId + ".png");
@@ -66,6 +67,7 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
     }
 
     private void runPythonThumbnail(Path inputFile, Path thumbnailFile) throws IOException, InterruptedException {
+        // Java 侧只负责编排流程，影像波段读取和拉伸逻辑交给 Python/rasterio。
         ProcessBuilder processBuilder = new ProcessBuilder(List.of(
                 properties.getPythonExecutable(),
                 properties.getThumbnailScript(),
@@ -86,6 +88,7 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
             throw new BusinessException(ResultCode.FAIL.getCode(), "Python 缩略图脚本无输出：" + stderr);
         }
 
+        // 即使脚本返回成功，也确认 PNG 文件确实落盘，避免上传空路径。
         JsonNode root = objectMapper.readTree(stdout);
         if (!root.path("success").asBoolean(false)) {
             throw new BusinessException(ResultCode.FAIL.getCode(), root.path("error").asText("缩略图生成失败"));

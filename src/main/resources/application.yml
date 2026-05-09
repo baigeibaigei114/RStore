@@ -12,9 +12,9 @@ spring:
 
   datasource:
     # 后续接入 PostgreSQL/PostGIS 时替换为真实连接信息。
-    url: jdbc:postgresql://localhost:5432/rs_image_asset
+    url: jdbc:postgresql://localhost:5433/rs_image_asset
     username: postgres
-    password: postgres
+    password: 1234
     driver-class-name: org.postgresql.Driver
 
   servlet:

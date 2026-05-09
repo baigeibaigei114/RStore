@@ -39,6 +39,7 @@ def parse_metadata(file_path):
             "height": dataset.height,
             "bandCount": dataset.count,
             "crs": dataset.crs.to_string() if dataset.crs else None,
+            # 无坐标系时 bounds 不具备明确地理含义，调用方不应直接生成空间范围。
             "bounds": bounds_to_dict(dataset.bounds) if dataset.crs else None,
             "transform": transform_to_list(dataset.transform),
             "resolution": {

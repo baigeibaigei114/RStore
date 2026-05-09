@@ -14,6 +14,7 @@ def normalize_to_uint8(array):
     if valid.size == 0:
         return np.zeros(data.shape, dtype="uint8")
 
+    # 使用百分位拉伸减少极端值影响，让不同传感器影像也能生成可辨认的预览图。
     low, high = np.percentile(valid, [2, 98])
     if high <= low:
         high = low + 1
@@ -41,6 +42,7 @@ def generate_thumbnail(input_path, output_path, max_size):
     with rasterio.open(src_path) as dataset:
         out_height, out_width = output_shape(dataset.width, dataset.height, max_size)
         if dataset.count >= 3:
+            # 多波段影像优先使用前三个波段作为 RGB，符合常见遥感影像预览习惯。
             bands = dataset.read(
                 [1, 2, 3],
                 out_shape=(3, out_height, out_width),
@@ -49,6 +51,7 @@ def generate_thumbnail(input_path, output_path, max_size):
             rgb = np.stack([normalize_to_uint8(bands[i]) for i in range(3)], axis=-1)
             image = Image.fromarray(rgb, mode="RGB")
         else:
+            # 单波段影像没有天然 RGB 组合，使用灰度图保留亮度信息。
             band = dataset.read(
                 1,
                 out_shape=(out_height, out_width),

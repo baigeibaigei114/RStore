@@ -35,6 +35,7 @@ public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
         Path tempDir = null;
         Path tempFile = null;
         try {
+            // 使用自建临时目录承接上传文件，避免 Python worker 直接依赖 Web 容器的 multipart 临时文件。
             tempDir = Files.createTempDirectory("rs-geotiff-");
             tempFile = tempDir.resolve(buildSafeTempFilename(file.getOriginalFilename()));
             Files.copy(file.getInputStream(), tempFile, StandardCopyOption.REPLACE_EXISTING);
@@ -50,6 +51,7 @@ public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
     }
 
     private GeoTiffMetadataVO runPythonParser(Path tempFile) throws IOException, InterruptedException {
+        // Python worker 作为独立进程运行，便于后续替换为容器化处理节点。
         ProcessBuilder processBuilder = new ProcessBuilder(List.of(
                 properties.getPythonExecutable(),
                 properties.getParseMetadataScript(),
@@ -64,6 +66,7 @@ public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
                     + Duration.ofSeconds(properties.getTimeoutSeconds()).toSeconds() + " 秒");
         }
 
+        // 脚本约定 stdout 输出结构化 JSON，stderr 仅作为异常诊断信息。
         String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         if (stdout.isBlank()) {

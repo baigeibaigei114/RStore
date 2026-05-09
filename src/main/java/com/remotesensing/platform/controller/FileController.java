@@ -18,6 +18,9 @@ public class FileController {
         this.minioService = minioService;
     }
 
+    /**
+     * 为私有 bucket 中的对象生成临时访问链接，前端无需接触 MinIO 密钥。
+     */
     @GetMapping("/presigned-url")
     public Result<FilePresignedUrlVO> generatePresignedUrl(@RequestParam String objectKey) {
         return Result.success(minioService.generatePresignedUrl(objectKey));
