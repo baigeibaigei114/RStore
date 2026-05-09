@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.RsTaskMapper">
+
+    <insert id="insert" parameterType="com.remotesensing.platform.entity.RsTask"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rs_task (
+            task_code,
+            image_id,
+            task_type,
+            task_name,
+            status,
+            priority,
+            progress,
+            retry_count,
+            max_retry_count,
+            params
+        ) VALUES (
+            #{taskCode},
+            #{imageId},
+            #{taskType},
+            #{taskName},
+            #{status},
+            #{priority},
+            #{progress},
+            #{retryCount},
+            #{maxRetryCount},
+            CAST(NULLIF(#{params}, '') AS jsonb)
+        )
+    </insert>
+
+    <update id="updateOutputObject">
+        UPDATE rs_task
+        SET output_bucket = #{outputBucket},
+            output_object_key = #{outputObjectKey},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE rs_task
+        SET status = #{status},
+            error_message = #{errorMessage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE rs_task
+        SET status = 'FAILED',
+            error_message = #{errorMessage},
+            retry_count = max_retry_count,
+            finished_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+</mapper>

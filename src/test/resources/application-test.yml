@@ -26,11 +26,25 @@ spring:
     port: 5672
     username: test
     password: test
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
     listener:
       simple:
         auto-startup: false
       direct:
         auto-startup: false
+
+rabbitmq:
+  remote-sensing-task:
+    exchange: rs.task.exchange
+    queue: rs.task.queue
+    routing-key: rs.task.submit
+    dead-letter-exchange: rs.task.dlx.exchange
+    dead-letter-queue: rs.task.dlx.queue
+    dead-letter-routing-key: rs.task.dlx
+    max-retry-count: 3
 
 minio:
   endpoint: http://127.0.0.1:19000

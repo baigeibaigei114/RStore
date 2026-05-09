@@ -41,6 +41,12 @@
             <version>3.0.4</version>
         </dependency>
 
+        <!-- RabbitMQ 客户端，用于提交遥感处理任务消息。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
         <!-- PostgreSQL 数据库驱动，用于连接 PostgreSQL/PostGIS。 -->
         <dependency>
             <groupId>org.postgresql</groupId>

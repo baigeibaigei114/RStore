@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS rs_task (
     progress INTEGER NOT NULL DEFAULT 0,
     retry_count INTEGER NOT NULL DEFAULT 0,
     max_retry_count INTEGER NOT NULL DEFAULT 3,
+    output_bucket VARCHAR(100),
+    output_object_key VARCHAR(500),
     params JSONB,
     error_message TEXT,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -104,12 +106,15 @@ CREATE TABLE IF NOT EXISTS rs_task (
 COMMENT ON TABLE rs_task IS '遥感处理任务表，记录影像处理、智能解译等异步任务';
 COMMENT ON COLUMN rs_task.task_type IS '任务类型，例如 PREPROCESS、CLASSIFICATION、DETECTION、CHANGE_DETECTION';
 COMMENT ON COLUMN rs_task.status IS '任务状态：PENDING、RUNNING、SUCCESS、FAILED、RETRYING、CANCELED';
+COMMENT ON COLUMN rs_task.output_bucket IS '任务结果文件输出 bucket';
+COMMENT ON COLUMN rs_task.output_object_key IS '任务结果文件输出对象路径';
 COMMENT ON COLUMN rs_task.params IS '任务参数，使用 JSONB 保存模型参数、裁剪范围等扩展配置';
 
 CREATE INDEX IF NOT EXISTS idx_rs_task_image_id ON rs_task (image_id);
 CREATE INDEX IF NOT EXISTS idx_rs_task_status ON rs_task (status);
 CREATE INDEX IF NOT EXISTS idx_rs_task_type ON rs_task (task_type);
 CREATE INDEX IF NOT EXISTS idx_rs_task_submitted_at ON rs_task (submitted_at);
+CREATE INDEX IF NOT EXISTS idx_rs_task_output_object_key ON rs_task (output_object_key);
 
 CREATE TABLE IF NOT EXISTS rs_task_log (
     id BIGSERIAL PRIMARY KEY,

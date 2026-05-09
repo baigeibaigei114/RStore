@@ -274,6 +274,117 @@ GET http://localhost:8080/api/images/search-by-region?regionId=1&sensor=Sentinel
 ST_Intersects(rs_image.footprint, rs_admin_region.geom)
 ```
 
+## 遥感处理任务提交
+
+任务提交接口：
+
+```text
+POST http://localhost:8080/api/tasks
+```
+
+请求示例：
+
+```json
+{
+  "imageId": 1,
+  "taskType": "NDVI",
+  "params": {
+    "redBand": 3,
+    "nirBand": 4,
+    "threshold": 0.3
+  }
+}
+```
+
+支持任务类型：
+
+```text
+NDVI
+NDWI
+CHANGE_DETECTION
+```
+
+提交流程：
+
+1. 校验 `imageId` 对应影像是否存在。
+2. 创建 `rs_task` 记录，初始状态为 `PENDING`。
+3. 生成输出对象路径：
+
+```text
+result/{taskType}/{yyyy}/{MM}/task_{taskId}.tif
+```
+
+4. 发送 RabbitMQ 消息。
+5. 返回 `taskId`。
+
+RabbitMQ 配置：
+
+```yaml
+spring:
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
+rabbitmq:
+  remote-sensing-task:
+    exchange: rs.task.exchange
+    queue: rs.task.queue
+    routing-key: rs.task.submit
+    dead-letter-exchange: rs.task.dlx.exchange
+    dead-letter-queue: rs.task.dlx.queue
+    dead-letter-routing-key: rs.task.dlx
+    max-retry-count: 3
+```
+
+发送给 worker 的消息示例：
+
+```json
+{
+  "taskId": 1001,
+  "taskType": "NDVI",
+  "inputBucket": "remote-sensing-images",
+  "inputObjectKey": "raw/2026/05/example.tif",
+  "outputBucket": "remote-sensing-images",
+  "outputObjectKey": "result/NDVI/2026/05/task_1001.tif",
+  "params": {
+    "redBand": 3,
+    "nirBand": 4,
+    "threshold": 0.3
+  }
+}
+```
+
+如果 RabbitMQ 本地发送异常、broker 返回 `nack`，或消息因 `mandatory` 未路由到队列，任务状态会更新为 `FAILED`，并写入 `rs_task_log`。当前阶段采用 publisher confirm/return 做最小可靠性增强，后续更稳妥的方案是增加 `rs_task_outbox` 和补偿投递线程。
+
+任务队列失败重试和死信流转：
+
+1. 后端提交任务消息到 `rs.task.exchange`。
+2. 消息通过 `rs.task.submit` 路由到主队列 `rs.task.queue`。
+3. 主队列声明了死信交换机 `rs.task.dlx.exchange` 和死信路由键 `rs.task.dlx`。
+4. 主队列使用 quorum queue 的 `x-delivery-limit` 控制最大投递次数，当前默认 `3` 次。
+5. Worker 消费失败并重新入队后，RabbitMQ 会累计投递次数。
+6. 超过最大投递次数后，消息进入 `rs.task.dlx.exchange`。
+7. 死信交换机将消息路由到 `rs.task.dlx.queue`。
+8. 后端监听死信队列，将任务状态更新为 `FAILED`，并把 `x-death`、headers、routingKey 等信息记录到 `rs_task_log`，便于后续排查失败任务。
+
+Python Worker 消费约定：
+
+1. 收到消息后先回调后端或更新任务状态为 `RUNNING`。
+2. 处理成功并上传结果文件后，再确认消息 `ack`，并将任务更新为 `SUCCESS`。
+3. 可恢复异常使用 `nack/reject` 且 `requeue=true`，交给 RabbitMQ 按 `x-delivery-limit` 进入重试或死信。
+4. 不可恢复异常应记录错误原因，并将任务更新为 `FAILED`；如果仍希望进入死信审计，可 `reject(requeue=false)`。
+5. Worker 不应在处理失败但未更新任务状态时直接 `ack`，否则会出现消息已消失但任务仍卡住的问题。
+
+注意：如果本地 RabbitMQ 已经创建过旧版 `rs.task.queue`，需要先删除旧队列，再让应用按新的 DLX/quorum 参数自动声明，否则 RabbitMQ 会因为队列参数不一致拒绝重声明。
+
+已有数据库需要执行升级脚本：
+
+```powershell
+psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260509_task_output_fields.sql
+```
+
 ## 当前已完成
 
 - 搭建 Maven + Spring Boot 3 后端项目基础结构。
