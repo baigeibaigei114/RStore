@@ -220,6 +220,60 @@ GET http://localhost:8080/api/files/presigned-url?objectKey=raw/2026/05/example.
 
 默认过期时间为 30 分钟。接口只返回临时访问 URL，不会返回 MinIO 的 `accessKey` 或 `secretKey`。
 
+## 行政区范围查询
+
+行政区表：
+
+```sql
+CREATE TABLE IF NOT EXISTS rs_admin_region (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    level VARCHAR(50) NOT NULL,
+    parent_id BIGINT,
+    geom geometry(MultiPolygon, 4326) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_rs_admin_region_parent FOREIGN KEY (parent_id) REFERENCES rs_admin_region (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rs_admin_region_geom_gist ON rs_admin_region USING GIST (geom);
+```
+
+已存在数据库可执行升级脚本：
+
+```powershell
+psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260509_admin_region.sql
+```
+
+接口地址：
+
+```text
+GET http://localhost:8080/api/images/search-by-region?regionId=1
+```
+
+可叠加过滤条件：
+
+```text
+startTime=2026-05-01T00:00:00+08:00
+endTime=2026-05-09T23:59:59+08:00
+sensor=Sentinel-2
+maxCloudPercent=20
+pageNum=1
+pageSize=10
+```
+
+示例：
+
+```text
+GET http://localhost:8080/api/images/search-by-region?regionId=1&sensor=Sentinel-2&maxCloudPercent=20&pageNum=1&pageSize=10
+```
+
+核心空间查询逻辑：
+
+```sql
+ST_Intersects(rs_image.footprint, rs_admin_region.geom)
+```
+
 ## 当前已完成
 
 - 搭建 Maven + Spring Boot 3 后端项目基础结构。

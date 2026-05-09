@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
+import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
@@ -14,6 +15,7 @@ import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
+import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -127,6 +129,39 @@ public class RsImageServiceImpl implements RsImageService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public PageResult<RsImageListVO> search(RsImageSearchDTO query, Integer pageNum, Integer pageSize) {
+        validateSearchTimeRange(query);
+        int currentPageNum = normalizePageNum(pageNum);
+        int currentPageSize = normalizePageSize(pageSize);
+        int offset = (currentPageNum - 1) * currentPageSize;
+
+        List<RsImageListVO> records = imageMapper.searchPage(query, offset, currentPageSize).stream()
+                .map(this::toListVO)
+                .toList();
+        long total = imageMapper.countSearch(query);
+        return new PageResult<>(records, total, currentPageNum, currentPageSize);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<RsImageListVO> searchByRegion(RsImageSearchDTO query, Integer pageNum, Integer pageSize) {
+        if (query.getRegionId() == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "regionId 不能为空");
+        }
+        validateSearchTimeRange(query);
+        int currentPageNum = normalizePageNum(pageNum);
+        int currentPageSize = normalizePageSize(pageSize);
+        int offset = (currentPageNum - 1) * currentPageSize;
+
+        List<RsImageListVO> records = imageMapper.searchByRegionPage(query, offset, currentPageSize).stream()
+                .map(this::toListVO)
+                .toList();
+        long total = imageMapper.countSearchByRegion(query);
+        return new PageResult<>(records, total, currentPageNum, currentPageSize);
+    }
+
+    @Override
     @Transactional
     public void deleteById(Long id) {
         if (imageMapper.selectById(id) == null) {
@@ -196,6 +231,23 @@ public class RsImageServiceImpl implements RsImageService {
         return vo;
     }
 
+    private RsImageListVO toListVO(RsImage image) {
+        RsImageListVO vo = new RsImageListVO();
+        vo.setId(image.getId());
+        vo.setImageCode(image.getImageCode());
+        vo.setImageName(image.getImageName());
+        vo.setSensorType(image.getSensorType());
+        vo.setAcquisitionTime(image.getAcquisitionTime());
+        vo.setCloudPercent(image.getCloudPercent());
+        vo.setResolutionMeter(image.getResolutionMeter());
+        vo.setWidth(image.getWidth());
+        vo.setHeight(image.getHeight());
+        vo.setObjectKey(image.getObjectKey());
+        vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
+        vo.setCreatedAt(image.getCreatedAt());
+        return vo;
+    }
+
     private int normalizePageNum(Integer pageNum) {
         return pageNum == null || pageNum < 1 ? DEFAULT_PAGE_NUM : pageNum;
     }
@@ -213,6 +265,14 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String generateImageCode() {
         return "IMG_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private void validateSearchTimeRange(RsImageSearchDTO query) {
+        if (query.getStartTime() != null
+                && query.getEndTime() != null
+                && query.getStartTime().isAfter(query.getEndTime())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "startTime 不能晚于 endTime");
+        }
     }
 
     private void fillMetadata(RsImage image, GeoTiffMetadataVO metadata) {

@@ -2,8 +2,12 @@ package com.remotesensing.platform.controller;
 
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
+import com.remotesensing.platform.dto.RsImageSearchDTO;
+import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.RsImageService;
+import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import jakarta.validation.Valid;
 import java.math.BigDecimal;
@@ -59,9 +63,76 @@ public class RsImageController {
         return Result.success(imageService.page(pageNum, pageSize));
     }
 
+    @GetMapping("/search")
+    public Result<PageResult<RsImageListVO>> search(@RequestParam(required = false) String keyword,
+                                                    @RequestParam(required = false)
+                                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                                                    OffsetDateTime startTime,
+                                                    @RequestParam(required = false)
+                                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                                                    OffsetDateTime endTime,
+                                                    @RequestParam(required = false) String sensor,
+                                                    @RequestParam(required = false) BigDecimal maxCloudPercent,
+                                                    @RequestParam(required = false) String bbox,
+                                                    @RequestParam(required = false) Integer pageNum,
+                                                    @RequestParam(required = false) Integer pageSize) {
+        RsImageSearchDTO query = new RsImageSearchDTO();
+        query.setKeyword(keyword);
+        query.setStartTime(startTime);
+        query.setEndTime(endTime);
+        query.setSensor(sensor);
+        query.setMaxCloudPercent(maxCloudPercent);
+        parseBbox(query, bbox);
+        return Result.success(imageService.search(query, pageNum, pageSize));
+    }
+
+    @GetMapping("/search-by-region")
+    public Result<PageResult<RsImageListVO>> searchByRegion(@RequestParam Long regionId,
+                                                            @RequestParam(required = false)
+                                                            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                                                            OffsetDateTime startTime,
+                                                            @RequestParam(required = false)
+                                                            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                                                            OffsetDateTime endTime,
+                                                            @RequestParam(required = false) String sensor,
+                                                            @RequestParam(required = false) BigDecimal maxCloudPercent,
+                                                            @RequestParam(required = false) Integer pageNum,
+                                                            @RequestParam(required = false) Integer pageSize) {
+        RsImageSearchDTO query = new RsImageSearchDTO();
+        query.setRegionId(regionId);
+        query.setStartTime(startTime);
+        query.setEndTime(endTime);
+        query.setSensor(sensor);
+        query.setMaxCloudPercent(maxCloudPercent);
+        return Result.success(imageService.searchByRegion(query, pageNum, pageSize));
+    }
+
     @DeleteMapping("/{id}")
     public Result<Void> deleteById(@PathVariable Long id) {
         imageService.deleteById(id);
         return Result.success();
+    }
+
+    private void parseBbox(RsImageSearchDTO query, String bbox) {
+        if (bbox == null || bbox.isBlank()) {
+            return;
+        }
+        String[] values = bbox.split(",");
+        if (values.length != 4) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 格式错误，应为 minLng,minLat,maxLng,maxLat");
+        }
+        try {
+            query.setMinLng(new BigDecimal(values[0].trim()));
+            query.setMinLat(new BigDecimal(values[1].trim()));
+            query.setMaxLng(new BigDecimal(values[2].trim()));
+            query.setMaxLat(new BigDecimal(values[3].trim()));
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 坐标必须是数字");
+        }
+        if (query.getMinLng().compareTo(query.getMaxLng()) >= 0
+                || query.getMinLat().compareTo(query.getMaxLat()) >= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 最小经纬度必须小于最大经纬度");
+        }
+        query.setHasBbox(true);
     }
 }

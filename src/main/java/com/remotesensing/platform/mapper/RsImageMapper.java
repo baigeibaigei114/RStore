@@ -1,6 +1,7 @@
 package com.remotesensing.platform.mapper;
 
 import com.remotesensing.platform.entity.RsImage;
+import com.remotesensing.platform.dto.RsImageSearchDTO;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -17,7 +18,19 @@ public interface RsImageMapper {
 
     List<RsImage> selectPage(@Param("offset") int offset, @Param("pageSize") int pageSize);
 
+    List<RsImage> searchPage(@Param("query") RsImageSearchDTO query,
+                             @Param("offset") int offset,
+                             @Param("pageSize") int pageSize);
+
+    List<RsImage> searchByRegionPage(@Param("query") RsImageSearchDTO query,
+                                     @Param("offset") int offset,
+                                     @Param("pageSize") int pageSize);
+
     long count();
+
+    long countSearch(@Param("query") RsImageSearchDTO query);
+
+    long countSearchByRegion(@Param("query") RsImageSearchDTO query);
 
     int deleteById(@Param("id") Long id);
 

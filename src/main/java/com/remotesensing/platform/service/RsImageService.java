@@ -2,8 +2,10 @@ package com.remotesensing.platform.service;
 
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
+import com.remotesensing.platform.dto.RsImageSearchDTO;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -19,6 +21,10 @@ public interface RsImageService {
     RsImageVO getById(Long id);
 
     PageResult<RsImageVO> page(Integer pageNum, Integer pageSize);
+
+    PageResult<RsImageListVO> search(RsImageSearchDTO query, Integer pageNum, Integer pageSize);
+
+    PageResult<RsImageListVO> searchByRegion(RsImageSearchDTO query, Integer pageNum, Integer pageSize);
 
     void deleteById(Long id);
 }

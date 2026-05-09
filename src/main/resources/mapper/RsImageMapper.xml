@@ -34,32 +34,78 @@
     </resultMap>
 
     <sql id="BaseColumnList">
-        id,
-        image_code,
-        image_name,
-        sensor_type,
-        satellite_name,
-        acquisition_time,
-        cloud_percent,
-        resolution_meter,
-        band_count,
-        projection,
-        width,
-        height,
-        file_format,
-        file_size,
-        content_type,
-        metadata_json::text AS metadata_json,
-        minio_bucket,
-        object_key,
-        thumbnail_object_key,
-        overview_object_key,
-        ST_AsText(footprint) AS footprint_wkt,
-        center_lon,
-        center_lat,
-        description,
-        created_at,
-        updated_at
+        rs_image.id,
+        rs_image.image_code,
+        rs_image.image_name,
+        rs_image.sensor_type,
+        rs_image.satellite_name,
+        rs_image.acquisition_time,
+        rs_image.cloud_percent,
+        rs_image.resolution_meter,
+        rs_image.band_count,
+        rs_image.projection,
+        rs_image.width,
+        rs_image.height,
+        rs_image.file_format,
+        rs_image.file_size,
+        rs_image.content_type,
+        rs_image.metadata_json::text AS metadata_json,
+        rs_image.minio_bucket,
+        rs_image.object_key,
+        rs_image.thumbnail_object_key,
+        rs_image.overview_object_key,
+        ST_AsText(rs_image.footprint) AS footprint_wkt,
+        rs_image.center_lon,
+        rs_image.center_lat,
+        rs_image.description,
+        rs_image.created_at,
+        rs_image.updated_at
+    </sql>
+
+    <sql id="SearchWhere">
+        <where>
+            <if test="query.keyword != null and query.keyword != ''">
+                AND image_name ILIKE CONCAT('%', #{query.keyword}, '%')
+            </if>
+            <if test="query.startTime != null">
+                AND acquisition_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND acquisition_time &lt;= #{query.endTime}
+            </if>
+            <if test="query.sensor != null and query.sensor != ''">
+                AND sensor_type = #{query.sensor}
+            </if>
+            <if test="query.maxCloudPercent != null">
+                AND cloud_percent &lt;= #{query.maxCloudPercent}
+            </if>
+            <if test="query.hasBbox">
+                AND footprint IS NOT NULL
+                AND ST_Intersects(
+                    footprint,
+                    ST_MakeEnvelope(#{query.minLng}, #{query.minLat}, #{query.maxLng}, #{query.maxLat}, 4326)
+                )
+            </if>
+        </where>
+    </sql>
+
+    <sql id="RegionSearchWhere">
+        <where>
+            AND footprint IS NOT NULL
+            AND ST_Intersects(footprint, region.geom)
+            <if test="query.startTime != null">
+                AND acquisition_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND acquisition_time &lt;= #{query.endTime}
+            </if>
+            <if test="query.sensor != null and query.sensor != ''">
+                AND sensor_type = #{query.sensor}
+            </if>
+            <if test="query.maxCloudPercent != null">
+                AND cloud_percent &lt;= #{query.maxCloudPercent}
+            </if>
+        </where>
     </sql>
 
     <insert id="insert" parameterType="com.remotesensing.platform.entity.RsImage"
@@ -130,9 +176,41 @@
         LIMIT #{pageSize} OFFSET #{offset}
     </select>
 
+    <select id="searchPage" resultMap="RsImageResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_image
+        <include refid="SearchWhere"/>
+        ORDER BY acquisition_time DESC NULLS LAST, created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="searchByRegionPage" resultMap="RsImageResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_image
+        INNER JOIN rs_admin_region region ON region.id = #{query.regionId}
+        <include refid="RegionSearchWhere"/>
+        ORDER BY acquisition_time DESC NULLS LAST, created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
     <select id="count" resultType="long">
         SELECT COUNT(1)
         FROM rs_image
+    </select>
+
+    <select id="countSearch" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_image
+        <include refid="SearchWhere"/>
+    </select>
+
+    <select id="countSearchByRegion" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_image
+        INNER JOIN rs_admin_region region ON region.id = #{query.regionId}
+        <include refid="RegionSearchWhere"/>
     </select>
 
     <delete id="deleteById">
