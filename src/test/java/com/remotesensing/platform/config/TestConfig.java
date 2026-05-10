@@ -24,7 +24,7 @@ public class TestConfig {
     @Primary
     public MinioService mockMinioService() {
         MinioService minioService = Mockito.mock(MinioService.class);
-        Mockito.when(minioService.uploadGeoTiff(Mockito.any()))
+        Mockito.when(minioService.uploadGeoTiff(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
                 .thenReturn(new MinioUploadVO(
                         "test-remote-sensing-images",
                         "test/geotiff/mock-image.tif",

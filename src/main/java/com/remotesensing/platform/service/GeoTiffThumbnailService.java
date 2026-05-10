@@ -1,11 +1,11 @@
 package com.remotesensing.platform.service;
 
-import org.springframework.web.multipart.MultipartFile;
+import java.nio.file.Path;
 
 public interface GeoTiffThumbnailService {
 
     /**
-     * 基于已入库的 imageId 生成固定路径的 PNG 缩略图，并上传到 MinIO。
+     * 基于本地临时 GeoTIFF 生成缩略图，上传链路可复用同一份临时文件。
      */
-    String generateAndUpload(MultipartFile file, Long imageId);
+    String generateAndUpload(Path inputFile, Long imageId);
 }

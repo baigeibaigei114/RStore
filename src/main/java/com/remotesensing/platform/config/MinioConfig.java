@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties({MinioProperties.class, PythonWorkerProperties.class})
+@EnableConfigurationProperties({MinioProperties.class, PythonWorkerProperties.class, UploadProperties.class})
 public class MinioConfig {
 
     /**

@@ -12,6 +12,8 @@ public class GeoTiffMetadataVO {
     private Integer bandCount;
     private String crs;
     private Bounds bounds;
+    private String boundsCrs;
+    private Bounds originalBounds;
     private List<BigDecimal> transform;
     private Resolution resolution;
     private BigDecimal nodata;

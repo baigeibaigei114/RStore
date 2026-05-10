@@ -11,14 +11,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
@@ -40,16 +37,12 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
     }
 
     @Override
-    public String generateAndUpload(MultipartFile file, Long imageId) {
+    public String generateAndUpload(Path inputFile, Long imageId) {
         Path tempDir = null;
-        Path inputFile = null;
         Path thumbnailFile = null;
         try {
-            // 缩略图 objectKey 依赖数据库 imageId，因此该步骤在影像记录插入后执行。
             tempDir = Files.createTempDirectory("rs-thumb-");
-            inputFile = tempDir.resolve(buildSafeTempFilename(file.getOriginalFilename()));
             thumbnailFile = tempDir.resolve(imageId + ".png");
-            Files.copy(file.getInputStream(), inputFile, StandardCopyOption.REPLACE_EXISTING);
 
             runPythonThumbnail(inputFile, thumbnailFile);
             String objectKey = buildThumbnailObjectKey(imageId);
@@ -61,7 +54,6 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
             throw new BusinessException(ResultCode.FAIL.getCode(), "GeoTIFF 缩略图生成失败：" + exception.getMessage());
         } finally {
             deleteQuietly(thumbnailFile);
-            deleteQuietly(inputFile);
             deleteQuietly(tempDir);
         }
     }
@@ -105,15 +97,6 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
                 MONTH_FORMATTER.format(now),
                 imageId
         );
-    }
-
-    private String buildSafeTempFilename(String originalFilename) {
-        String filename = originalFilename == null || originalFilename.isBlank() ? "upload.tif" : originalFilename;
-        String safeFilename = filename
-                .replace("\\", "_")
-                .replace("/", "_")
-                .replaceAll("\\s+", "_");
-        return UUID.randomUUID() + "_" + safeFilename;
     }
 
     private void deleteQuietly(Path path) {

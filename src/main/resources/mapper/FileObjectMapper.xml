@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.FileObjectMapper">
+
+    <select id="countAccessibleObjectKey" resultType="long">
+        SELECT COUNT(1)
+        FROM (
+            SELECT object_key AS object_key
+            FROM rs_image
+            WHERE object_key = #{objectKey}
+            UNION ALL
+            SELECT thumbnail_object_key AS object_key
+            FROM rs_image
+            WHERE thumbnail_object_key = #{objectKey}
+            UNION ALL
+            SELECT overview_object_key AS object_key
+            FROM rs_image
+            WHERE overview_object_key = #{objectKey}
+            UNION ALL
+            SELECT object_key AS object_key
+            FROM rs_result_file
+            WHERE object_key = #{objectKey}
+        ) accessible_file
+    </select>
+</mapper>

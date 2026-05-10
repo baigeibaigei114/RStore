@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import rasterio
+from rasterio.warp import transform_bounds
 
 
 def transform_to_list(transform):
@@ -26,6 +27,16 @@ def bounds_to_dict(bounds):
     }
 
 
+def bounds_tuple_to_dict(bounds):
+    left, bottom, right, top = bounds
+    return {
+        "left": left,
+        "bottom": bottom,
+        "right": right,
+        "top": top,
+    }
+
+
 def parse_metadata(file_path):
     path = Path(file_path)
     if not path.exists():
@@ -34,13 +45,22 @@ def parse_metadata(file_path):
         raise ValueError(f"Input path is not a file: {path}")
 
     with rasterio.open(path) as dataset:
+        raw_bounds = dataset.bounds
+        # transform_bounds 使用 densify_pts 可减少投影坐标系转 WGS84 时边界曲线带来的包络误差。
+        wgs84_bounds = (
+            transform_bounds(dataset.crs, "EPSG:4326", *raw_bounds, densify_pts=21)
+            if dataset.crs
+            else None
+        )
         return {
             "width": dataset.width,
             "height": dataset.height,
             "bandCount": dataset.count,
             "crs": dataset.crs.to_string() if dataset.crs else None,
-            # 无坐标系时 bounds 不具备明确地理含义，交给后端保持 footprint 为空。
-            "bounds": bounds_to_dict(dataset.bounds) if dataset.crs else None,
+            "originalBounds": bounds_to_dict(raw_bounds) if dataset.crs else None,
+            # 后端的 footprint 字段固定为 geometry(Polygon, 4326)，这里统一输出 WGS84 范围。
+            "bounds": bounds_tuple_to_dict(wgs84_bounds) if wgs84_bounds else None,
+            "boundsCrs": "EPSG:4326" if wgs84_bounds else None,
             "transform": transform_to_list(dataset.transform),
             "resolution": {
                 "x": dataset.res[0],

@@ -63,6 +63,9 @@ python-worker:
   thumbnail-script: python-worker/scripts/generate_thumbnail.py
   timeout-seconds: 60
 
+upload:
+  max-concurrent: 2
+
 geoserver:
   url: http://localhost:8081/geoserver
   username: admin

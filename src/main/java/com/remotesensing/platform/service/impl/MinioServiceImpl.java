@@ -3,6 +3,7 @@ package com.remotesensing.platform.service.impl;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.exception.BusinessException;
+import com.remotesensing.platform.mapper.FileObjectMapper;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
@@ -11,6 +12,7 @@ import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import io.minio.http.Method;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -20,7 +22,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class MinioServiceImpl implements MinioService {
@@ -31,28 +32,33 @@ public class MinioServiceImpl implements MinioService {
 
     private final MinioClient minioClient;
     private final MinioProperties minioProperties;
+    private final FileObjectMapper fileObjectMapper;
 
-    public MinioServiceImpl(MinioClient minioClient, MinioProperties minioProperties) {
+    public MinioServiceImpl(MinioClient minioClient,
+                            MinioProperties minioProperties,
+                            FileObjectMapper fileObjectMapper) {
         this.minioClient = minioClient;
         this.minioProperties = minioProperties;
+        this.fileObjectMapper = fileObjectMapper;
     }
 
     @Override
-    public MinioUploadVO uploadGeoTiff(MultipartFile file) {
-        validateGeoTiff(file);
+    public MinioUploadVO uploadGeoTiff(Path filePath, String originalFilename, String contentType) {
+        validateGeoTiffFile(originalFilename, filePath);
         ensureBucketExists();
 
         // 原始影像路径按日期分区，便于后续按时间归档和排查对象存储文件。
-        String objectKey = buildObjectKey(file.getOriginalFilename());
-        String contentType = resolveContentType(file);
-        try (InputStream inputStream = file.getInputStream()) {
+        String objectKey = buildObjectKey(originalFilename);
+        String resolvedContentType = defaultContentType(contentType);
+        try (InputStream inputStream = Files.newInputStream(filePath)) {
+            long fileSize = Files.size(filePath);
             minioClient.putObject(PutObjectArgs.builder()
                     .bucket(minioProperties.getBucketName())
                     .object(objectKey)
-                    .stream(inputStream, file.getSize(), -1)
-                    .contentType(contentType)
+                    .stream(inputStream, fileSize, -1)
+                    .contentType(resolvedContentType)
                     .build());
-            return new MinioUploadVO(minioProperties.getBucketName(), objectKey, file.getSize(), contentType);
+            return new MinioUploadVO(minioProperties.getBucketName(), objectKey, fileSize, resolvedContentType);
         } catch (Exception exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "上传文件到 MinIO 失败：" + exception.getMessage());
         }
@@ -60,9 +66,7 @@ public class MinioServiceImpl implements MinioService {
 
     @Override
     public FilePresignedUrlVO generatePresignedUrl(String objectKey) {
-        if (objectKey == null || objectKey.isBlank()) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 不能为空");
-        }
+        validatePresignedObjectKey(objectKey);
 
         try {
             String url = minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
@@ -94,6 +98,22 @@ public class MinioServiceImpl implements MinioService {
         }
     }
 
+    @Override
+    public void deleteObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            return;
+        }
+
+        try {
+            minioClient.removeObject(RemoveObjectArgs.builder()
+                    .bucket(minioProperties.getBucketName())
+                    .object(objectKey)
+                    .build());
+        } catch (Exception exception) {
+            throw new BusinessException(ResultCode.FAIL.getCode(), "删除 MinIO 对象失败：" + exception.getMessage());
+        }
+    }
+
     private void ensureBucketExists() {
         try {
             // 本地开发环境常从空 MinIO 启动，上传前自动准备 bucket。
@@ -110,19 +130,35 @@ public class MinioServiceImpl implements MinioService {
         }
     }
 
-    private void validateGeoTiff(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
+    private void validateGeoTiffFile(String originalFilename, Path filePath) {
+        if (filePath == null || !Files.isRegularFile(filePath)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "上传文件不能为空");
         }
-
-        String originalFilename = file.getOriginalFilename();
         if (originalFilename == null || originalFilename.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "文件名不能为空");
         }
-
         String lowerFilename = originalFilename.toLowerCase(Locale.ROOT);
         if (!lowerFilename.endsWith(".tif") && !lowerFilename.endsWith(".tiff")) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只允许上传 .tif 或 .tiff 格式的 GeoTIFF 文件");
+        }
+    }
+
+    private void validatePresignedObjectKey(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 不能为空");
+        }
+        // 预签名 URL 会直接暴露私有对象的临时访问能力，先收紧路径形态。
+        if (objectKey.contains("..") || objectKey.startsWith("/") || objectKey.contains("\\")) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 格式不合法");
+        }
+        if (!objectKey.startsWith("raw/")
+                && !objectKey.startsWith("thumbnail/")
+                && !objectKey.startsWith("result/")) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 只能访问 raw、thumbnail 或 result 目录");
+        }
+        // 仅允许访问已经被业务表登记的文件，降低猜测 objectKey 访问私有 bucket 的风险。
+        if (fileObjectMapper.countAccessibleObjectKey(objectKey) <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 未在业务表中登记，不能生成访问链接");
         }
     }
 
@@ -141,8 +177,7 @@ public class MinioServiceImpl implements MinioService {
         );
     }
 
-    private String resolveContentType(MultipartFile file) {
-        String contentType = file.getContentType();
+    private String defaultContentType(String contentType) {
         return contentType == null || contentType.isBlank() ? "image/tiff" : contentType;
     }
 }

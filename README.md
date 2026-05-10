@@ -84,6 +84,8 @@ docker compose down -v
 mvn spring-boot:run
 ```
 
+当前 Python 脚本路径使用项目内相对路径配置，请在项目根目录启动后端；后续 Docker 化时建议改为绝对路径配置或独立 Python Worker 容器。
+
 后端默认访问地址：
 
 ```text
@@ -157,6 +159,8 @@ raw/{yyyy}/{MM}/{uuid}_{originalFilename}
 
 数据库只保存 bucket、objectKey、fileSize、contentType 等元数据信息，不保存文件本体。
 
+上传接口会先把 Multipart 文件保存为一份本地临时 GeoTIFF，后续元数据解析、MinIO 上传和缩略图生成都复用这同一份临时文件，避免大文件在一次请求中被反复复制。
+
 上传接口会同步调用 `python-worker/scripts/parse_metadata.py` 解析 GeoTIFF 元数据，并写入：
 
 | 元数据 | 保存位置 |
@@ -166,14 +170,22 @@ raw/{yyyy}/{MM}/{uuid}_{originalFilename}
 | bandCount | `rs_image.band_count` |
 | crs | `rs_image.projection` |
 | resolution.x | `rs_image.resolution_meter` |
-| bounds | 转换为 `rs_image.footprint` |
+| bounds | Python 已转换为 EPSG:4326，写入 `rs_image.footprint` |
+| originalBounds | 保留在 `rs_image.metadata_json`，表示原始影像 CRS 下的范围 |
 | 完整元数据 JSON | `rs_image.metadata_json` |
 
-如果 Python 解析失败，接口会返回错误信息，当前不会创建影像数据库记录；临时文件会在解析完成或失败后自动清理。
+上传流程会先解析本地临时 GeoTIFF，通过后再上传 MinIO。这样伪造后缀或无法被 rasterio 打开的文件不会先进入对象存储。文件保存、Python 解析和 MinIO 上传都在数据库事务外执行；只有影像记录入库和缩略图路径回写使用短事务。如果数据库保存失败，后端会补偿删除已经上传的 `raw/` 对象；临时文件会在上传流程结束后自动清理。
+
+当前阶段上传接口使用轻量并发限制，默认最多同时处理 2 个 GeoTIFF 上传请求。超过限制时接口会返回“当前上传任务较多，请稍后重试”，避免多个大文件同时触发磁盘 IO、MinIO 上传和 Python 进程堆积。可通过配置调整：
+
+```yaml
+upload:
+  max-concurrent: 2
+```
 
 上传接口还会同步生成 PNG 缩略图：
 
-1. Spring Boot 将 GeoTIFF 复制到本地临时目录。
+1. Spring Boot 复用上传入口已经保存的本地临时 GeoTIFF。
 2. 调用 `python-worker/scripts/generate_thumbnail.py`。
 3. Python 使用 rasterio 读取影像，优先使用前三个波段生成 RGB 缩略图。
 4. 如果只有单波段，则生成灰度缩略图。
@@ -188,11 +200,13 @@ thumbnail/{yyyy}/{MM}/{imageId}.png
 
 缩略图生成异常处理：
 
-- GeoTIFF 读取失败：返回 `GeoTIFF 缩略图生成失败`。
-- Python 脚本超时：返回 `GeoTIFF 缩略图生成超时`。
-- Python 未生成 PNG：返回 `缩略图脚本未生成 PNG 文件`。
-- MinIO 上传失败：返回 `上传本地文件到 MinIO 失败`。
+- GeoTIFF 读取失败：记录日志，影像主记录仍然保存成功。
+- Python 脚本超时：记录日志，影像主记录仍然保存成功。
+- Python 未生成 PNG：记录日志，影像主记录仍然保存成功。
+- MinIO 上传失败：记录日志，影像主记录仍然保存成功。
 - 成功或失败后都会清理本地临时 GeoTIFF 和 PNG 文件。
+
+缩略图是展示增强能力，当前阶段不会因为缩略图失败回滚原始影像和元数据。列表页可根据 `thumbnailObjectKey` 是否为空展示默认占位图，后续可改为异步任务补生成。
 
 ## 文件预签名 URL
 
@@ -219,6 +233,8 @@ GET http://localhost:8080/api/files/presigned-url?objectKey=raw/2026/05/example.
 ```
 
 默认过期时间为 30 分钟。接口只返回临时访问 URL，不会返回 MinIO 的 `accessKey` 或 `secretKey`。
+
+为避免私有 bucket 中任意对象被猜路径访问，当前接口只允许 `raw/`、`thumbnail/`、`result/` 前缀，并会校验 objectKey 是否已登记在 `rs_image` 或 `rs_result_file` 中。
 
 ## 行政区范围查询
 

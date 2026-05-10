@@ -27,6 +27,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/images")
 public class RsImageController {
 
+    private static final BigDecimal MIN_LNG = BigDecimal.valueOf(-180);
+    private static final BigDecimal MAX_LNG = BigDecimal.valueOf(180);
+    private static final BigDecimal MIN_LAT = BigDecimal.valueOf(-90);
+    private static final BigDecimal MAX_LAT = BigDecimal.valueOf(90);
+
     private final RsImageService imageService;
 
     public RsImageController(RsImageService imageService) {
@@ -132,6 +137,13 @@ public class RsImageController {
         if (query.getMinLng().compareTo(query.getMaxLng()) >= 0
                 || query.getMinLat().compareTo(query.getMaxLat()) >= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 最小经纬度必须小于最大经纬度");
+        }
+        // footprint 统一使用 EPSG:4326，经纬度越界会让空间查询结果失真。
+        if (query.getMinLng().compareTo(MIN_LNG) < 0
+                || query.getMaxLng().compareTo(MAX_LNG) > 0
+                || query.getMinLat().compareTo(MIN_LAT) < 0
+                || query.getMaxLat().compareTo(MAX_LAT) > 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 经度范围应为 [-180,180]，纬度范围应为 [-90,90]");
         }
         query.setHasBbox(true);
     }

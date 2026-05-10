@@ -1,12 +1,12 @@
 package com.remotesensing.platform.service;
 
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
-import org.springframework.web.multipart.MultipartFile;
+import java.nio.file.Path;
 
 public interface GeoTiffMetadataService {
 
     /**
-     * 将上传文件交给 Python worker 解析，返回可写入 rs_image 的元数据结构。
+     * 解析已经落到本地临时目录的 GeoTIFF，避免大文件被 Multipart 流重复复制。
      */
-    GeoTiffMetadataVO parse(MultipartFile file);
+    GeoTiffMetadataVO parse(Path filePath);
 }

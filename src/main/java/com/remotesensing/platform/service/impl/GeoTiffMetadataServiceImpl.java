@@ -9,15 +9,11 @@ import com.remotesensing.platform.service.GeoTiffMetadataService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
@@ -31,22 +27,13 @@ public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
     }
 
     @Override
-    public GeoTiffMetadataVO parse(MultipartFile file) {
-        Path tempDir = null;
-        Path tempFile = null;
+    public GeoTiffMetadataVO parse(Path filePath) {
         try {
-            // 使用自建临时目录承接上传文件，避免 Python worker 直接依赖 Web 容器的 multipart 临时文件。
-            tempDir = Files.createTempDirectory("rs-geotiff-");
-            tempFile = tempDir.resolve(buildSafeTempFilename(file.getOriginalFilename()));
-            Files.copy(file.getInputStream(), tempFile, StandardCopyOption.REPLACE_EXISTING);
-            return runPythonParser(tempFile);
+            return runPythonParser(filePath);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "GeoTIFF 元数据解析失败：" + exception.getMessage());
-        } finally {
-            deleteQuietly(tempFile);
-            deleteQuietly(tempDir);
         }
     }
 
@@ -80,25 +67,5 @@ public class GeoTiffMetadataServiceImpl implements GeoTiffMetadataService {
         }
 
         return objectMapper.treeToValue(root.path("data"), GeoTiffMetadataVO.class);
-    }
-
-    private String buildSafeTempFilename(String originalFilename) {
-        String filename = originalFilename == null || originalFilename.isBlank() ? "upload.tif" : originalFilename;
-        String safeFilename = filename
-                .replace("\\", "_")
-                .replace("/", "_")
-                .replaceAll("\\s+", "_");
-        return UUID.randomUUID() + "_" + safeFilename;
-    }
-
-    private void deleteQuietly(Path path) {
-        if (path == null) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException ignored) {
-            // 临时文件清理失败不影响主流程，后续可接入日志记录。
-        }
     }
 }
