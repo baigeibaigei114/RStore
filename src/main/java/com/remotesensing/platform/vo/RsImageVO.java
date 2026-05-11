@@ -30,7 +30,10 @@ public class RsImageVO {
     private String footprintWkt;
     private BigDecimal centerLon;
     private BigDecimal centerLat;
+    private String status;
     private String description;
+    private OffsetDateTime deletedAt;
+    private String deletedReason;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

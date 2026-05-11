@@ -41,8 +41,10 @@ class RabbitMqConsumer:
             if processor is None:
                 raise ValueError(f"unsupported taskType: {task_type}")
 
+            # Worker 先把业务任务置为 RUNNING，再执行计算，便于前端区分排队和处理中。
             self._callback_client.safe_update_status(task_id, "RUNNING")
             result = processor.process(message)
+            # 只有结果文件已经上传并完成回调后才 ack，保证消息确认与业务成功尽量同向。
             self._callback_client.safe_update_status(task_id, "SUCCESS", extra=result)
             channel.basic_ack(delivery_tag=method.delivery_tag)
             print(f"[worker] task completed task_id={task_id} task_type={task_type}", flush=True)
@@ -52,8 +54,10 @@ class RabbitMqConsumer:
                 self._callback_client.safe_update_status(task_id, "FAILED", message=str(exc))
 
             if self._settings.requeue_on_error:
+                # Java 队列使用 delivery-limit 控制最大重试次数，重新入队后超过次数会进入 DLQ。
                 channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
             else:
+                # 不可恢复错误直接拒绝，交给 RabbitMQ 死信链路保留失败消息。
                 channel.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
             print(f"[worker-error] task_id={task_id} reason={exc}", flush=True)
 

@@ -18,5 +18,6 @@ public class RsImageListVO {
     private Integer height;
     private String objectKey;
     private String thumbnailObjectKey;
+    private String status;
     private OffsetDateTime createdAt;
 }

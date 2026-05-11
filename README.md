@@ -208,6 +208,22 @@ thumbnail/{yyyy}/{MM}/{imageId}.png
 
 缩略图是展示增强能力，当前阶段不会因为缩略图失败回滚原始影像和元数据。列表页可根据 `thumbnailObjectKey` 是否为空展示默认占位图，后续可改为异步任务补生成。
 
+## 影像删除策略
+
+当前阶段采用“未完成任务禁止删除 + 历史任务下软删除影像 + 保留任务日志和结果文件”的策略：
+
+1. 如果影像存在 `PENDING`、`RUNNING`、`RETRYING` 任务，删除接口会拒绝删除。
+2. 如果只存在 `SUCCESS`、`FAILED`、`CANCELED` 历史任务，允许软删除影像。
+3. 软删除只更新 `rs_image.status = DELETED`、`deleted_at`、`deleted_reason`，不会物理删除 `rs_task`、`rs_task_log`、`rs_result_file`。
+4. 默认不删除 MinIO 中的原始影像、缩略图和结果文件，后续可由管理员确认或后台清理任务异步处理。
+5. 影像列表、空间检索和行政区检索默认过滤 `deleted_at IS NULL`。
+
+已有数据库需要执行升级脚本：
+
+```powershell
+psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260511_rs_image_soft_delete.sql
+```
+
 ## 文件预签名 URL
 
 MinIO bucket 默认私有，前端访问原始影像、缩略图或结果文件时，需要通过后端生成临时 URL。
@@ -392,6 +408,37 @@ Python Worker 消费约定：
 3. 可恢复异常使用 `nack/reject` 且 `requeue=true`，交给 RabbitMQ 按 `x-delivery-limit` 进入重试或死信。
 4. 不可恢复异常应记录错误原因，并将任务更新为 `FAILED`；如果仍希望进入死信审计，可 `reject(requeue=false)`。
 5. Worker 不应在处理失败但未更新任务状态时直接 `ack`，否则会出现消息已消失但任务仍卡住的问题。
+
+Worker 状态回调接口：
+
+```http
+POST http://localhost:8080/api/tasks/{taskId}/status
+```
+
+请求体示例：
+
+```json
+{
+  "status": "RUNNING",
+  "progress": 30,
+  "message": "已读取波段数据",
+  "outputObjectKey": null,
+  "errorMessage": null
+}
+```
+
+状态流转规则：
+
+| 当前状态 | 允许流转到 | 说明 |
+| --- | --- | --- |
+| `PENDING` | `RUNNING`、`RETRYING`、`FAILED`、`CANCELED` | 任务已入库，等待 Worker 消费或被取消 |
+| `RUNNING` | `RUNNING`、`RETRYING`、`SUCCESS`、`FAILED`、`CANCELED` | `RUNNING -> RUNNING` 用于进度回调 |
+| `RETRYING` | `RETRYING`、`RUNNING`、`FAILED`、`CANCELED` | 任务等待重新执行或再次进入运行 |
+| `SUCCESS` | `SUCCESS` | 成功终态，不允许回退到运行中 |
+| `FAILED` | `FAILED` | 失败终态，后续重投建议创建新任务或人工处理 |
+| `CANCELED` | `CANCELED` | 取消终态，不允许继续执行 |
+
+每次合法回调都会写入 `rs_task_log`。当状态为 `SUCCESS` 时，后端会保存 `outputObjectKey` 并写入 `finished_at`；当状态为 `FAILED` 时，后端会保存 `errorMessage` 并写入 `finished_at`。
 
 注意：如果本地 RabbitMQ 已经创建过旧版 `rs.task.queue`，需要先删除旧队列，再让应用按新的 DLX/quorum 参数自动声明，否则 RabbitMQ 会因为队列参数不一致拒绝重声明。
 

@@ -31,6 +31,7 @@ public class RsTaskFailureServiceImpl implements RsTaskFailureService {
             return;
         }
 
+        // 状态和日志放在同一个事务中，保证前端状态与后台排障记录保持一致。
         taskMapper.markFailed(taskId, errorMessage);
 
         RsTaskLog taskLog = new RsTaskLog();

@@ -16,6 +16,8 @@ class CallbackClient:
         payload: dict[str, Any] = {"status": status}
         if message:
             payload["message"] = message
+            if status == "FAILED":
+                payload["errorMessage"] = message
         if extra:
             payload.update(extra)
 

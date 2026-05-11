@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS rs_image (
     footprint geometry(Polygon, 4326),
     center_lon NUMERIC(10, 6),
     center_lat NUMERIC(10, 6),
+    status VARCHAR(30) NOT NULL DEFAULT 'READY',
     description TEXT,
+    deleted_at TIMESTAMPTZ,
+    deleted_by VARCHAR(100),
+    deleted_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_rs_image_cloud_percent CHECK (cloud_percent IS NULL OR (cloud_percent >= 0 AND cloud_percent <= 100)),
@@ -37,7 +41,8 @@ CREATE TABLE IF NOT EXISTS rs_image (
         (width IS NULL OR width > 0)
         AND (height IS NULL OR height > 0)
         AND (file_size IS NULL OR file_size >= 0)
-    )
+    ),
+    CONSTRAINT ck_rs_image_status CHECK (status IN ('UPLOADING', 'PARSING', 'READY', 'PROCESSING', 'DELETE_LOCKED', 'DELETED', 'FAILED'))
 );
 
 COMMENT ON TABLE rs_image IS '影像资产表，保存 GeoTIFF 影像元数据、对象存储路径和空间范围';
@@ -48,12 +53,18 @@ COMMENT ON COLUMN rs_image.content_type IS '文件 MIME 类型';
 COMMENT ON COLUMN rs_image.metadata_json IS 'GeoTIFF 解析得到的完整元数据 JSON';
 COMMENT ON COLUMN rs_image.overview_object_key IS 'MinIO 中影像缩略图或概览文件对象路径';
 COMMENT ON COLUMN rs_image.footprint IS '影像覆盖范围，WGS84 坐标系 Polygon；上传后可为空，解析元数据后补全';
+COMMENT ON COLUMN rs_image.status IS '影像资产状态：UPLOADING、PARSING、READY、PROCESSING、DELETE_LOCKED、DELETED、FAILED';
+COMMENT ON COLUMN rs_image.deleted_at IS '软删除时间；为空表示资产正常可见';
+COMMENT ON COLUMN rs_image.deleted_by IS '执行软删除的用户标识，当前阶段可为空';
+COMMENT ON COLUMN rs_image.deleted_reason IS '软删除原因';
 
 CREATE INDEX IF NOT EXISTS idx_rs_image_footprint_gist ON rs_image USING GIST (footprint);
 CREATE INDEX IF NOT EXISTS idx_rs_image_acquisition_time ON rs_image (acquisition_time);
 CREATE INDEX IF NOT EXISTS idx_rs_image_sensor_type ON rs_image (sensor_type);
 CREATE INDEX IF NOT EXISTS idx_rs_image_object_location ON rs_image (minio_bucket, object_key);
 CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_object_key ON rs_image (thumbnail_object_key);
+CREATE INDEX IF NOT EXISTS idx_rs_image_deleted_at ON rs_image (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_rs_image_status ON rs_image (status);
 
 CREATE TABLE IF NOT EXISTS rs_admin_region (
     id BIGSERIAL PRIMARY KEY,

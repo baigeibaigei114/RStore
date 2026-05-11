@@ -12,6 +12,8 @@ public interface RsTaskMapper {
      */
     int insert(RsTask task);
 
+    RsTask selectById(@Param("id") Long id);
+
     /**
      * 输出路径依赖 taskId，因此作为任务创建后的独立回写步骤。
      */
@@ -25,6 +27,17 @@ public interface RsTaskMapper {
     int updateStatus(@Param("id") Long id,
                      @Param("status") String status,
                      @Param("errorMessage") String errorMessage);
+
+    int updateStatusFromWorker(@Param("id") Long id,
+                               @Param("status") String status,
+                               @Param("progress") Integer progress,
+                               @Param("outputObjectKey") String outputObjectKey,
+                               @Param("errorMessage") String errorMessage);
+
+    /**
+     * 删除影像前显式检查未完成任务，避免只依赖外键异常表达业务状态。
+     */
+    long countUnfinishedByImageId(@Param("imageId") Long imageId);
 
     /**
      * 将任务标记为最终失败，用于消息投递失败或进入死信队列后的状态兜底。

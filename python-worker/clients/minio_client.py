@@ -20,6 +20,7 @@ class MinioStorageClient:
         return target_path
 
     def upload_file(self, bucket: str, object_key: str, source_path: Path, content_type: str = "image/tiff") -> None:
+        # Worker 可能独立于 Java 服务启动，上传结果前主动确保输出 bucket 可用。
         if not self._client.bucket_exists(bucket):
             self._client.make_bucket(bucket)
         self._client.fput_object(bucket, object_key, str(source_path), content_type=content_type)

@@ -32,7 +32,9 @@ public interface RsImageMapper {
 
     long countSearchByRegion(@Param("query") RsImageSearchDTO query);
 
-    int deleteById(@Param("id") Long id);
+    int softDeleteById(@Param("id") Long id,
+                       @Param("deletedBy") String deletedBy,
+                       @Param("deletedReason") String deletedReason);
 
     long countByImageCode(@Param("imageCode") String imageCode);
 

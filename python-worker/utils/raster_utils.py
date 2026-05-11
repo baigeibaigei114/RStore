@@ -16,6 +16,7 @@ def normalized_difference(first: np.ndarray, second: np.ndarray, epsilon: float 
 
 
 def write_single_band_geotiff(reference: rasterio.DatasetReader, output_path: Path, data: np.ndarray, nodata: float = -9999.0) -> None:
+    # 复用参考影像 profile，确保输出结果继承 CRS、transform、分辨率等空间定位信息。
     profile = reference.profile.copy()
     profile.update(
         driver="GTiff",
@@ -31,6 +32,7 @@ def write_single_band_geotiff(reference: rasterio.DatasetReader, output_path: Pa
 
 
 def write_mask_geotiff(reference: rasterio.DatasetReader, output_path: Path, mask: np.ndarray) -> None:
+    # 掩膜只表达是否变化，使用 uint8 可显著减小结果文件体积。
     profile = reference.profile.copy()
     profile.update(
         driver="GTiff",

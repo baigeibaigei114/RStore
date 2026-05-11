@@ -10,6 +10,7 @@ import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
+import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
 import com.remotesensing.platform.service.GeoTiffThumbnailService;
 import com.remotesensing.platform.service.RsImageService;
@@ -36,8 +37,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -50,6 +49,7 @@ public class RsImageServiceImpl implements RsImageService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final RsImageMapper imageMapper;
+    private final RsTaskMapper taskMapper;
     private final MinioService minioService;
     private final GeoTiffMetadataService geoTiffMetadataService;
     private final GeoTiffThumbnailService geoTiffThumbnailService;
@@ -59,6 +59,7 @@ public class RsImageServiceImpl implements RsImageService {
     private final Semaphore uploadSemaphore;
 
     public RsImageServiceImpl(RsImageMapper imageMapper,
+                              RsTaskMapper taskMapper,
                               MinioService minioService,
                               GeoTiffMetadataService geoTiffMetadataService,
                               GeoTiffThumbnailService geoTiffThumbnailService,
@@ -66,6 +67,7 @@ public class RsImageServiceImpl implements RsImageService {
                               UploadProperties uploadProperties,
                               PlatformTransactionManager transactionManager) {
         this.imageMapper = imageMapper;
+        this.taskMapper = taskMapper;
         this.minioService = minioService;
         this.geoTiffMetadataService = geoTiffMetadataService;
         this.geoTiffThumbnailService = geoTiffThumbnailService;
@@ -197,13 +199,19 @@ public class RsImageServiceImpl implements RsImageService {
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
         }
+        // 活跃处理任务仍依赖原始影像，删除前先用业务状态拦截，而不是依赖数据库外键报错。
+        if (taskMapper.countUnfinishedByImageId(id) > 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像存在正在执行的处理任务，暂不能删除");
+        }
 
         try {
-            imageMapper.deleteById(id);
-            // 只有数据库删除提交成功后才删除对象，避免事务回滚后文件已经被清掉。
-            runAfterCommit(() -> deleteImageObjects(image));
+            // 历史任务需要保留审计链路，这里只隐藏影像资产，不级联清理任务、日志和结果文件。
+            int updated = imageMapper.softDeleteById(id, null, "用户删除影像资产");
+            if (updated <= 0) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在或已删除");
+            }
         } catch (DataIntegrityViolationException exception) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像已关联处理任务，暂不能删除");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像删除失败，请检查关联数据");
         }
     }
 
@@ -225,6 +233,7 @@ public class RsImageServiceImpl implements RsImageService {
         image.setContentType(uploadVO.getContentType());
         image.setMinioBucket(uploadVO.getBucketName());
         image.setObjectKey(uploadVO.getObjectKey());
+        image.setStatus("READY");
         return image;
     }
 
@@ -349,7 +358,10 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setFootprintWkt(image.getFootprintWkt());
         vo.setCenterLon(image.getCenterLon());
         vo.setCenterLat(image.getCenterLat());
+        vo.setStatus(image.getStatus());
         vo.setDescription(image.getDescription());
+        vo.setDeletedAt(image.getDeletedAt());
+        vo.setDeletedReason(image.getDeletedReason());
         vo.setCreatedAt(image.getCreatedAt());
         vo.setUpdatedAt(image.getUpdatedAt());
         return vo;
@@ -368,6 +380,7 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setHeight(image.getHeight());
         vo.setObjectKey(image.getObjectKey());
         vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
+        vo.setStatus(image.getStatus());
         vo.setCreatedAt(image.getCreatedAt());
         return vo;
     }
@@ -432,25 +445,6 @@ public class RsImageServiceImpl implements RsImageService {
 
     private BigDecimal center(BigDecimal min, BigDecimal max) {
         return min.add(max).divide(BigDecimal.valueOf(2));
-    }
-
-    private void runAfterCommit(Runnable action) {
-        // 对象存储操作不参与数据库事务，放在 afterCommit 能降低数据与文件不一致的概率。
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action.run();
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                action.run();
-            }
-        });
-    }
-
-    private void deleteImageObjects(RsImage image) {
-        deleteObjectQuietly(image.getObjectKey());
-        deleteObjectQuietly(image.getThumbnailObjectKey());
     }
 
     private void deleteObjectQuietly(String objectKey) {

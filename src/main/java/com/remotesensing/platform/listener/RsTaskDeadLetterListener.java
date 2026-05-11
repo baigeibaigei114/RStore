@@ -22,9 +22,11 @@ public class RsTaskDeadLetterListener {
             throws IOException {
         long deliveryTag = rawMessage.getMessageProperties().getDeliveryTag();
         try {
+            // 只有死信信息成功落库后才 ack，避免 DLQ 消息被提前确认而丢失排障线索。
             deadLetterService.record(taskMessage, rawMessage);
             channel.basicAck(deliveryTag, false);
         } catch (Exception exception) {
+            // 记录失败时让消息留在死信队列中，等待后续重试或人工排查。
             channel.basicNack(deliveryTag, false, true);
         }
     }

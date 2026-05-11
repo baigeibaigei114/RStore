@@ -31,6 +31,29 @@
         )
     </insert>
 
+    <select id="selectById" resultType="com.remotesensing.platform.entity.RsTask">
+        SELECT
+            id,
+            task_code,
+            image_id,
+            task_type,
+            task_name,
+            status,
+            progress,
+            retry_count,
+            max_retry_count,
+            output_bucket,
+            output_object_key,
+            error_message,
+            submitted_at,
+            started_at,
+            finished_at,
+            created_at,
+            updated_at
+        FROM rs_task
+        WHERE id = #{id}
+    </select>
+
     <update id="updateOutputObject">
         UPDATE rs_task
         SET output_bucket = #{outputBucket},
@@ -46,6 +69,42 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
+
+    <update id="updateStatusFromWorker">
+        UPDATE rs_task
+        SET status = #{status},
+            progress = CASE
+                WHEN #{status} = 'SUCCESS' THEN 100
+                WHEN #{progress} IS NOT NULL THEN #{progress}
+                ELSE progress
+            END,
+            output_object_key = CASE
+                WHEN #{outputObjectKey} IS NOT NULL AND #{outputObjectKey} != '' THEN #{outputObjectKey}
+                ELSE output_object_key
+            END,
+            error_message = CASE
+                WHEN #{status} = 'FAILED' THEN #{errorMessage}
+                WHEN #{status} = 'SUCCESS' THEN NULL
+                ELSE error_message
+            END,
+            started_at = CASE
+                WHEN #{status} = 'RUNNING' THEN COALESCE(started_at, CURRENT_TIMESTAMP)
+                ELSE started_at
+            END,
+            finished_at = CASE
+                WHEN #{status} IN ('SUCCESS', 'FAILED', 'CANCELED') THEN CURRENT_TIMESTAMP
+                ELSE finished_at
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <select id="countUnfinishedByImageId" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_task
+        WHERE image_id = #{imageId}
+          AND status IN ('PENDING', 'RUNNING', 'RETRYING')
+    </select>
 
     <update id="markFailed">
         UPDATE rs_task
