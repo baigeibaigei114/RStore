@@ -217,6 +217,22 @@ thumbnail/{yyyy}/{MM}/{imageId}.png
 3. 软删除只更新 `rs_image.status = DELETED`、`deleted_at`、`deleted_reason`，不会物理删除 `rs_task`、`rs_task_log`、`rs_result_file`。
 4. 默认不删除 MinIO 中的原始影像、缩略图和结果文件，后续可由管理员确认或后台清理任务异步处理。
 5. 影像列表、空间检索和行政区检索默认过滤 `deleted_at IS NULL`。
+6. 删除 SQL 只允许 `READY` 或 `FAILED` 影像进入 `DELETED`，避免删除正在处理中的资产。
+
+影像资产与处理任务的状态协作规则：
+
+| 场景 | 影像状态 | 任务状态 | 说明 |
+| --- | --- | --- | --- |
+| 上传完成入库 | `READY` | 无 | 当前阶段上传完成后才创建影像记录，`UPLOADING/PARSING` 作为后续增强预留 |
+| 提交任务 | `READY -> PROCESSING` | `PENDING` | 同一事务内先占用影像，再创建任务 |
+| Worker 开始处理 | `PROCESSING` | `PENDING -> RUNNING` | 影像保持处理中 |
+| Worker 重试 | `PROCESSING` | `RUNNING -> RETRYING` | 影像保持处理中 |
+| 任务成功 | `PROCESSING -> READY` | `SUCCESS` | 若同一影像没有其他未完成任务，则恢复影像可用 |
+| 任务失败 | `PROCESSING -> READY` | `FAILED` | 任务失败不代表原始影像损坏，原始资产仍恢复可用 |
+| 任务取消 | `PROCESSING -> READY` | `CANCELED` | 若没有其他未完成任务，则恢复影像可用 |
+| 删除影像 | `READY/FAILED -> DELETED` | 历史任务保留 | 不级联删除任务、日志、结果文件和 MinIO 对象 |
+
+当前第一版只允许 `READY` 影像提交处理任务。如果后续需要支持同一影像并行多个处理任务，建议把“是否有活跃任务”设计为派生状态或单独计数字段，而不是继续扩展单值 `rs_image.status`。
 
 已有数据库需要执行升级脚本：
 

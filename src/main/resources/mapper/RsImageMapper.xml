@@ -237,6 +237,25 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND deleted_at IS NULL
+          AND status IN ('READY', 'FAILED')
+    </update>
+
+    <update id="markProcessingIfReady">
+        UPDATE rs_image
+        SET status = 'PROCESSING',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status = 'READY'
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="markReadyIfProcessing">
+        UPDATE rs_image
+        SET status = 'READY',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status = 'PROCESSING'
+          AND deleted_at IS NULL
     </update>
 
     <select id="countByImageCode" resultType="long">

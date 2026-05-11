@@ -43,6 +43,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_CANCELED = "CANCELED";
+    private static final String IMAGE_STATUS_READY = "READY";
     private static final Set<String> TERMINAL_STATUSES = Set.of(STATUS_SUCCESS, STATUS_FAILED, STATUS_CANCELED);
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
             STATUS_PENDING, Set.of(STATUS_RUNNING, STATUS_RETRYING, STATUS_FAILED, STATUS_CANCELED),
@@ -123,12 +124,21 @@ public class RsTaskServiceImpl implements RsTaskService {
                 errorMessage
         );
         insertStatusLog(task, targetStatus, updateDTO, errorMessage);
+        releaseImageIfTaskFinished(task, targetStatus);
     }
 
     private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO) {
         RsImage image = imageMapper.selectById(submitDTO.getImageId());
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
+        }
+        if (!IMAGE_STATUS_READY.equals(image.getStatus())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
+        }
+
+        // READY -> PROCESSING 与任务创建在同一事务内完成，防止软删除和提交任务并发交叉。
+        if (imageMapper.markProcessingIfReady(image.getId()) <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许提交处理任务");
         }
 
         // 任务和输出路径在同一个事务内落库，避免出现缺少结果路径的 PENDING 任务。
@@ -274,6 +284,16 @@ public class RsTaskServiceImpl implements RsTaskService {
         taskLog.setMessage(buildStatusLogMessage(task.getStatus(), targetStatus, updateDTO));
         taskLog.setDetail(toJson(detail));
         taskLogMapper.insert(taskLog);
+    }
+
+    private void releaseImageIfTaskFinished(RsTask task, String targetStatus) {
+        if (!TERMINAL_STATUSES.contains(targetStatus)) {
+            return;
+        }
+        // 同一影像没有其他活跃任务时，原始资产恢复 READY，便于后续继续检索、删除或再次处理。
+        if (taskMapper.countUnfinishedByImageId(task.getImageId()) == 0) {
+            imageMapper.markReadyIfProcessing(task.getImageId());
+        }
     }
 
     private String buildStatusLogMessage(String currentStatus, String targetStatus, RsTaskStatusUpdateDTO updateDTO) {

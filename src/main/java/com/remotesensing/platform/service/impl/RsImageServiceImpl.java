@@ -208,7 +208,7 @@ public class RsImageServiceImpl implements RsImageService {
             // 历史任务需要保留审计链路，这里只隐藏影像资产，不级联清理任务、日志和结果文件。
             int updated = imageMapper.softDeleteById(id, null, "用户删除影像资产");
             if (updated <= 0) {
-                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在或已删除");
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许删除，请确认没有处理任务正在执行");
             }
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像删除失败，请检查关联数据");

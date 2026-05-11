@@ -36,6 +36,16 @@ public interface RsImageMapper {
                        @Param("deletedBy") String deletedBy,
                        @Param("deletedReason") String deletedReason);
 
+    /**
+     * 提交任务时用条件更新占用影像，避免删除和任务创建之间出现并发窗口。
+     */
+    int markProcessingIfReady(@Param("id") Long id);
+
+    /**
+     * 任务全部进入终态后释放影像，原始资产本身仍可继续被查询或再次处理。
+     */
+    int markReadyIfProcessing(@Param("id") Long id);
+
     long countByImageCode(@Param("imageCode") String imageCode);
 
     /**
