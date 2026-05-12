@@ -11,8 +11,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
@@ -20,8 +18,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
 
-    private static final DateTimeFormatter YEAR_FORMATTER = DateTimeFormatter.ofPattern("yyyy");
-    private static final DateTimeFormatter MONTH_FORMATTER = DateTimeFormatter.ofPattern("MM");
     private static final String PNG_CONTENT_TYPE = "image/png";
 
     private final PythonWorkerProperties properties;
@@ -37,17 +33,16 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
     }
 
     @Override
-    public String generateAndUpload(Path inputFile, Long imageId) {
+    public String generateAndUpload(Path inputFile, String thumbnailObjectKey) {
         Path tempDir = null;
         Path thumbnailFile = null;
         try {
             tempDir = Files.createTempDirectory("rs-thumb-");
-            thumbnailFile = tempDir.resolve(imageId + ".png");
+            thumbnailFile = tempDir.resolve("thumbnail.png");
 
             runPythonThumbnail(inputFile, thumbnailFile);
-            String objectKey = buildThumbnailObjectKey(imageId);
-            minioService.uploadLocalFile(thumbnailFile, objectKey, PNG_CONTENT_TYPE);
-            return objectKey;
+            minioService.uploadLocalFile(thumbnailFile, thumbnailObjectKey, PNG_CONTENT_TYPE);
+            return thumbnailObjectKey;
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -88,15 +83,6 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
         if (!Files.exists(thumbnailFile)) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "缩略图脚本未生成 PNG 文件");
         }
-    }
-
-    private String buildThumbnailObjectKey(Long imageId) {
-        LocalDate now = LocalDate.now();
-        return "thumbnail/%s/%s/%s.png".formatted(
-                YEAR_FORMATTER.format(now),
-                MONTH_FORMATTER.format(now),
-                imageId
-        );
     }
 
     private void deleteQuietly(Path path) {

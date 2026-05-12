@@ -12,9 +12,9 @@ import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
-import com.remotesensing.platform.service.GeoTiffThumbnailService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.service.ThumbnailAsyncService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import com.remotesensing.platform.vo.RsImageListVO;
@@ -37,6 +37,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -52,7 +54,7 @@ public class RsImageServiceImpl implements RsImageService {
     private final RsTaskMapper taskMapper;
     private final MinioService minioService;
     private final GeoTiffMetadataService geoTiffMetadataService;
-    private final GeoTiffThumbnailService geoTiffThumbnailService;
+    private final ThumbnailAsyncService thumbnailAsyncService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     // 大文件上传会占用磁盘 IO、请求线程和 Python 进程，这里先用轻量闸门限制并发。
@@ -62,7 +64,7 @@ public class RsImageServiceImpl implements RsImageService {
                               RsTaskMapper taskMapper,
                               MinioService minioService,
                               GeoTiffMetadataService geoTiffMetadataService,
-                              GeoTiffThumbnailService geoTiffThumbnailService,
+                              ThumbnailAsyncService thumbnailAsyncService,
                               ObjectMapper objectMapper,
                               UploadProperties uploadProperties,
                               PlatformTransactionManager transactionManager) {
@@ -70,7 +72,7 @@ public class RsImageServiceImpl implements RsImageService {
         this.taskMapper = taskMapper;
         this.minioService = minioService;
         this.geoTiffMetadataService = geoTiffMetadataService;
-        this.geoTiffThumbnailService = geoTiffThumbnailService;
+        this.thumbnailAsyncService = thumbnailAsyncService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.uploadSemaphore = new Semaphore(Math.max(1, uploadProperties.getMaxConcurrent()));
@@ -108,26 +110,22 @@ public class RsImageServiceImpl implements RsImageService {
 
         LocalGeoTiffFile localFile = null;
         MinioUploadVO uploadVO = null;
-        String thumbnailObjectKey = null;
         try {
             localFile = saveToLocalTemp(file);
-            // 同一份本地临时文件依次用于解析、上传和缩略图，避免 1GB 级文件被反复复制。
+            // 上传主流程只复用这一份临时文件完成解析和原始影像上传，缩略图交给后台任务独立处理。
             GeoTiffMetadataVO metadata = geoTiffMetadataService.parse(localFile.filePath());
             uploadVO = minioService.uploadGeoTiff(localFile.filePath(), localFile.originalFilename(), localFile.contentType());
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
             insertImageInTransaction(image);
 
-            thumbnailObjectKey = generateThumbnailBestEffort(localFile.filePath(), image.getId());
             return getById(image.getId());
         } catch (DataIntegrityViolationException exception) {
             // 数据库事务无法回滚 MinIO 对象，失败分支需要主动清理已上传文件。
             deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
-            deleteObjectQuietly(thumbnailObjectKey);
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录保存失败：" + exception.getMostSpecificCause().getMessage());
         } catch (RuntimeException exception) {
             // 非数据库异常同样可能发生在 MinIO 上传之后，统一做对象存储补偿。
             deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
-            deleteObjectQuietly(thumbnailObjectKey);
             throw exception;
         } finally {
             deleteLocalFileQuietly(localFile);
@@ -234,12 +232,21 @@ public class RsImageServiceImpl implements RsImageService {
         image.setMinioBucket(uploadVO.getBucketName());
         image.setObjectKey(uploadVO.getObjectKey());
         image.setStatus("READY");
+        image.setThumbnailStatus("PENDING");
         return image;
     }
 
     private void insertImageInTransaction(RsImage image) {
         // 文件处理已完成后才开启短事务，只覆盖影像元数据入库这一步。
-        transactionTemplate.executeWithoutResult(status -> imageMapper.insert(image));
+        transactionTemplate.executeWithoutResult(status -> {
+            imageMapper.insert(image);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    thumbnailAsyncService.generateAsync(image.getId());
+                }
+            });
+        });
     }
 
     private LocalGeoTiffFile saveToLocalTemp(MultipartFile file) {
@@ -247,7 +254,7 @@ public class RsImageServiceImpl implements RsImageService {
         Path tempDir = null;
         Path filePath = null;
         try {
-            // 上传链路只落盘一次，后续解析、上传和缩略图生成都复用这份文件。
+            // 上传链路只落盘一次，后续解析和原始影像上传都复用这份文件。
             tempDir = Files.createTempDirectory("rs-upload-");
             filePath = tempDir.resolve(buildSafeTempFilename(file.getOriginalFilename()));
             Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
@@ -281,31 +288,6 @@ public class RsImageServiceImpl implements RsImageService {
                 .replace("/", "_")
                 .replaceAll("\\s+", "_");
         return UUID.randomUUID() + "_" + safeFilename;
-    }
-
-    private String generateThumbnailBestEffort(Path filePath, Long imageId) {
-        String thumbnailObjectKey = null;
-        try {
-            // 缩略图是展示增强能力，失败时保留原始影像和元数据。
-            thumbnailObjectKey = geoTiffThumbnailService.generateAndUpload(filePath, imageId);
-            int updated = updateThumbnailInTransaction(imageId, thumbnailObjectKey);
-            if (updated <= 0) {
-                deleteObjectQuietly(thumbnailObjectKey);
-                log.warn("影像缩略图已生成但回写数据库失败，imageId={}, objectKey={}", imageId, thumbnailObjectKey);
-                return null;
-            }
-            return thumbnailObjectKey;
-        } catch (RuntimeException exception) {
-            deleteObjectQuietly(thumbnailObjectKey);
-            log.warn("影像缩略图生成失败，上传主流程降级为无缩略图，imageId={}, reason={}", imageId, exception.getMessage());
-            return null;
-        }
-    }
-
-    private int updateThumbnailInTransaction(Long imageId, String thumbnailObjectKey) {
-        Integer updated = transactionTemplate.execute(status ->
-                imageMapper.updateThumbnailObjectKey(imageId, thumbnailObjectKey));
-        return updated == null ? 0 : updated;
     }
 
     private RsImage toEntity(RsImageCreateDTO createDTO) {
@@ -354,6 +336,8 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setMinioBucket(image.getMinioBucket());
         vo.setObjectKey(image.getObjectKey());
         vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
+        vo.setThumbnailStatus(image.getThumbnailStatus());
+        vo.setThumbnailErrorMessage(image.getThumbnailErrorMessage());
         vo.setOverviewObjectKey(image.getOverviewObjectKey());
         vo.setFootprintWkt(image.getFootprintWkt());
         vo.setCenterLon(image.getCenterLon());
@@ -380,6 +364,7 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setHeight(image.getHeight());
         vo.setObjectKey(image.getObjectKey());
         vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
+        vo.setThumbnailStatus(image.getThumbnailStatus());
         vo.setStatus(image.getStatus());
         vo.setCreatedAt(image.getCreatedAt());
         return vo;

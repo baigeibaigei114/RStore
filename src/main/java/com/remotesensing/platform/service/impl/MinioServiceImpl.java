@@ -8,6 +8,7 @@ import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import io.minio.BucketExistsArgs;
+import io.minio.DownloadObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
@@ -95,6 +96,23 @@ public class MinioServiceImpl implements MinioService {
             return new MinioUploadVO(minioProperties.getBucketName(), objectKey, fileSize, contentType);
         } catch (Exception exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "上传本地文件到 MinIO 失败：" + exception.getMessage());
+        }
+    }
+
+    @Override
+    public void downloadObject(String objectKey, Path targetPath) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 不能为空");
+        }
+        try {
+            Files.createDirectories(targetPath.getParent());
+            minioClient.downloadObject(DownloadObjectArgs.builder()
+                    .bucket(minioProperties.getBucketName())
+                    .object(objectKey)
+                    .filename(targetPath.toAbsolutePath().toString())
+                    .build());
+        } catch (Exception exception) {
+            throw new BusinessException(ResultCode.FAIL.getCode(), "从 MinIO 下载对象失败：" + exception.getMessage());
         }
     }
 

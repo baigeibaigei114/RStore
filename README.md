@@ -159,7 +159,7 @@ raw/{yyyy}/{MM}/{uuid}_{originalFilename}
 
 数据库只保存 bucket、objectKey、fileSize、contentType 等元数据信息，不保存文件本体。
 
-上传接口会先把 Multipart 文件保存为一份本地临时 GeoTIFF，后续元数据解析、MinIO 上传和缩略图生成都复用这同一份临时文件，避免大文件在一次请求中被反复复制。
+上传接口会先把 Multipart 文件保存为一份本地临时 GeoTIFF，主流程只复用这同一份临时文件完成元数据解析和原始影像上传。缩略图作为派生资源，在数据库提交成功后交给后台线程池异步生成。
 
 上传接口会同步调用 `python-worker/scripts/parse_metadata.py` 解析 GeoTIFF 元数据，并写入：
 
@@ -174,23 +174,41 @@ raw/{yyyy}/{MM}/{uuid}_{originalFilename}
 | originalBounds | 保留在 `rs_image.metadata_json`，表示原始影像 CRS 下的范围 |
 | 完整元数据 JSON | `rs_image.metadata_json` |
 
-上传流程会先解析本地临时 GeoTIFF，通过后再上传 MinIO。这样伪造后缀或无法被 rasterio 打开的文件不会先进入对象存储。文件保存、Python 解析和 MinIO 上传都在数据库事务外执行；只有影像记录入库和缩略图路径回写使用短事务。如果数据库保存失败，后端会补偿删除已经上传的 `raw/` 对象；临时文件会在上传流程结束后自动清理。
+上传流程会先解析本地临时 GeoTIFF，通过后再上传 MinIO。这样伪造后缀或无法被 rasterio 打开的文件不会先进入对象存储。文件保存、Python 解析和 MinIO 上传都在数据库事务外执行；只有影像记录入库使用短事务。如果数据库保存失败，后端会补偿删除已经上传的 `raw/` 对象；上传主流程的临时文件会在接口结束前自动清理。
 
 当前阶段上传接口使用轻量并发限制，默认最多同时处理 2 个 GeoTIFF 上传请求。超过限制时接口会返回“当前上传任务较多，请稍后重试”，避免多个大文件同时触发磁盘 IO、MinIO 上传和 Python 进程堆积。可通过配置调整：
 
 ```yaml
 upload:
   max-concurrent: 2
+  thumbnail-core-pool-size: 1
+  thumbnail-max-pool-size: 2
+  thumbnail-queue-capacity: 20
+  thumbnail-retry-batch-size: 20
+  thumbnail-retry-fixed-delay-ms: 60000
 ```
 
-上传接口还会同步生成 PNG 缩略图：
+缩略图生成流程：
 
-1. Spring Boot 复用上传入口已经保存的本地临时 GeoTIFF。
-2. 调用 `python-worker/scripts/generate_thumbnail.py`。
-3. Python 使用 rasterio 读取影像，优先使用前三个波段生成 RGB 缩略图。
-4. 如果只有单波段，则生成灰度缩略图。
-5. 生成的 PNG 上传到 MinIO。
-6. `rs_image.thumbnail_object_key` 保存缩略图对象路径。
+1. 原始影像记录入库事务提交成功。
+2. `afterCommit` 将缩略图任务提交到受限线程池。
+3. 异步线程重新从 MinIO 下载原始 GeoTIFF 到自己的临时目录。
+4. 调用 `python-worker/scripts/generate_thumbnail.py`。
+5. Python 使用 rasterio 读取影像，优先使用前三个波段生成 RGB 缩略图。
+6. 如果只有单波段，则生成灰度缩略图。
+7. 生成的 PNG 上传到 MinIO。
+8. `rs_image.thumbnail_object_key` 保存缩略图对象路径。
+
+缩略图状态字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `thumbnail_status` | `PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`SKIPPED` |
+| `thumbnail_error_message` | 记录线程池拒绝、Python 失败、MinIO 失败或跳过原因 |
+
+缩略图任务开始前会使用 `PENDING -> RUNNING` 条件更新做抢占，只有抢占成功的线程才会真正下载 GeoTIFF 和调用 Python，避免同一影像被多个异步线程重复处理。
+
+`PENDING` 表示还没有真正开始处理，可能是刚上传成功、线程池暂时满了，或等待补偿扫描重新投递。定时补偿任务会周期性扫描 `thumbnail_status = 'PENDING' AND deleted_at IS NULL` 的影像，并重新提交缩略图异步任务。
 
 缩略图 objectKey 格式：
 
@@ -204,9 +222,19 @@ thumbnail/{yyyy}/{MM}/{imageId}.png
 - Python 脚本超时：记录日志，影像主记录仍然保存成功。
 - Python 未生成 PNG：记录日志，影像主记录仍然保存成功。
 - MinIO 上传失败：记录日志，影像主记录仍然保存成功。
-- 成功或失败后都会清理本地临时 GeoTIFF 和 PNG 文件。
+- 线程池队列已满：保持 `thumbnail_status = PENDING`，等待下一轮补偿扫描重新投递。
+- 只有 Python、GeoTIFF 文件处理或 MinIO 处理过程中真正失败时，才标记 `thumbnail_status = FAILED`。
+- 缩略图上传成功但数据库回写失败时，会补偿删除已上传的缩略图对象。
+- 异步执行时如果影像已被软删除，会跳过缩略图生成。
+- 成功或失败后都会清理异步任务自己的本地临时 GeoTIFF 和 PNG 文件。
 
-缩略图是展示增强能力，当前阶段不会因为缩略图失败回滚原始影像和元数据。列表页可根据 `thumbnailObjectKey` 是否为空展示默认占位图，后续可改为异步任务补生成。
+缩略图是展示增强能力，当前阶段不会因为缩略图失败回滚原始影像和元数据。上传接口返回时，`thumbnailObjectKey` 通常为空；列表页可先展示默认占位图，后续刷新获取缩略图。后续可增加补偿任务，定期扫描 `thumbnail_object_key IS NULL` 的影像并重新生成。
+
+已有数据库需要执行升级脚本：
+
+```powershell
+psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260511_thumbnail_status.sql
+```
 
 ## 影像删除策略
 

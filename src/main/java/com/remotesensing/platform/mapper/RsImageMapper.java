@@ -32,6 +32,8 @@ public interface RsImageMapper {
 
     long countSearchByRegion(@Param("query") RsImageSearchDTO query);
 
+    List<Long> selectPendingThumbnailImageIds(@Param("limit") int limit);
+
     int softDeleteById(@Param("id") Long id,
                        @Param("deletedBy") String deletedBy,
                        @Param("deletedReason") String deletedReason);
@@ -52,4 +54,9 @@ public interface RsImageMapper {
      * 缩略图生成发生在影像记录插入之后，因此单独回写该字段。
      */
     int updateThumbnailObjectKey(@Param("id") Long id, @Param("thumbnailObjectKey") String thumbnailObjectKey);
+
+    int updateThumbnailStatus(@Param("id") Long id,
+                              @Param("fromStatus") String fromStatus,
+                              @Param("toStatus") String toStatus,
+                              @Param("errorMessage") String errorMessage);
 }

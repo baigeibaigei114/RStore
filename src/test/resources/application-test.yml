@@ -60,6 +60,11 @@ python-worker:
 
 upload:
   max-concurrent: 2
+  thumbnail-core-pool-size: 1
+  thumbnail-max-pool-size: 1
+  thumbnail-queue-capacity: 2
+  thumbnail-retry-batch-size: 5
+  thumbnail-retry-fixed-delay-ms: 60000
 
 geoserver:
   url: http://127.0.0.1:18081/geoserver

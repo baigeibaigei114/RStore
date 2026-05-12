@@ -30,6 +30,8 @@ public class RsImage {
     private String minioBucket;
     private String objectKey;
     private String thumbnailObjectKey;
+    private String thumbnailStatus;
+    private String thumbnailErrorMessage;
     private String overviewObjectKey;
     private String footprintWkt;
     private BigDecimal centerLon;

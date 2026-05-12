@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS rs_image (
     minio_bucket VARCHAR(100) NOT NULL,
     object_key VARCHAR(500) NOT NULL,
     thumbnail_object_key VARCHAR(500),
+    thumbnail_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    thumbnail_error_message TEXT,
     overview_object_key VARCHAR(500),
     footprint geometry(Polygon, 4326),
     center_lon NUMERIC(10, 6),
@@ -42,13 +44,16 @@ CREATE TABLE IF NOT EXISTS rs_image (
         AND (height IS NULL OR height > 0)
         AND (file_size IS NULL OR file_size >= 0)
     ),
-    CONSTRAINT ck_rs_image_status CHECK (status IN ('UPLOADING', 'PARSING', 'READY', 'PROCESSING', 'DELETE_LOCKED', 'DELETED', 'FAILED'))
+    CONSTRAINT ck_rs_image_status CHECK (status IN ('UPLOADING', 'PARSING', 'READY', 'PROCESSING', 'DELETE_LOCKED', 'DELETED', 'FAILED')),
+    CONSTRAINT ck_rs_image_thumbnail_status CHECK (thumbnail_status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED'))
 );
 
 COMMENT ON TABLE rs_image IS '影像资产表，保存 GeoTIFF 影像元数据、对象存储路径和空间范围';
 COMMENT ON COLUMN rs_image.image_code IS '影像唯一编码，用于业务侧稳定引用';
 COMMENT ON COLUMN rs_image.object_key IS 'MinIO 中原始影像文件对象路径';
 COMMENT ON COLUMN rs_image.thumbnail_object_key IS 'MinIO 中 PNG 缩略图对象路径';
+COMMENT ON COLUMN rs_image.thumbnail_status IS '缩略图生成状态：PENDING、RUNNING、SUCCESS、FAILED、SKIPPED';
+COMMENT ON COLUMN rs_image.thumbnail_error_message IS '缩略图生成失败或跳过原因';
 COMMENT ON COLUMN rs_image.content_type IS '文件 MIME 类型';
 COMMENT ON COLUMN rs_image.metadata_json IS 'GeoTIFF 解析得到的完整元数据 JSON';
 COMMENT ON COLUMN rs_image.overview_object_key IS 'MinIO 中影像缩略图或概览文件对象路径';
@@ -63,6 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_rs_image_acquisition_time ON rs_image (acquisitio
 CREATE INDEX IF NOT EXISTS idx_rs_image_sensor_type ON rs_image (sensor_type);
 CREATE INDEX IF NOT EXISTS idx_rs_image_object_location ON rs_image (minio_bucket, object_key);
 CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_object_key ON rs_image (thumbnail_object_key);
+CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_status ON rs_image (thumbnail_status);
 CREATE INDEX IF NOT EXISTS idx_rs_image_deleted_at ON rs_image (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_rs_image_status ON rs_image (status);
 

@@ -24,6 +24,8 @@
         <result property="minioBucket" column="minio_bucket"/>
         <result property="objectKey" column="object_key"/>
         <result property="thumbnailObjectKey" column="thumbnail_object_key"/>
+        <result property="thumbnailStatus" column="thumbnail_status"/>
+        <result property="thumbnailErrorMessage" column="thumbnail_error_message"/>
         <result property="overviewObjectKey" column="overview_object_key"/>
         <result property="footprintWkt" column="footprint_wkt"/>
         <result property="centerLon" column="center_lon"/>
@@ -57,6 +59,8 @@
         rs_image.minio_bucket,
         rs_image.object_key,
         rs_image.thumbnail_object_key,
+        rs_image.thumbnail_status,
+        rs_image.thumbnail_error_message,
         rs_image.overview_object_key,
         ST_AsText(rs_image.footprint) AS footprint_wkt,
         rs_image.center_lon,
@@ -139,6 +143,8 @@
             minio_bucket,
             object_key,
             thumbnail_object_key,
+            thumbnail_status,
+            thumbnail_error_message,
             overview_object_key,
             footprint,
             center_lon,
@@ -164,6 +170,8 @@
             #{minioBucket},
             #{objectKey},
             #{thumbnailObjectKey},
+            COALESCE(#{thumbnailStatus}, 'PENDING'),
+            #{thumbnailErrorMessage},
             #{overviewObjectKey},
             ST_GeomFromText(NULLIF(#{footprintWkt}, ''), 4326),
             #{centerLon},
@@ -228,6 +236,15 @@
         <include refid="RegionSearchWhere"/>
     </select>
 
+    <select id="selectPendingThumbnailImageIds" resultType="long">
+        SELECT id
+        FROM rs_image
+        WHERE thumbnail_status = 'PENDING'
+          AND deleted_at IS NULL
+        ORDER BY created_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
     <update id="softDeleteById">
         UPDATE rs_image
         SET status = 'DELETED',
@@ -267,7 +284,22 @@
     <update id="updateThumbnailObjectKey">
         UPDATE rs_image
         SET thumbnail_object_key = #{thumbnailObjectKey},
+            thumbnail_status = 'SUCCESS',
+            thumbnail_error_message = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="updateThumbnailStatus">
+        UPDATE rs_image
+        SET thumbnail_status = #{toStatus},
+            thumbnail_error_message = #{errorMessage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND deleted_at IS NULL
+          <if test="fromStatus != null and fromStatus != ''">
+              AND thumbnail_status = #{fromStatus}
+          </if>
     </update>
 </mapper>

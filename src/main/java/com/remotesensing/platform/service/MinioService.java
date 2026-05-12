@@ -17,6 +17,11 @@ public interface MinioService {
     MinioUploadVO uploadLocalFile(Path filePath, String objectKey, String contentType);
 
     /**
+     * 下载对象到本地临时文件，供异步缩略图或后续处理节点使用。
+     */
+    void downloadObject(String objectKey, Path targetPath);
+
+    /**
      * 删除对象存储文件，用于数据库失败补偿或影像删除后的空间回收。
      */
     void deleteObject(String objectKey);
