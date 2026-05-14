@@ -1,5 +1,0 @@
-$kind: collection
-name: Remote Sensing Image Asset Platform API
-variables:
-  - key: baseUrl
-    value: 'http://localhost:8080/api'
