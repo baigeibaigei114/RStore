@@ -2,6 +2,7 @@ package com.remotesensing.platform.service;
 
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
+import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
 
 public interface RsTaskService {
@@ -15,4 +16,9 @@ public interface RsTaskService {
      * 接收 Worker 状态回调，并维护任务状态、进度和执行日志。
      */
     void updateStatus(Long taskId, RsTaskStatusUpdateDTO updateDTO);
+
+    /**
+     * Worker 执行前原子抢占任务，避免 RabbitMQ 重投导致重复计算。
+     */
+    RsTaskClaimVO claim(Long taskId);
 }

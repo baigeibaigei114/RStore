@@ -34,9 +34,9 @@ public interface RsImageMapper {
 
     List<Long> selectPendingThumbnailImageIds(@Param("limit") int limit);
 
-    int softDeleteById(@Param("id") Long id,
-                       @Param("deletedBy") String deletedBy,
-                       @Param("deletedReason") String deletedReason);
+    int softDeleteIfDeletable(@Param("id") Long id,
+                              @Param("deletedBy") String deletedBy,
+                              @Param("deletedReason") String deletedReason);
 
     /**
      * 提交任务时用条件更新占用影像，避免删除和任务创建之间出现并发窗口。

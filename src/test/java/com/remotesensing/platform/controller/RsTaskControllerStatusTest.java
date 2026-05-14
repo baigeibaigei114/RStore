@@ -12,6 +12,7 @@ import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.RsTaskClaimVO;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.Mockito.when;
 
 @ActiveProfiles("test")
 @WebMvcTest(RsTaskController.class)
@@ -32,6 +35,24 @@ class RsTaskControllerStatusTest {
 
     @MockBean
     private RsTaskService taskService;
+
+    /**
+     * 场景：Worker 消费消息前先抢占任务，只有抢占成功才继续计算。
+     */
+    @Test
+    @DisplayName("Worker 抢占任务成功")
+    void claimTaskShouldReturnSuccess() throws Exception {
+        when(taskService.claim(1L)).thenReturn(new RsTaskClaimVO(true, "CLAIMED", "RUNNING", "任务抢占成功", "result/NDVI/2026/05/task_1.tif"));
+
+        mockMvc.perform(post("/api/tasks/{taskId}/claim", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.claimed").value(true))
+                .andExpect(jsonPath("$.data.action").value("CLAIMED"));
+
+        verify(taskService).claim(1L);
+    }
 
     /**
      * 场景：Worker 上报运行中进度时，Controller 应接收请求并交给 Service 校验流转规则。

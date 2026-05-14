@@ -2,8 +2,9 @@ package com.remotesensing.platform.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.remotesensing.platform.entity.RsTaskLog;
+import com.remotesensing.platform.common.enums.TaskStatus;
 import com.remotesensing.platform.entity.RsTask;
+import com.remotesensing.platform.entity.RsTaskLog;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
@@ -31,15 +32,19 @@ public class RsTaskFailureServiceImpl implements RsTaskFailureService {
 
     @Override
     @Transactional
-    public void markFailed(Long taskId, String errorMessage, Object detail) {
+    public void markFailedIfActive(Long taskId, String errorMessage, Object detail) {
         if (taskId == null) {
             return;
         }
 
         RsTask task = taskMapper.selectById(taskId);
-        // 状态和日志放在同一个事务中，保证前端状态与后台排障记录保持一致。
-        taskMapper.markFailed(taskId, errorMessage);
-        if (task != null && taskMapper.countUnfinishedByImageId(task.getImageId()) == 0) {
+        // The SQL guard prevents fallback paths from overwriting terminal task states.
+        int updated = taskMapper.markFailedIfActive(taskId, errorMessage);
+        if (updated <= 0) {
+            return;
+        }
+        if (task != null && TaskStatus.fromDb(task.getStatus()).isActive()
+                && taskMapper.countActiveByImageId(task.getImageId()) == 0) {
             imageMapper.markReadyIfProcessing(task.getImageId());
         }
 

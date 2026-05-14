@@ -1,5 +1,6 @@
 package com.remotesensing.platform.service.impl;
 
+import com.remotesensing.platform.common.enums.ThumbnailStatus;
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.service.GeoTiffThumbnailService;
@@ -27,10 +28,6 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
     private static final Logger log = LoggerFactory.getLogger(ThumbnailAsyncServiceImpl.class);
     private static final DateTimeFormatter YEAR_FORMATTER = DateTimeFormatter.ofPattern("yyyy");
     private static final DateTimeFormatter MONTH_FORMATTER = DateTimeFormatter.ofPattern("MM");
-    private static final String THUMBNAIL_PENDING = "PENDING";
-    private static final String THUMBNAIL_RUNNING = "RUNNING";
-    private static final String THUMBNAIL_FAILED = "FAILED";
-    private static final String THUMBNAIL_SKIPPED = "SKIPPED";
 
     private final Executor thumbnailTaskExecutor;
     private final RsImageMapper imageMapper;
@@ -55,8 +52,8 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             thumbnailTaskExecutor.execute(() -> generateThumbnailSafely(imageId));
         } catch (RejectedExecutionException exception) {
-            // 调度失败不代表文件或 Python 处理失败，保持 PENDING 交给定时补偿任务再次投递。
-            log.warn("缩略图异步任务提交失败，保持 PENDING 等待补偿重试，imageId={}, reason={}", imageId, exception.getMessage());
+            // A full queue is a scheduling issue; keep PENDING for the retry scheduler.
+            log.warn("Thumbnail task rejected, keep PENDING for retry, imageId={}, reason={}", imageId, exception.getMessage());
         }
     }
 
@@ -66,17 +63,17 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             RsImage image = imageMapper.selectById(imageId);
             if (image == null) {
-                updateThumbnailStatus(imageId, null, THUMBNAIL_SKIPPED, "影像不存在或已删除");
-                log.info("影像不存在或已删除，跳过缩略图生成，imageId={}", imageId);
+                updateThumbnailStatus(imageId, null, ThumbnailStatus.SKIPPED, "Image does not exist or has been deleted");
+                log.info("Skip thumbnail because image is missing or deleted, imageId={}", imageId);
                 return;
             }
             if (image.getThumbnailObjectKey() != null && !image.getThumbnailObjectKey().isBlank()) {
-                updateThumbnailStatus(imageId, null, "SUCCESS", null);
-                log.info("影像缩略图已存在，跳过重复生成，imageId={}, objectKey={}", imageId, image.getThumbnailObjectKey());
+                updateThumbnailStatus(imageId, null, ThumbnailStatus.SUCCESS, null);
+                log.info("Skip duplicate thumbnail generation, imageId={}, objectKey={}", imageId, image.getThumbnailObjectKey());
                 return;
             }
-            if (updateThumbnailStatus(imageId, THUMBNAIL_PENDING, THUMBNAIL_RUNNING, null) <= 0) {
-                log.info("缩略图任务未抢占到 PENDING 状态，跳过执行，imageId={}", imageId);
+            if (updateThumbnailStatus(imageId, ThumbnailStatus.PENDING, ThumbnailStatus.RUNNING, null) <= 0) {
+                log.info("Thumbnail task was not claimed from PENDING, imageId={}", imageId);
                 return;
             }
 
@@ -84,21 +81,21 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
             Path rawFile = tempDir.resolve("source.tif");
             thumbnailObjectKey = buildThumbnailObjectKey(image);
 
-            // 异步任务不依赖上传请求中的临时文件，独立从 MinIO 拉取原始影像，便于请求线程及时清理。
+            // Async generation downloads its own temp file so the upload request can clean up immediately.
             minioService.downloadObject(image.getObjectKey(), rawFile);
             geoTiffThumbnailService.generateAndUpload(rawFile, thumbnailObjectKey);
 
             int updated = updateThumbnailInTransaction(imageId, thumbnailObjectKey);
             if (updated <= 0) {
                 deleteObjectQuietly(thumbnailObjectKey);
-                log.warn("缩略图生成完成但影像已不可回写，已清理缩略图对象，imageId={}, objectKey={}", imageId, thumbnailObjectKey);
+                log.warn("Thumbnail generated but image cannot be updated, cleaned object, imageId={}, objectKey={}", imageId, thumbnailObjectKey);
                 return;
             }
-            log.info("缩略图异步生成完成，imageId={}, objectKey={}", imageId, thumbnailObjectKey);
+            log.info("Thumbnail generated, imageId={}, objectKey={}", imageId, thumbnailObjectKey);
         } catch (Exception exception) {
             deleteObjectQuietly(thumbnailObjectKey);
-            updateThumbnailStatus(imageId, THUMBNAIL_RUNNING, THUMBNAIL_FAILED, truncate(exception.getMessage()));
-            log.warn("缩略图异步生成失败，imageId={}, reason={}", imageId, exception.getMessage(), exception);
+            updateThumbnailStatus(imageId, ThumbnailStatus.RUNNING, ThumbnailStatus.FAILED, truncate(exception.getMessage()));
+            log.warn("Thumbnail generation failed, imageId={}, reason={}", imageId, exception.getMessage(), exception);
         } finally {
             deleteDirectoryQuietly(tempDir);
         }
@@ -110,9 +107,14 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         return updated == null ? 0 : updated;
     }
 
-    private int updateThumbnailStatus(Long imageId, String fromStatus, String toStatus, String errorMessage) {
+    private int updateThumbnailStatus(Long imageId, ThumbnailStatus fromStatus, ThumbnailStatus toStatus, String errorMessage) {
         Integer updated = transactionTemplate.execute(status ->
-                imageMapper.updateThumbnailStatus(imageId, fromStatus, toStatus, truncate(errorMessage)));
+                imageMapper.updateThumbnailStatus(
+                        imageId,
+                        fromStatus == null ? null : fromStatus.dbValue(),
+                        toStatus.dbValue(),
+                        truncate(errorMessage)
+                ));
         return updated == null ? 0 : updated;
     }
 
@@ -132,7 +134,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             minioService.deleteObject(objectKey);
         } catch (RuntimeException exception) {
-            log.warn("缩略图补偿删除失败，objectKey={}, reason={}", objectKey, exception.getMessage());
+            log.warn("Thumbnail compensation delete failed, objectKey={}, reason={}", objectKey, exception.getMessage());
         }
     }
 
@@ -144,7 +146,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
             paths.sorted(Comparator.reverseOrder())
                     .forEach(this::deletePathQuietly);
         } catch (IOException exception) {
-            log.warn("缩略图临时目录清理失败，path={}, reason={}", dir, exception.getMessage());
+            log.warn("Thumbnail temp directory cleanup failed, path={}, reason={}", dir, exception.getMessage());
         }
     }
 
@@ -152,7 +154,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             Files.deleteIfExists(path);
         } catch (IOException exception) {
-            log.warn("缩略图临时文件清理失败，path={}, reason={}", path, exception.getMessage());
+            log.warn("Thumbnail temp file cleanup failed, path={}, reason={}", path, exception.getMessage());
         }
     }
 

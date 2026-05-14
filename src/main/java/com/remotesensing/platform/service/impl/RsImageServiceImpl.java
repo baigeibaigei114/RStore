@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
+import com.remotesensing.platform.common.enums.ImageStatus;
+import com.remotesensing.platform.common.enums.ThumbnailStatus;
 import com.remotesensing.platform.config.UploadProperties;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
@@ -198,13 +200,13 @@ public class RsImageServiceImpl implements RsImageService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
         }
         // 活跃处理任务仍依赖原始影像，删除前先用业务状态拦截，而不是依赖数据库外键报错。
-        if (taskMapper.countUnfinishedByImageId(id) > 0) {
+        if (taskMapper.countActiveByImageId(id) > 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像存在正在执行的处理任务，暂不能删除");
         }
 
         try {
             // 历史任务需要保留审计链路，这里只隐藏影像资产，不级联清理任务、日志和结果文件。
-            int updated = imageMapper.softDeleteById(id, null, "用户删除影像资产");
+            int updated = imageMapper.softDeleteIfDeletable(id, null, "用户删除影像资产");
             if (updated <= 0) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许删除，请确认没有处理任务正在执行");
             }
@@ -231,8 +233,8 @@ public class RsImageServiceImpl implements RsImageService {
         image.setContentType(uploadVO.getContentType());
         image.setMinioBucket(uploadVO.getBucketName());
         image.setObjectKey(uploadVO.getObjectKey());
-        image.setStatus("READY");
-        image.setThumbnailStatus("PENDING");
+        image.setStatus(ImageStatus.READY.dbValue());
+        image.setThumbnailStatus(ThumbnailStatus.PENDING.dbValue());
         return image;
     }
 

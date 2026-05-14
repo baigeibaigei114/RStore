@@ -5,6 +5,10 @@ import requests
 from config import CallbackSettings
 
 
+class CallbackError(RuntimeError):
+    pass
+
+
 class CallbackClient:
     def __init__(self, settings: CallbackSettings):
         self._settings = settings
@@ -23,11 +27,30 @@ class CallbackClient:
 
         url = f"{self._settings.base_url.rstrip('/')}/api/tasks/{task_id}/status"
         response = requests.post(url, json=payload, timeout=self._settings.timeout_seconds)
-        response.raise_for_status()
+        self._parse_result(response)
+
+    def claim_task(self, task_id: int) -> dict[str, Any]:
+        if not self._settings.enabled:
+            return {"claimed": True, "action": "CLAIMED"}
+
+        url = f"{self._settings.base_url.rstrip('/')}/api/tasks/{task_id}/claim"
+        response = requests.post(url, timeout=self._settings.timeout_seconds)
+        return self._parse_result(response) or {}
 
     def safe_update_status(self, task_id: int, status: str, message: str | None = None, extra: dict[str, Any] | None = None) -> None:
         try:
             self.update_status(task_id, status, message, extra)
-        except requests.RequestException as exc:
+        except (requests.RequestException, CallbackError) as exc:
             # 当前 Java 端状态回调接口可能尚未实现，Worker 先记录告警而不阻断消息处理框架。
             print(f"[callback-warning] task_id={task_id} status={status} reason={exc}", flush=True)
+
+    def _parse_result(self, response: requests.Response) -> Any:
+        response.raise_for_status()
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise CallbackError(f"callback response is not JSON: {response.text}") from exc
+
+        if result.get("code") != 200:
+            raise CallbackError(f"callback rejected: code={result.get('code')} message={result.get('message')}")
+        return result.get("data")

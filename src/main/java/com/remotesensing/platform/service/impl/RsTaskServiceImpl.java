@@ -3,26 +3,29 @@ package com.remotesensing.platform.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.ResultCode;
+import com.remotesensing.platform.common.enums.ImageStatus;
+import com.remotesensing.platform.common.enums.TaskClaimAction;
+import com.remotesensing.platform.common.enums.TaskStatus;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.config.RabbitTaskProperties;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.entity.RsImage;
-import com.remotesensing.platform.entity.RsTaskLog;
 import com.remotesensing.platform.entity.RsTask;
+import com.remotesensing.platform.entity.RsTaskLog;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.RsTaskFailureService;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.MessageDeliveryMode;
@@ -37,22 +40,6 @@ public class RsTaskServiceImpl implements RsTaskService {
 
     private static final DateTimeFormatter YEAR_FORMATTER = DateTimeFormatter.ofPattern("yyyy");
     private static final DateTimeFormatter MONTH_FORMATTER = DateTimeFormatter.ofPattern("MM");
-    private static final String STATUS_PENDING = "PENDING";
-    private static final String STATUS_RUNNING = "RUNNING";
-    private static final String STATUS_RETRYING = "RETRYING";
-    private static final String STATUS_SUCCESS = "SUCCESS";
-    private static final String STATUS_FAILED = "FAILED";
-    private static final String STATUS_CANCELED = "CANCELED";
-    private static final String IMAGE_STATUS_READY = "READY";
-    private static final Set<String> TERMINAL_STATUSES = Set.of(STATUS_SUCCESS, STATUS_FAILED, STATUS_CANCELED);
-    private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
-            STATUS_PENDING, Set.of(STATUS_RUNNING, STATUS_RETRYING, STATUS_FAILED, STATUS_CANCELED),
-            STATUS_RUNNING, Set.of(STATUS_RUNNING, STATUS_RETRYING, STATUS_SUCCESS, STATUS_FAILED, STATUS_CANCELED),
-            STATUS_RETRYING, Set.of(STATUS_RETRYING, STATUS_RUNNING, STATUS_FAILED, STATUS_CANCELED),
-            STATUS_SUCCESS, Set.of(STATUS_SUCCESS),
-            STATUS_FAILED, Set.of(STATUS_FAILED),
-            STATUS_CANCELED, Set.of(STATUS_CANCELED)
-    );
 
     private final RsImageMapper imageMapper;
     private final RsTaskMapper taskMapper;
@@ -88,7 +75,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     public RsTaskSubmitVO submit(RsTaskSubmitDTO submitDTO) {
         PreparedTask preparedTask = transactionTemplate.execute(status -> prepareTask(submitDTO));
         if (preparedTask == null) {
-            throw new BusinessException(ResultCode.FAIL.getCode(), "任务提交失败，事务未返回任务信息");
+            throw new BusinessException(ResultCode.FAIL.getCode(), "Task submit failed: transaction returned no task");
         }
 
         sendTaskMessage(preparedTask, submitDTO);
@@ -100,48 +87,87 @@ public class RsTaskServiceImpl implements RsTaskService {
         transactionTemplate.executeWithoutResult(status -> updateStatusInTransaction(taskId, updateDTO));
     }
 
+    @Override
+    public RsTaskClaimVO claim(Long taskId) {
+        return transactionTemplate.execute(status -> claimInTransaction(taskId));
+    }
+
+    private RsTaskClaimVO claimInTransaction(Long taskId) {
+        RsTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Task does not exist");
+        }
+
+        TaskStatus currentStatus = TaskStatus.fromDb(task.getStatus());
+        if (currentStatus.isTerminal()) {
+            return new RsTaskClaimVO(false, TaskClaimAction.ALREADY_FINISHED.dbValue(), task.getStatus(), "Task is terminal; skip duplicate work", task.getOutputObjectKey());
+        }
+        if (currentStatus == TaskStatus.RUNNING) {
+            return new RsTaskClaimVO(false, TaskClaimAction.ALREADY_RUNNING.dbValue(), task.getStatus(), "Task is already running", task.getOutputObjectKey());
+        }
+
+        int updated = taskMapper.claimForRunning(taskId);
+        if (updated <= 0) {
+            RsTask latestTask = taskMapper.selectById(taskId);
+            String latestStatus = latestTask == null ? task.getStatus() : latestTask.getStatus();
+            return new RsTaskClaimVO(false, TaskClaimAction.CLAIM_REJECTED.dbValue(), latestStatus, "Task status changed; claim rejected", task.getOutputObjectKey());
+        }
+
+        RsTaskLog taskLog = new RsTaskLog();
+        taskLog.setTaskId(taskId);
+        taskLog.setLogLevel("INFO");
+        taskLog.setMessage("Worker claimed task: " + task.getStatus() + " -> " + TaskStatus.RUNNING.dbValue());
+        taskLog.setDetail(toJson(Map.of("fromStatus", task.getStatus(), "toStatus", TaskStatus.RUNNING.dbValue())));
+        taskLogMapper.insert(taskLog);
+        return new RsTaskClaimVO(true, TaskClaimAction.CLAIMED.dbValue(), TaskStatus.RUNNING.dbValue(), "Task claimed", task.getOutputObjectKey());
+    }
+
     private void updateStatusInTransaction(Long taskId, RsTaskStatusUpdateDTO updateDTO) {
         RsTask task = taskMapper.selectById(taskId);
         if (task == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务记录不存在");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Task does not exist");
         }
 
-        String targetStatus = normalizeStatus(updateDTO.getStatus());
-        validateTransition(task.getStatus(), targetStatus);
+        TaskStatus targetStatus = normalizeStatus(updateDTO.getStatus());
+        validateTransition(TaskStatus.fromDb(task.getStatus()), targetStatus);
         String errorMessage = resolveErrorMessage(targetStatus, updateDTO);
-        if (STATUS_SUCCESS.equals(targetStatus) && isBlank(updateDTO.getOutputObjectKey()) && isBlank(task.getOutputObjectKey())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "SUCCESS 状态必须提供 outputObjectKey");
+        if (targetStatus == TaskStatus.SUCCESS && isBlank(updateDTO.getOutputObjectKey()) && isBlank(task.getOutputObjectKey())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "SUCCESS status requires outputObjectKey");
         }
-        if (STATUS_FAILED.equals(targetStatus) && isBlank(errorMessage)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");
+        if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED status requires errorMessage");
         }
 
-        taskMapper.updateStatusFromWorker(
+        int updated = taskMapper.updateStatusFromWorker(
                 taskId,
-                targetStatus,
+                task.getStatus(),
+                targetStatus.dbValue(),
                 updateDTO.getProgress(),
                 updateDTO.getOutputObjectKey(),
                 errorMessage
         );
-        insertStatusLog(task, targetStatus, updateDTO, errorMessage);
+        if (updated <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Task status changed concurrently; please retry callback");
+        }
+        insertStatusLog(task, targetStatus.dbValue(), updateDTO, errorMessage);
         releaseImageIfTaskFinished(task, targetStatus);
     }
 
     private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO) {
         RsImage image = imageMapper.selectById(submitDTO.getImageId());
         if (image == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Image does not exist");
         }
-        if (!IMAGE_STATUS_READY.equals(image.getStatus())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
+        if (!ImageStatus.fromDb(image.getStatus()).canSubmitTask()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Only READY images can submit processing tasks");
         }
 
-        // READY -> PROCESSING 与任务创建在同一事务内完成，防止软删除和提交任务并发交叉。
+        // The conditional update closes the submit/delete concurrency window.
         if (imageMapper.markProcessingIfReady(image.getId()) <= 0) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许提交处理任务");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Image status does not allow task submission");
         }
 
-        // 任务和输出路径在同一个事务内落库，避免出现缺少结果路径的 PENDING 任务。
+        // Persist task and output path in one short transaction to avoid incomplete PENDING tasks.
         RsTask task = buildPendingTask(submitDTO);
         taskMapper.insert(task);
 
@@ -166,12 +192,12 @@ public class RsTaskServiceImpl implements RsTaskService {
                     new CorrelationData(String.valueOf(task.getId()))
             );
         } catch (AmqpException exception) {
-            taskFailureService.markFailed(
+            taskFailureService.markFailedIfActive(
                     task.getId(),
-                    "RabbitMQ 消息发送异常：" + exception.getMessage(),
+                    "RabbitMQ send exception: " + exception.getMessage(),
                     buildPublishExceptionDetail(exception)
             );
-            throw new BusinessException(ResultCode.FAIL.getCode(), "任务提交失败，RabbitMQ 消息发送异常");
+            throw new BusinessException(ResultCode.FAIL.getCode(), "Task submit failed: RabbitMQ send exception");
         }
     }
 
@@ -180,8 +206,8 @@ public class RsTaskServiceImpl implements RsTaskService {
         task.setTaskCode("TASK_" + UUID.randomUUID().toString().replace("-", ""));
         task.setImageId(submitDTO.getImageId());
         task.setTaskType(submitDTO.getTaskType().name());
-        task.setTaskName(submitDTO.getTaskType().name() + " 处理任务");
-        task.setStatus(STATUS_PENDING);
+        task.setTaskName(submitDTO.getTaskType().name() + " processing task");
+        task.setStatus(TaskStatus.PENDING.dbValue());
         task.setPriority(5);
         task.setProgress(0);
         task.setRetryCount(0);
@@ -194,7 +220,7 @@ public class RsTaskServiceImpl implements RsTaskService {
                                                   RsImage image,
                                                   Long taskId,
                                                   String outputObjectKey) {
-        // RabbitMQ 消息只传 MinIO 路径和计算参数，避免大文件进入消息队列。
+        // RabbitMQ carries object paths and parameters only; GeoTIFF bytes stay in MinIO.
         RemoteSensingTaskMessage message = new RemoteSensingTaskMessage();
         message.setTaskId(taskId);
         message.setTaskType(submitDTO.getTaskType());
@@ -232,33 +258,32 @@ public class RsTaskServiceImpl implements RsTaskService {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务参数 JSON 序列化失败");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Task params JSON serialization failed");
         }
     }
 
-    private String normalizeStatus(String status) {
-        String normalizedStatus = status.trim().toUpperCase();
-        if (!ALLOWED_TRANSITIONS.containsKey(normalizedStatus)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "非法任务状态：" + status);
+    private TaskStatus normalizeStatus(String status) {
+        try {
+            return TaskStatus.fromDb(status);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Invalid task status: " + status);
         }
-        return normalizedStatus;
     }
 
-    private void validateTransition(String currentStatus, String targetStatus) {
-        Set<String> allowedTargets = ALLOWED_TRANSITIONS.get(currentStatus);
-        if (allowedTargets == null || !allowedTargets.contains(targetStatus)) {
+    private void validateTransition(TaskStatus currentStatus, TaskStatus targetStatus) {
+        if (!currentStatus.canTransitTo(targetStatus)) {
             throw new BusinessException(
                     ResultCode.PARAM_ERROR.getCode(),
-                    "非法任务状态流转：" + currentStatus + " -> " + targetStatus
+                    "Invalid task status transition: " + currentStatus + " -> " + targetStatus
             );
         }
-        if (TERMINAL_STATUSES.contains(currentStatus) && !currentStatus.equals(targetStatus)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "终态任务不允许再次变更状态");
+        if (currentStatus.isTerminal() && currentStatus != targetStatus) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "Terminal task cannot change status again");
         }
     }
 
-    private String resolveErrorMessage(String targetStatus, RsTaskStatusUpdateDTO updateDTO) {
-        if (!STATUS_FAILED.equals(targetStatus)) {
+    private String resolveErrorMessage(TaskStatus targetStatus, RsTaskStatusUpdateDTO updateDTO) {
+        if (targetStatus != TaskStatus.FAILED) {
             return updateDTO.getErrorMessage();
         }
         if (!isBlank(updateDTO.getErrorMessage())) {
@@ -280,18 +305,18 @@ public class RsTaskServiceImpl implements RsTaskService {
 
         RsTaskLog taskLog = new RsTaskLog();
         taskLog.setTaskId(task.getId());
-        taskLog.setLogLevel(STATUS_FAILED.equals(targetStatus) ? "ERROR" : "INFO");
+        taskLog.setLogLevel(TaskStatus.FAILED.dbValue().equals(targetStatus) ? "ERROR" : "INFO");
         taskLog.setMessage(buildStatusLogMessage(task.getStatus(), targetStatus, updateDTO));
         taskLog.setDetail(toJson(detail));
         taskLogMapper.insert(taskLog);
     }
 
-    private void releaseImageIfTaskFinished(RsTask task, String targetStatus) {
-        if (!TERMINAL_STATUSES.contains(targetStatus)) {
+    private void releaseImageIfTaskFinished(RsTask task, TaskStatus targetStatus) {
+        if (!targetStatus.isTerminal()) {
             return;
         }
-        // 同一影像没有其他活跃任务时，原始资产恢复 READY，便于后续继续检索、删除或再次处理。
-        if (taskMapper.countUnfinishedByImageId(task.getImageId()) == 0) {
+        // Release the image only when no active task remains for the same source asset.
+        if (taskMapper.countActiveByImageId(task.getImageId()) == 0) {
             imageMapper.markReadyIfProcessing(task.getImageId());
         }
     }
@@ -301,9 +326,9 @@ public class RsTaskServiceImpl implements RsTaskService {
             return updateDTO.getMessage();
         }
         if (currentStatus.equals(targetStatus)) {
-            return "任务状态回调：" + targetStatus;
+            return "Task status callback: " + targetStatus;
         }
-        return "任务状态变更：" + currentStatus + " -> " + targetStatus;
+        return "Task status changed: " + currentStatus + " -> " + targetStatus;
     }
 
     private boolean isBlank(String value) {

@@ -245,7 +245,7 @@
         LIMIT #{limit}
     </select>
 
-    <update id="softDeleteById">
+    <update id="softDeleteIfDeletable">
         UPDATE rs_image
         SET status = 'DELETED',
             deleted_at = CURRENT_TIMESTAMP,

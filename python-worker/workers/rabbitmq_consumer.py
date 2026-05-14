@@ -41,25 +41,38 @@ class RabbitMqConsumer:
             if processor is None:
                 raise ValueError(f"unsupported taskType: {task_type}")
 
-            # Worker 先把业务任务置为 RUNNING，再执行计算，便于前端区分排队和处理中。
-            self._callback_client.safe_update_status(task_id, "RUNNING")
+            claim_result = self._callback_client.claim_task(task_id)
+            action = claim_result.get("action")
+            if action == "ALREADY_FINISHED":
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                print(f"[worker] skip finished task task_id={task_id} status={claim_result.get('taskStatus')}", flush=True)
+                return
+            if action != "CLAIMED":
+                self._requeue_or_reject(channel, method.delivery_tag, task_id, f"claim action={action}")
+                return
+
             result = processor.process(message)
             # 只有结果文件已经上传并完成回调后才 ack，保证消息确认与业务成功尽量同向。
-            self._callback_client.safe_update_status(task_id, "SUCCESS", extra=result)
+            self._callback_client.update_status(task_id, "SUCCESS", extra=result)
             channel.basic_ack(delivery_tag=method.delivery_tag)
             print(f"[worker] task completed task_id={task_id} task_type={task_type}", flush=True)
         except Exception as exc:
             task_id = self._extract_task_id(message)
-            if task_id is not None:
-                self._callback_client.safe_update_status(task_id, "FAILED", message=str(exc))
+            if task_id is not None and self._settings.requeue_on_error:
+                self._callback_client.safe_update_status(task_id, "RETRYING", message=str(exc))
 
-            if self._settings.requeue_on_error:
-                # Java 队列使用 delivery-limit 控制最大重试次数，重新入队后超过次数会进入 DLQ。
-                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-            else:
-                # 不可恢复错误直接拒绝，交给 RabbitMQ 死信链路保留失败消息。
-                channel.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
+            self._requeue_or_reject(channel, method.delivery_tag, task_id, str(exc))
             print(f"[worker-error] task_id={task_id} reason={exc}", flush=True)
+
+    def _requeue_or_reject(self, channel, delivery_tag: int, task_id: int | None, reason: str) -> None:
+        if self._settings.requeue_on_error:
+            # Java 队列使用 delivery-limit 控制最大重试次数，重新入队后超过次数会进入 DLQ。
+            channel.basic_nack(delivery_tag=delivery_tag, requeue=True)
+        else:
+            if task_id is not None:
+                self._callback_client.safe_update_status(task_id, "FAILED", message=reason)
+            # 不可恢复错误直接拒绝，交给 RabbitMQ 死信链路保留失败消息。
+            channel.basic_reject(delivery_tag=delivery_tag, requeue=False)
 
     @staticmethod
     def _extract_task_id(message: dict[str, Any] | None) -> int | None:

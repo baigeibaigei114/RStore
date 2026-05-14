@@ -3,7 +3,7 @@ package com.remotesensing.platform.service;
 public interface RsTaskFailureService {
 
     /**
-     * 统一处理任务最终失败状态，避免死信、投递失败等入口各自维护状态。
+     * 只对仍处于活跃状态的任务写入最终失败，避免覆盖 SUCCESS/CANCELED 等终态。
      */
-    void markFailed(Long taskId, String errorMessage, Object detail);
+    void markFailedIfActive(Long taskId, String errorMessage, Object detail);
 }

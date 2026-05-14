@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from minio import Minio
+from minio.error import S3Error
 
 from config import MinioSettings
 
@@ -24,3 +25,12 @@ class MinioStorageClient:
         if not self._client.bucket_exists(bucket):
             self._client.make_bucket(bucket)
         self._client.fput_object(bucket, object_key, str(source_path), content_type=content_type)
+
+    def object_exists(self, bucket: str, object_key: str) -> bool:
+        try:
+            self._client.stat_object(bucket, object_key)
+            return True
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+                return False
+            raise

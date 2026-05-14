@@ -98,6 +98,33 @@ http://localhost:8080/api
 mvn test
 ```
 
+## GitHub Actions CI/CD
+
+本项目已添加基础 CI 工作流：
+
+```text
+.github/workflows/ci.yml
+```
+
+触发方式：
+- push 到任意分支时自动执行。
+- 提交 Pull Request 时自动执行。
+- 在 GitHub Actions 页面手动点击 `Run workflow` 执行。
+
+当前 CI 包含三个 job：
+
+| Job | 作用 |
+| --- | --- |
+| `backend-test` | 使用 JDK 17 执行 `mvn -B test`，验证 Spring Boot 后端编译和测试 |
+| `python-worker-check` | 使用 Python 3.11 执行 `python -m compileall python-worker -q`，检查 Python Worker 语法 |
+| `docker-compose-check` | 执行 `docker compose config`，检查本地开发环境编排文件是否有效 |
+
+当前阶段先做 CI，不直接做 CD 自动部署。原因是 CD 需要额外准备镜像仓库、服务器、部署密钥和环境变量。后续可以继续扩展为：
+- 构建 Spring Boot Docker 镜像。
+- 构建 Python Worker Docker 镜像。
+- 推送镜像到 Docker Hub 或 GitHub Container Registry。
+- 通过 SSH 或 Kubernetes 将新版本部署到服务器。
+
 ## Docker Compose 服务地址
 
 | 服务 | 地址/端口 | 默认账号 | 默认密码 | 说明 |
@@ -447,11 +474,50 @@ rabbitmq:
 
 Python Worker 消费约定：
 
-1. 收到消息后先回调后端或更新任务状态为 `RUNNING`。
-2. 处理成功并上传结果文件后，再确认消息 `ack`，并将任务更新为 `SUCCESS`。
-3. 可恢复异常使用 `nack/reject` 且 `requeue=true`，交给 RabbitMQ 按 `x-delivery-limit` 进入重试或死信。
-4. 不可恢复异常应记录错误原因，并将任务更新为 `FAILED`；如果仍希望进入死信审计，可 `reject(requeue=false)`。
-5. Worker 不应在处理失败但未更新任务状态时直接 `ack`，否则会出现消息已消失但任务仍卡住的问题。
+1. 收到消息后先调用 `POST /api/tasks/{taskId}/claim` 抢占任务。
+2. 只有 `PENDING/RETRYING -> RUNNING` 抢占成功时，Worker 才能下载影像并执行计算。
+3. 如果 claim 返回 `ALREADY_FINISHED`，说明任务已经是 `SUCCESS/FAILED/CANCELED`，Worker 直接 `ack`，不重复计算。
+4. 如果 claim 返回 `ALREADY_RUNNING` 或抢占失败，Worker 使用 `nack/requeue`，交给 RabbitMQ 后续重投。
+5. 处理成功并上传结果文件后，必须回调 `SUCCESS` 成功后才能 `ack`。
+6. 可重试异常不直接标记 `FAILED`，而是回调 `RETRYING` 后 `nack/requeue`。
+7. 超过 RabbitMQ `x-delivery-limit` 后进入 DLQ，由 Java 侧 DLQ 监听器标记最终 `FAILED`。
+8. Python 回调必须解析统一响应 JSON，只有 `code = 200` 才算成功，不能只看 HTTP 200。
+9. Worker 不应在关键回调失败时直接 `ack`，否则会出现结果已上传但任务状态仍卡住的问题。
+
+Worker 抢占接口：
+
+```http
+POST http://localhost:8080/api/tasks/{taskId}/claim
+```
+
+返回示例：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "claimed": true,
+    "action": "CLAIMED",
+    "taskStatus": "RUNNING",
+    "message": "任务抢占成功",
+    "outputObjectKey": "result/NDVI/2026/05/task_1001.tif"
+  }
+}
+```
+
+抢占动作含义：
+
+| action | Worker 行为 |
+| --- | --- |
+| `CLAIMED` | 执行计算 |
+| `ALREADY_FINISHED` | 直接 `ack`，不重复计算 |
+| `ALREADY_RUNNING` | `nack/requeue`，稍后重试 |
+| `CLAIM_REJECTED` | `nack/requeue`，等待下次投递 |
+
+Worker 结果文件幂等：
+
+结果路径基于 `taskId` 固定生成。Worker 抢占成功后，如果发现 `outputObjectKey` 已经存在于 MinIO，说明可能是上次计算已上传结果但 `SUCCESS` 回调前崩溃，此时会跳过重复计算，直接回调 `SUCCESS` 并 `ack`。
 
 Worker 状态回调接口：
 

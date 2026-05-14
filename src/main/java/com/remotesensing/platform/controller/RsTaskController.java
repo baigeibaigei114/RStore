@@ -4,6 +4,7 @@ import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,6 +29,14 @@ public class RsTaskController {
     @PostMapping
     public Result<RsTaskSubmitVO> submit(@Valid @RequestBody RsTaskSubmitDTO submitDTO) {
         return Result.success(taskService.submit(submitDTO));
+    }
+
+    /**
+     * Worker 消费消息前先抢占任务，只有抢占成功才允许执行重计算。
+     */
+    @PostMapping("/{taskId}/claim")
+    public Result<RsTaskClaimVO> claim(@PathVariable Long taskId) {
+        return Result.success(taskService.claim(taskId));
     }
 
     /**

@@ -97,16 +97,27 @@
             END,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
+          AND status = #{currentStatus}
     </update>
 
-    <select id="countUnfinishedByImageId" resultType="long">
+    <update id="claimForRunning">
+        UPDATE rs_task
+        SET status = 'RUNNING',
+            started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+            error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('PENDING', 'RETRYING')
+    </update>
+
+    <select id="countActiveByImageId" resultType="long">
         SELECT COUNT(1)
         FROM rs_task
         WHERE image_id = #{imageId}
           AND status IN ('PENDING', 'RUNNING', 'RETRYING')
     </select>
 
-    <update id="markFailed">
+    <update id="markFailedIfActive">
         UPDATE rs_task
         SET status = 'FAILED',
             error_message = #{errorMessage},
@@ -114,5 +125,6 @@
             finished_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
+          AND status IN ('PENDING', 'RUNNING', 'RETRYING')
     </update>
 </mapper>

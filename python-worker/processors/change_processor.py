@@ -18,6 +18,13 @@ class ChangeDetectionProcessor:
         self._temp_dir = temp_dir
 
     def process(self, message: dict) -> dict:
+        if self._storage_client.object_exists(message["outputBucket"], message["outputObjectKey"]):
+            return {
+                "outputBucket": message["outputBucket"],
+                "outputObjectKey": message["outputObjectKey"],
+                "skippedReason": "output object already exists",
+            }
+
         params = message.get("params") or {}
         before_object_key = params.get("beforeObjectKey")
         after_object_key = params.get("afterObjectKey")

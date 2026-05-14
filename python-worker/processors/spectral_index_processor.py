@@ -17,6 +17,14 @@ class SpectralIndexProcessor:
         self._index_name = index_name
 
     def process_index(self, message: dict, first_band: int, second_band: int, band_names: dict[str, int]) -> dict:
+        if self._storage_client.object_exists(message["outputBucket"], message["outputObjectKey"]):
+            return {
+                "outputBucket": message["outputBucket"],
+                "outputObjectKey": message["outputObjectKey"],
+                "skippedReason": "output object already exists",
+                **band_names,
+            }
+
         work_dir = self._temp_dir / f"{self._index_name.lower()}_{message['taskId']}_{uuid4().hex}"
         work_dir.mkdir(parents=True, exist_ok=True)
 

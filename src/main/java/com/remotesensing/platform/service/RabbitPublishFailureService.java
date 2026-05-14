@@ -26,7 +26,7 @@ public class RabbitPublishFailureService {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("correlationId", correlationData.getId());
         detail.put("cause", cause);
-        taskFailureService.markFailed(taskId, "RabbitMQ broker 未确认任务消息：" + nullToUnknown(cause), detail);
+        taskFailureService.markFailedIfActive(taskId, "RabbitMQ broker 未确认任务消息：" + nullToUnknown(cause), detail);
     }
 
     public void handleReturn(ReturnedMessage returnedMessage) {
@@ -37,7 +37,7 @@ public class RabbitPublishFailureService {
         detail.put("replyCode", returnedMessage.getReplyCode());
         detail.put("replyText", returnedMessage.getReplyText());
         detail.put("headers", returnedMessage.getMessage().getMessageProperties().getHeaders());
-        taskFailureService.markFailed(taskId, "RabbitMQ 任务消息未路由到队列：" + returnedMessage.getReplyText(), detail);
+        taskFailureService.markFailedIfActive(taskId, "RabbitMQ 任务消息未路由到队列：" + returnedMessage.getReplyText(), detail);
     }
 
     private Long extractTaskId(ReturnedMessage returnedMessage) {
