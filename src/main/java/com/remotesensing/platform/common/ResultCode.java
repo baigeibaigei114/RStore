@@ -5,8 +5,8 @@ package com.remotesensing.platform.common;
  */
 public enum ResultCode {
 
-    SUCCESS(200, "success"),
-    FAIL(500, "fail"),
+    SUCCESS(200, "成功"),
+    FAIL(500, "失败"),
     PARAM_ERROR(400, "参数错误");
 
     private final Integer code;

@@ -39,11 +39,13 @@
             task_type,
             task_name,
             status,
+            priority,
             progress,
             retry_count,
             max_retry_count,
             output_bucket,
             output_object_key,
+            params::text AS params,
             error_message,
             submitted_at,
             started_at,
@@ -52,6 +54,63 @@
             updated_at
         FROM rs_task
         WHERE id = #{id}
+    </select>
+
+    <select id="selectDetailById" resultType="com.remotesensing.platform.vo.RsTaskVO">
+        SELECT
+            t.id,
+            t.task_code,
+            t.image_id,
+            i.image_name,
+            t.task_type,
+            t.task_name,
+            t.status,
+            t.progress,
+            t.retry_count,
+            t.max_retry_count,
+            i.minio_bucket AS input_bucket,
+            i.object_key AS input_object_key,
+            t.output_bucket,
+            t.output_object_key,
+            t.params::text AS params,
+            t.error_message,
+            t.submitted_at,
+            t.started_at,
+            t.finished_at,
+            t.created_at,
+            t.updated_at
+        FROM rs_task t
+        LEFT JOIN rs_image i ON i.id = t.image_id
+        WHERE t.id = #{id}
+    </select>
+
+    <select id="selectPage" resultType="com.remotesensing.platform.vo.RsTaskListVO">
+        SELECT
+            t.id,
+            t.task_code,
+            t.image_id,
+            i.image_name,
+            t.task_type,
+            t.task_name,
+            t.status,
+            t.progress,
+            i.minio_bucket AS input_bucket,
+            i.object_key AS input_object_key,
+            t.output_bucket,
+            t.output_object_key,
+            t.error_message,
+            t.submitted_at,
+            t.started_at,
+            t.finished_at
+        FROM rs_task t
+        LEFT JOIN rs_image i ON i.id = t.image_id
+        ORDER BY t.submitted_at DESC, t.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM rs_task
     </select>
 
     <update id="updateOutputObject">

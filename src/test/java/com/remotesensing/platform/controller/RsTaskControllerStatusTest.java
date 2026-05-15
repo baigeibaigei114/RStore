@@ -4,15 +4,22 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
+import com.remotesensing.platform.vo.RsTaskListVO;
+import com.remotesensing.platform.vo.RsTaskLogVO;
+import com.remotesensing.platform.vo.RsTaskVO;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,8 +29,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-
-import static org.mockito.Mockito.when;
 
 @ActiveProfiles("test")
 @WebMvcTest(RsTaskController.class)
@@ -35,6 +40,67 @@ class RsTaskControllerStatusTest {
 
     @MockBean
     private RsTaskService taskService;
+
+    @Test
+    @DisplayName("查询任务详情成功")
+    void getTaskDetailShouldReturnSuccess() throws Exception {
+        RsTaskVO task = new RsTaskVO();
+        task.setId(1L);
+        task.setStatus("SUCCESS");
+        task.setProgress(100);
+        task.setInputObjectKey("raw/2026/05/source.tif");
+        task.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
+        when(taskService.getById(1L)).thenReturn(task);
+
+        mockMvc.perform(get("/api/tasks/{taskId}", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.outputObjectKey").value("result/NDVI/2026/05/task_1.tif"));
+
+        verify(taskService).getById(1L);
+    }
+
+    @Test
+    @DisplayName("分页查询任务列表成功")
+    void pageTasksShouldReturnSuccess() throws Exception {
+        RsTaskListVO task = new RsTaskListVO();
+        task.setId(1L);
+        task.setStatus("RUNNING");
+        task.setProgress(30);
+        when(taskService.page(1, 10)).thenReturn(new PageResult<>(List.of(task), 1, 1, 10));
+
+        mockMvc.perform(get("/api/tasks")
+                        .contextPath("/api")
+                        .param("pageNum", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].status").value("RUNNING"));
+
+        verify(taskService).page(1, 10);
+    }
+
+    @Test
+    @DisplayName("查询任务日志成功")
+    void listTaskLogsShouldReturnSuccess() throws Exception {
+        RsTaskLogVO log = new RsTaskLogVO();
+        log.setId(1L);
+        log.setTaskId(1L);
+        log.setLogLevel("INFO");
+        log.setMessage("任务已开始");
+        when(taskService.listLogs(1L)).thenReturn(List.of(log));
+
+        mockMvc.perform(get("/api/tasks/{taskId}/logs", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data[0].message").value("任务已开始"));
+
+        verify(taskService).listLogs(1L);
+    }
 
     /**
      * 场景：Worker 消费消息前先抢占任务，只有抢占成功才继续计算。

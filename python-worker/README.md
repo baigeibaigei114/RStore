@@ -57,7 +57,7 @@ python scripts\generate_thumbnail.py D:\data\sample.tif D:\data\sample_thumb.png
 ```json
 {
   "success": false,
-  "error": "Failed to parse GeoTIFF metadata: ..."
+  "error": "GeoTIFF 元数据解析失败：..."
 }
 ```
 

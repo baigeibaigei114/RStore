@@ -17,4 +17,7 @@ public class RabbitTaskProperties {
     private String deadLetterQueue;
     private String deadLetterRoutingKey;
     private Integer maxRetryCount = 3;
+    private Integer outboxBatchSize = 20;
+    private Integer outboxRetryDelayMs = 30000;
+    private Integer outboxMaxRetryCount = 5;
 }

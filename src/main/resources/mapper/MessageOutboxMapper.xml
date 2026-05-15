@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.MessageOutboxMapper">
+
+    <resultMap id="MessageOutboxResultMap" type="com.remotesensing.platform.entity.MessageOutbox">
+        <id property="id" column="id"/>
+        <result property="aggregateType" column="aggregate_type"/>
+        <result property="aggregateId" column="aggregate_id"/>
+        <result property="exchangeName" column="exchange_name"/>
+        <result property="routingKey" column="routing_key"/>
+        <result property="payload" column="payload"/>
+        <result property="status" column="status"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="maxRetryCount" column="max_retry_count"/>
+        <result property="nextRetryAt" column="next_retry_at"/>
+        <result property="sentAt" column="sent_at"/>
+        <result property="errorMessage" column="error_message"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.remotesensing.platform.entity.MessageOutbox"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO message_outbox (
+            aggregate_type,
+            aggregate_id,
+            exchange_name,
+            routing_key,
+            payload,
+            status,
+            retry_count,
+            max_retry_count,
+            next_retry_at
+        ) VALUES (
+            #{aggregateType},
+            #{aggregateId},
+            #{exchangeName},
+            #{routingKey},
+            CAST(#{payload} AS jsonb),
+            #{status},
+            #{retryCount},
+            #{maxRetryCount},
+            #{nextRetryAt}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="MessageOutboxResultMap">
+        SELECT
+            id,
+            aggregate_type,
+            aggregate_id,
+            exchange_name,
+            routing_key,
+            payload::text AS payload,
+            status,
+            retry_count,
+            max_retry_count,
+            next_retry_at,
+            sent_at,
+            error_message,
+            created_at,
+            updated_at
+        FROM message_outbox
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByTaskId" resultMap="MessageOutboxResultMap">
+        SELECT
+            id,
+            aggregate_type,
+            aggregate_id,
+            exchange_name,
+            routing_key,
+            payload::text AS payload,
+            status,
+            retry_count,
+            max_retry_count,
+            next_retry_at,
+            sent_at,
+            error_message,
+            created_at,
+            updated_at
+        FROM message_outbox
+        WHERE aggregate_type = 'RS_TASK'
+          AND aggregate_id = #{taskId}
+    </select>
+
+    <select id="selectDueMessages" resultMap="MessageOutboxResultMap">
+        SELECT
+            id,
+            aggregate_type,
+            aggregate_id,
+            exchange_name,
+            routing_key,
+            payload::text AS payload,
+            status,
+            retry_count,
+            max_retry_count,
+            next_retry_at,
+            sent_at,
+            error_message,
+            created_at,
+            updated_at
+        FROM message_outbox
+        WHERE status IN ('PENDING', 'FAILED', 'SENDING')
+          AND retry_count &lt; max_retry_count
+          AND next_retry_at &lt;= #{now}
+        ORDER BY created_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="markPublishAttempt">
+        UPDATE message_outbox
+        SET status = 'SENDING',
+            retry_count = retry_count + 1,
+            next_retry_at = #{nextRetryAt},
+            error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('PENDING', 'FAILED', 'SENDING')
+          AND retry_count &lt; max_retry_count
+          AND next_retry_at &lt;= #{now}
+    </update>
+
+    <update id="markSentByTaskId">
+        UPDATE message_outbox
+        SET status = 'SENT',
+            sent_at = CURRENT_TIMESTAMP,
+            error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE aggregate_type = 'RS_TASK'
+          AND aggregate_id = #{taskId}
+          AND status IN ('PENDING', 'FAILED', 'SENDING')
+    </update>
+
+    <update id="markFailedByTaskId">
+        UPDATE message_outbox
+        SET status = 'FAILED',
+            error_message = #{errorMessage},
+            next_retry_at = #{nextRetryAt},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE aggregate_type = 'RS_TASK'
+          AND aggregate_id = #{taskId}
+          AND status IN ('PENDING', 'SENDING')
+    </update>
+</mapper>

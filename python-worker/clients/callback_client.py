@@ -41,16 +41,16 @@ class CallbackClient:
         try:
             self.update_status(task_id, status, message, extra)
         except (requests.RequestException, CallbackError) as exc:
-            # 当前 Java 端状态回调接口可能尚未实现，Worker 先记录告警而不阻断消息处理框架。
-            print(f"[callback-warning] task_id={task_id} status={status} reason={exc}", flush=True)
+            # 非关键回调失败时只记录告警，避免遮蔽主处理流程中的原始异常。
+            print(f"[callback-warning] 状态回调失败 task_id={task_id} status={status} reason={exc}", flush=True)
 
     def _parse_result(self, response: requests.Response) -> Any:
         response.raise_for_status()
         try:
             result = response.json()
         except ValueError as exc:
-            raise CallbackError(f"callback response is not JSON: {response.text}") from exc
+            raise CallbackError(f"回调响应不是 JSON：{response.text}") from exc
 
         if result.get("code") != 200:
-            raise CallbackError(f"callback rejected: code={result.get('code')} message={result.get('message')}")
+            raise CallbackError(f"回调被后端拒绝：code={result.get('code')} message={result.get('message')}")
         return result.get("data")

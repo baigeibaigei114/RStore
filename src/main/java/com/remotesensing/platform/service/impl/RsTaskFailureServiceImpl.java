@@ -38,7 +38,7 @@ public class RsTaskFailureServiceImpl implements RsTaskFailureService {
         }
 
         RsTask task = taskMapper.selectById(taskId);
-        // The SQL guard prevents fallback paths from overwriting terminal task states.
+        // SQL 条件保护终态任务，避免失败兜底路径覆盖 SUCCESS/CANCELED 等最终状态。
         int updated = taskMapper.markFailedIfActive(taskId, errorMessage);
         if (updated <= 0) {
             return;
@@ -63,7 +63,7 @@ public class RsTaskFailureServiceImpl implements RsTaskFailureService {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
-            return "{\"error\":\"task failure detail serialization failed\"}";
+            return "{\"error\":\"任务失败详情序列化失败\"}";
         }
     }
 }

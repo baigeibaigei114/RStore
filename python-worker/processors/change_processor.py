@@ -22,14 +22,14 @@ class ChangeDetectionProcessor:
             return {
                 "outputBucket": message["outputBucket"],
                 "outputObjectKey": message["outputObjectKey"],
-                "skippedReason": "output object already exists",
+                "skippedReason": "结果对象已存在",
             }
 
         params = message.get("params") or {}
         before_object_key = params.get("beforeObjectKey")
         after_object_key = params.get("afterObjectKey")
         if not before_object_key or not after_object_key:
-            raise ValueError("CHANGE_DETECTION requires params.beforeObjectKey and params.afterObjectKey")
+            raise ValueError("CHANGE_DETECTION 需要 params.beforeObjectKey 和 params.afterObjectKey")
 
         band = int(params.get("band", self.DEFAULT_BAND))
         threshold = float(params.get("threshold", self.DEFAULT_THRESHOLD))
@@ -37,7 +37,7 @@ class ChangeDetectionProcessor:
         before_bucket = params.get("beforeBucket") or input_bucket
         after_bucket = params.get("afterBucket") or input_bucket
         if not before_bucket or not after_bucket:
-            raise ValueError("CHANGE_DETECTION requires inputBucket or params.beforeBucket/params.afterBucket")
+            raise ValueError("CHANGE_DETECTION 需要 inputBucket 或 params.beforeBucket/params.afterBucket")
 
         work_dir = self._temp_dir / f"change_{message['taskId']}_{uuid4().hex}"
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -73,11 +73,11 @@ class ChangeDetectionProcessor:
     def _validate_compatible(self, before_dataset: rasterio.DatasetReader, after_dataset: rasterio.DatasetReader) -> None:
         if before_dataset.width != after_dataset.width or before_dataset.height != after_dataset.height:
             raise ValueError(
-                "before and after GeoTIFF size mismatch: "
+                "前后两期 GeoTIFF 尺寸不一致："
                 f"before={before_dataset.width}x{before_dataset.height}, "
                 f"after={after_dataset.width}x{after_dataset.height}"
             )
         if before_dataset.crs != after_dataset.crs:
-            raise ValueError(f"before and after GeoTIFF CRS mismatch: before={before_dataset.crs}, after={after_dataset.crs}")
+            raise ValueError(f"前后两期 GeoTIFF 坐标系不一致：before={before_dataset.crs}, after={after_dataset.crs}")
         if before_dataset.transform != after_dataset.transform:
-            raise ValueError("before and after GeoTIFF transform mismatch")
+            raise ValueError("前后两期 GeoTIFF 仿射变换不一致")

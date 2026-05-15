@@ -6,7 +6,7 @@ import rasterio
 
 def read_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
     if band_index < 1 or band_index > dataset.count:
-        raise ValueError(f"band index {band_index} out of range, dataset has {dataset.count} bands")
+        raise ValueError(f"波段编号 {band_index} 超出范围，当前影像共有 {dataset.count} 个波段")
     return dataset.read(band_index).astype("float32")
 
 
@@ -32,7 +32,7 @@ def write_single_band_geotiff(reference: rasterio.DatasetReader, output_path: Pa
 
 
 def write_mask_geotiff(reference: rasterio.DatasetReader, output_path: Path, mask: np.ndarray) -> None:
-    # 掩膜只表达是否变化，使用 uint8 可显著减小结果文件体积。
+    # 掩膜只表达是否变化，使用 uint8 可以显著减小结果文件体积。
     profile = reference.profile.copy()
     profile.update(
         driver="GTiff",

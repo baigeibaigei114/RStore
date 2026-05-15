@@ -1,5 +1,9 @@
 package com.remotesensing.platform.service;
 
+import com.remotesensing.platform.config.RabbitTaskProperties;
+import com.remotesensing.platform.entity.MessageOutbox;
+import com.remotesensing.platform.mapper.MessageOutboxMapper;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.amqp.core.ReturnedMessage;
@@ -11,22 +15,36 @@ public class RabbitPublishFailureService {
 
     private static final String TASK_ID_HEADER = "taskId";
 
+    private final MessageOutboxMapper outboxMapper;
     private final RsTaskFailureService taskFailureService;
+    private final RabbitTaskProperties rabbitTaskProperties;
 
-    public RabbitPublishFailureService(RsTaskFailureService taskFailureService) {
+    public RabbitPublishFailureService(MessageOutboxMapper outboxMapper,
+                                       RsTaskFailureService taskFailureService,
+                                       RabbitTaskProperties rabbitTaskProperties) {
+        this.outboxMapper = outboxMapper;
         this.taskFailureService = taskFailureService;
+        this.rabbitTaskProperties = rabbitTaskProperties;
     }
 
     public void handleConfirm(CorrelationData correlationData, boolean ack, String cause) {
-        if (ack || correlationData == null) {
+        if (correlationData == null) {
             return;
         }
 
         Long taskId = parseTaskId(correlationData.getId());
+        if (taskId == null) {
+            return;
+        }
+        if (ack) {
+            outboxMapper.markSentByTaskId(taskId);
+            return;
+        }
+
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("correlationId", correlationData.getId());
         detail.put("cause", cause);
-        taskFailureService.markFailedIfActive(taskId, "RabbitMQ broker 未确认任务消息：" + nullToUnknown(cause), detail);
+        markOutboxFailed(taskId, "RabbitMQ 服务端未确认任务消息：" + nullToUnknown(cause), detail);
     }
 
     public void handleReturn(ReturnedMessage returnedMessage) {
@@ -37,7 +55,21 @@ public class RabbitPublishFailureService {
         detail.put("replyCode", returnedMessage.getReplyCode());
         detail.put("replyText", returnedMessage.getReplyText());
         detail.put("headers", returnedMessage.getMessage().getMessageProperties().getHeaders());
-        taskFailureService.markFailedIfActive(taskId, "RabbitMQ 任务消息未路由到队列：" + returnedMessage.getReplyText(), detail);
+        markOutboxFailed(taskId, "RabbitMQ 任务消息被退回：" + returnedMessage.getReplyText(), detail);
+    }
+
+    private void markOutboxFailed(Long taskId, String errorMessage, Map<String, Object> detail) {
+        if (taskId == null) {
+            return;
+        }
+        OffsetDateTime nextRetryAt = OffsetDateTime.now()
+                .plusNanos(resolveOutboxRetryDelayMs() * 1_000_000L);
+        outboxMapper.markFailedByTaskId(taskId, errorMessage, nextRetryAt);
+
+        MessageOutbox outbox = outboxMapper.selectByTaskId(taskId);
+        if (outbox != null && outbox.getRetryCount() >= outbox.getMaxRetryCount()) {
+            taskFailureService.markFailedIfActive(taskId, errorMessage, detail);
+        }
     }
 
     private Long extractTaskId(ReturnedMessage returnedMessage) {
@@ -60,6 +92,11 @@ public class RabbitPublishFailureService {
     }
 
     private String nullToUnknown(String value) {
-        return value == null || value.isBlank() ? "unknown" : value;
+        return value == null || value.isBlank() ? "未知原因" : value;
+    }
+
+    private int resolveOutboxRetryDelayMs() {
+        Integer value = rabbitTaskProperties.getOutboxRetryDelayMs();
+        return value == null || value < 1 ? 30000 : value;
     }
 }

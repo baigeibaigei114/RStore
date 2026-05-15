@@ -34,7 +34,7 @@ def output_shape(width, height, max_size):
 def generate_thumbnail(input_path, output_path, max_size):
     src_path = Path(input_path)
     if not src_path.exists():
-        raise FileNotFoundError(f"GeoTIFF file does not exist: {src_path}")
+        raise FileNotFoundError(f"GeoTIFF 文件不存在：{src_path}")
 
     dst_path = Path(output_path)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,10 +79,10 @@ def response(success, data=None, error=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate GeoTIFF PNG thumbnail.")
-    parser.add_argument("input", help="Local GeoTIFF file path.")
-    parser.add_argument("output", help="Output PNG file path.")
-    parser.add_argument("--max-size", type=int, default=512, help="Max thumbnail width or height.")
+    parser = argparse.ArgumentParser(description="生成 GeoTIFF PNG 缩略图。")
+    parser.add_argument("input", help="本地 GeoTIFF 文件路径。")
+    parser.add_argument("output", help="输出 PNG 文件路径。")
+    parser.add_argument("--max-size", type=int, default=512, help="缩略图最大宽度或高度。")
     args = parser.parse_args()
 
     try:
@@ -90,7 +90,7 @@ def main():
         print(json.dumps(response(True, data=data), ensure_ascii=False))
         return 0
     except Exception as exc:
-        print(json.dumps(response(False, error=f"Failed to generate thumbnail: {exc}"), ensure_ascii=False))
+        print(json.dumps(response(False, error=f"缩略图生成失败：{exc}"), ensure_ascii=False))
         return 1
 
 

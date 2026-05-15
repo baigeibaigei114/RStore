@@ -10,12 +10,12 @@ public enum ThumbnailStatus {
 
     public static ThumbnailStatus fromDb(String status) {
         if (status == null || status.isBlank()) {
-            throw new IllegalArgumentException("Thumbnail status must not be blank");
+            throw new IllegalArgumentException("缩略图状态不能为空");
         }
         try {
             return ThumbnailStatus.valueOf(status.trim().toUpperCase());
         } catch (RuntimeException exception) {
-            throw new IllegalArgumentException("Invalid thumbnail status: " + status, exception);
+            throw new IllegalArgumentException("非法缩略图状态：" + status, exception);
         }
     }
 

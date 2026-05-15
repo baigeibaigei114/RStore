@@ -12,12 +12,12 @@ public enum ImageStatus {
 
     public static ImageStatus fromDb(String status) {
         if (status == null || status.isBlank()) {
-            throw new IllegalArgumentException("Image status must not be blank");
+            throw new IllegalArgumentException("影像状态不能为空");
         }
         try {
             return ImageStatus.valueOf(status.trim().toUpperCase());
         } catch (RuntimeException exception) {
-            throw new IllegalArgumentException("Invalid image status: " + status, exception);
+            throw new IllegalArgumentException("非法影像状态：" + status, exception);
         }
     }
 

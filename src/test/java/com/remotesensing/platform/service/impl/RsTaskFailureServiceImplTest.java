@@ -38,7 +38,7 @@ class RsTaskFailureServiceImplTest {
     }
 
     @Test
-    @DisplayName("failure fallback does not overwrite SUCCESS task")
+    @DisplayName("失败兜底不覆盖 SUCCESS 任务")
     void markFailedIfActiveShouldNotOverwriteSuccessTask() {
         RsTask task = new RsTask();
         task.setId(1L);
@@ -46,11 +46,11 @@ class RsTaskFailureServiceImplTest {
         task.setStatus(TaskStatus.SUCCESS.dbValue());
 
         when(taskMapper.selectById(1L)).thenReturn(task);
-        when(taskMapper.markFailedIfActive(1L, "publish failed")).thenReturn(0);
+        when(taskMapper.markFailedIfActive(1L, "投递失败")).thenReturn(0);
 
-        service.markFailedIfActive(1L, "publish failed", Map.of("source", "test"));
+        service.markFailedIfActive(1L, "投递失败", Map.of("source", "test"));
 
-        verify(taskMapper).markFailedIfActive(1L, "publish failed");
+        verify(taskMapper).markFailedIfActive(1L, "投递失败");
         verify(taskLogMapper, never()).insert(org.mockito.ArgumentMatchers.any());
         verify(imageMapper, never()).markReadyIfProcessing(org.mockito.ArgumentMatchers.anyLong());
     }

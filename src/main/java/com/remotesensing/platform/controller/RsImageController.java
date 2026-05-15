@@ -44,7 +44,7 @@ public class RsImageController {
     }
 
     /**
-     * GeoTIFF 上传入口：文件本体进入 MinIO，元数据入库；缩略图由后台线程异步生成。
+     * GeoTIFF 上传入口：文件本体进入 MinIO，元数据入库，缩略图由后台线程异步生成。
      */
     @PostMapping("/upload")
     public Result<RsImageVO> upload(@RequestParam("file") MultipartFile file,

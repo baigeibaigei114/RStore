@@ -21,7 +21,7 @@ class SpectralIndexProcessor:
             return {
                 "outputBucket": message["outputBucket"],
                 "outputObjectKey": message["outputObjectKey"],
-                "skippedReason": "output object already exists",
+                "skippedReason": "结果对象已存在",
                 **band_names,
             }
 

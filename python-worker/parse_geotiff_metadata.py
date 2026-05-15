@@ -29,9 +29,9 @@ def bounds_to_dict(bounds):
 def parse_metadata(file_path):
     path = Path(file_path)
     if not path.exists():
-        raise FileNotFoundError(f"GeoTIFF file does not exist: {path}")
+        raise FileNotFoundError(f"GeoTIFF 文件不存在：{path}")
     if not path.is_file():
-        raise ValueError(f"Input path is not a file: {path}")
+        raise ValueError(f"输入路径不是文件：{path}")
 
     with rasterio.open(path) as dataset:
         metadata = {
@@ -66,8 +66,8 @@ def error_response(message):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse GeoTIFF metadata with rasterio.")
-    parser.add_argument("file", help="Local GeoTIFF file path.")
+    parser = argparse.ArgumentParser(description="使用 rasterio 解析 GeoTIFF 元数据。")
+    parser.add_argument("file", help="本地 GeoTIFF 文件路径。")
     args = parser.parse_args()
 
     try:
@@ -75,7 +75,7 @@ def main():
         print(json.dumps(success_response(metadata), ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
-        print(json.dumps(error_response(f"Failed to parse GeoTIFF metadata: {exc}"), ensure_ascii=False, indent=2))
+        print(json.dumps(error_response(f"GeoTIFF 元数据解析失败：{exc}"), ensure_ascii=False, indent=2))
         return 1
 
 

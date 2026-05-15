@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class TaskStatusTest {
 
     @Test
-    @DisplayName("fromDb rejects blank and unknown values")
+    @DisplayName("fromDb 拒绝空值和未知状态")
     void fromDbShouldRejectInvalidValue() {
         assertThatThrownBy(() -> TaskStatus.fromDb(null))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -20,7 +20,7 @@ class TaskStatusTest {
     }
 
     @Test
-    @DisplayName("terminal task status cannot regress")
+    @DisplayName("终态任务状态不能回退")
     void terminalStatusShouldNotTransitBackToRunning() {
         assertThat(TaskStatus.SUCCESS.canTransitTo(TaskStatus.SUCCESS)).isTrue();
         assertThat(TaskStatus.SUCCESS.canTransitTo(TaskStatus.RUNNING)).isFalse();

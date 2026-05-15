@@ -13,12 +13,12 @@ public enum TaskStatus {
 
     public static TaskStatus fromDb(String status) {
         if (status == null || status.isBlank()) {
-            throw new IllegalArgumentException("Task status must not be blank");
+            throw new IllegalArgumentException("任务状态不能为空");
         }
         try {
             return TaskStatus.valueOf(status.trim().toUpperCase());
         } catch (RuntimeException exception) {
-            throw new IllegalArgumentException("Invalid task status: " + status, exception);
+            throw new IllegalArgumentException("非法任务状态：" + status, exception);
         }
     }
 

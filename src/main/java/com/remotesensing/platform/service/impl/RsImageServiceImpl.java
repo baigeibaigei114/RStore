@@ -14,8 +14,8 @@ import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
-import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.ThumbnailAsyncService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
@@ -239,7 +239,7 @@ public class RsImageServiceImpl implements RsImageService {
     }
 
     private void insertImageInTransaction(RsImage image) {
-        // 文件处理已完成后才开启短事务，只覆盖影像元数据入库这一步。
+        // 文件处理完成后才开启短事务，只覆盖影像元数据入库这一步。
         transactionTemplate.executeWithoutResult(status -> {
             imageMapper.insert(image);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -478,7 +478,7 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String toJson(GeoTiffMetadataVO metadata) {
         try {
-            // 保留完整元数据，避免后续新增字段时需要立即改表。
+            // 保留完整元数据，避免后续新增字段时立刻改表。
             return objectMapper.writeValueAsString(metadata);
         } catch (JsonProcessingException exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "GeoTIFF 元数据 JSON 序列化失败");

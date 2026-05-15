@@ -18,4 +18,17 @@
             CAST(NULLIF(#{detail}, '') AS jsonb)
         )
     </insert>
+
+    <select id="selectByTaskIdOrderByCreatedAt" resultType="com.remotesensing.platform.vo.RsTaskLogVO">
+        SELECT
+            id,
+            task_id,
+            log_level,
+            message,
+            detail::text AS detail,
+            created_at
+        FROM rs_task_log
+        WHERE task_id = #{taskId}
+        ORDER BY created_at ASC, id ASC
+    </select>
 </mapper>

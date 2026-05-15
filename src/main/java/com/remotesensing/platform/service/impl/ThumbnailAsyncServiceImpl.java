@@ -52,8 +52,8 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             thumbnailTaskExecutor.execute(() -> generateThumbnailSafely(imageId));
         } catch (RejectedExecutionException exception) {
-            // A full queue is a scheduling issue; keep PENDING for the retry scheduler.
-            log.warn("Thumbnail task rejected, keep PENDING for retry, imageId={}, reason={}", imageId, exception.getMessage());
+            // 队列满属于调度失败，保持 PENDING 等待定时补偿重新提交。
+            log.warn("缩略图任务被线程池拒绝，保持 PENDING 等待重试，imageId={}, reason={}", imageId, exception.getMessage());
         }
     }
 
@@ -63,17 +63,17 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             RsImage image = imageMapper.selectById(imageId);
             if (image == null) {
-                updateThumbnailStatus(imageId, null, ThumbnailStatus.SKIPPED, "Image does not exist or has been deleted");
-                log.info("Skip thumbnail because image is missing or deleted, imageId={}", imageId);
+                updateThumbnailStatus(imageId, null, ThumbnailStatus.SKIPPED, "影像不存在或已删除");
+                log.info("影像不存在或已删除，跳过缩略图生成，imageId={}", imageId);
                 return;
             }
             if (image.getThumbnailObjectKey() != null && !image.getThumbnailObjectKey().isBlank()) {
                 updateThumbnailStatus(imageId, null, ThumbnailStatus.SUCCESS, null);
-                log.info("Skip duplicate thumbnail generation, imageId={}, objectKey={}", imageId, image.getThumbnailObjectKey());
+                log.info("缩略图已存在，跳过重复生成，imageId={}, objectKey={}", imageId, image.getThumbnailObjectKey());
                 return;
             }
             if (updateThumbnailStatus(imageId, ThumbnailStatus.PENDING, ThumbnailStatus.RUNNING, null) <= 0) {
-                log.info("Thumbnail task was not claimed from PENDING, imageId={}", imageId);
+                log.info("缩略图任务未从 PENDING 抢占成功，imageId={}", imageId);
                 return;
             }
 
@@ -81,21 +81,21 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
             Path rawFile = tempDir.resolve("source.tif");
             thumbnailObjectKey = buildThumbnailObjectKey(image);
 
-            // Async generation downloads its own temp file so the upload request can clean up immediately.
+            // 异步生成使用独立临时文件，上传请求可以及时清理自己的临时目录。
             minioService.downloadObject(image.getObjectKey(), rawFile);
             geoTiffThumbnailService.generateAndUpload(rawFile, thumbnailObjectKey);
 
             int updated = updateThumbnailInTransaction(imageId, thumbnailObjectKey);
             if (updated <= 0) {
                 deleteObjectQuietly(thumbnailObjectKey);
-                log.warn("Thumbnail generated but image cannot be updated, cleaned object, imageId={}, objectKey={}", imageId, thumbnailObjectKey);
+                log.warn("缩略图已生成但影像记录回写失败，已补偿删除对象，imageId={}, objectKey={}", imageId, thumbnailObjectKey);
                 return;
             }
-            log.info("Thumbnail generated, imageId={}, objectKey={}", imageId, thumbnailObjectKey);
+            log.info("缩略图生成成功，imageId={}, objectKey={}", imageId, thumbnailObjectKey);
         } catch (Exception exception) {
             deleteObjectQuietly(thumbnailObjectKey);
             updateThumbnailStatus(imageId, ThumbnailStatus.RUNNING, ThumbnailStatus.FAILED, truncate(exception.getMessage()));
-            log.warn("Thumbnail generation failed, imageId={}, reason={}", imageId, exception.getMessage(), exception);
+            log.warn("缩略图生成失败，imageId={}, reason={}", imageId, exception.getMessage(), exception);
         } finally {
             deleteDirectoryQuietly(tempDir);
         }
@@ -134,7 +134,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             minioService.deleteObject(objectKey);
         } catch (RuntimeException exception) {
-            log.warn("Thumbnail compensation delete failed, objectKey={}, reason={}", objectKey, exception.getMessage());
+            log.warn("缩略图补偿删除失败，objectKey={}, reason={}", objectKey, exception.getMessage());
         }
     }
 
@@ -146,7 +146,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
             paths.sorted(Comparator.reverseOrder())
                     .forEach(this::deletePathQuietly);
         } catch (IOException exception) {
-            log.warn("Thumbnail temp directory cleanup failed, path={}, reason={}", dir, exception.getMessage());
+            log.warn("缩略图临时目录清理失败，path={}, reason={}", dir, exception.getMessage());
         }
     }
 
@@ -154,7 +154,7 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
         try {
             Files.deleteIfExists(path);
         } catch (IOException exception) {
-            log.warn("Thumbnail temp file cleanup failed, path={}, reason={}", path, exception.getMessage());
+            log.warn("缩略图临时文件清理失败，path={}, reason={}", path, exception.getMessage());
         }
     }
 

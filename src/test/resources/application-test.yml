@@ -45,6 +45,9 @@ rabbitmq:
     dead-letter-queue: rs.task.dlx.queue
     dead-letter-routing-key: rs.task.dlx
     max-retry-count: 3
+    outbox-batch-size: 5
+    outbox-retry-delay-ms: 1000
+    outbox-max-retry-count: 3
 
 minio:
   endpoint: http://127.0.0.1:19000

@@ -7,23 +7,28 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.TaskStatus;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.config.RabbitTaskProperties;
+import com.remotesensing.platform.dto.RemoteSensingTaskMessage;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
+import com.remotesensing.platform.dto.RsTaskSubmitDTO;
+import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.entity.RsTask;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
-import com.remotesensing.platform.service.RsTaskFailureService;
+import com.remotesensing.platform.service.MessageOutboxService;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.invocation.InvocationOnMock;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -41,16 +46,13 @@ class RsTaskServiceImplTest {
     private RsTaskLogMapper taskLogMapper;
 
     @Mock
-    private RabbitTemplate rabbitTemplate;
-
-    @Mock
     private RabbitTaskProperties rabbitTaskProperties;
 
     @Mock
     private MinioProperties minioProperties;
 
     @Mock
-    private RsTaskFailureService taskFailureService;
+    private MessageOutboxService messageOutboxService;
 
     @Mock
     private PlatformTransactionManager transactionManager;
@@ -65,17 +67,43 @@ class RsTaskServiceImplTest {
                 imageMapper,
                 taskMapper,
                 taskLogMapper,
-                rabbitTemplate,
                 rabbitTaskProperties,
                 minioProperties,
                 new ObjectMapper(),
-                taskFailureService,
+                messageOutboxService,
                 transactionManager
         );
     }
 
     @Test
-    @DisplayName("Worker status callback uses current status guard")
+    @DisplayName("提交任务时创建 Outbox 消息并尝试立即投递")
+    void submitShouldCreateOutboxAndPublishAfterCommit() {
+        RsImage image = new RsImage();
+        image.setId(10L);
+        image.setStatus(ImageStatus.READY.dbValue());
+        image.setMinioBucket("remote-sensing-images");
+        image.setObjectKey("raw/2026/05/source.tif");
+
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setParams(Map.of("redBand", 3, "nirBand", 4));
+
+        when(imageMapper.selectById(10L)).thenReturn(image);
+        when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
+        when(rabbitTaskProperties.getMaxRetryCount()).thenReturn(3);
+        when(minioProperties.getBucketName()).thenReturn("remote-sensing-images");
+        when(messageOutboxService.createTaskMessage(any(), any())).thenReturn(99L);
+        when(taskMapper.insert(any(RsTask.class))).thenAnswer(this::fillTaskId);
+
+        service.submit(dto);
+
+        verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), any(RemoteSensingTaskMessage.class));
+        verify(messageOutboxService).publishById(99L);
+    }
+
+    @Test
+    @DisplayName("Worker 状态回调使用当前状态保护")
     void updateStatusShouldRejectConcurrentOverwrite() {
         RsTask task = new RsTask();
         task.setId(1L);
@@ -100,9 +128,15 @@ class RsTaskServiceImplTest {
 
         assertThatThrownBy(() -> service.updateStatus(1L, dto))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("concurrently");
+                .hasMessageContaining("并发更新");
 
         verify(taskLogMapper, never()).insert(any());
         verify(imageMapper, never()).markReadyIfProcessing(10L);
+    }
+
+    private int fillTaskId(InvocationOnMock invocation) {
+        RsTask task = invocation.getArgument(0);
+        task.setId(1L);
+        return 1;
     }
 }

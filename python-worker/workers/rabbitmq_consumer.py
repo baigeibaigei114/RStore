@@ -28,7 +28,7 @@ class RabbitMqConsumer:
         channel.basic_qos(prefetch_count=self._settings.prefetch_count)
         channel.basic_consume(queue=self._settings.queue, on_message_callback=self._handle_message)
 
-        print(f"[worker] consuming queue={self._settings.queue}", flush=True)
+        print(f"[worker] 开始消费队列 queue={self._settings.queue}", flush=True)
         channel.start_consuming()
 
     def _handle_message(self, channel, method, properties, body: bytes) -> None:
@@ -39,30 +39,30 @@ class RabbitMqConsumer:
             task_type = str(message["taskType"])
             processor = self._processors.get(task_type)
             if processor is None:
-                raise ValueError(f"unsupported taskType: {task_type}")
+                raise ValueError(f"不支持的任务类型：{task_type}")
 
             claim_result = self._callback_client.claim_task(task_id)
             action = claim_result.get("action")
             if action == "ALREADY_FINISHED":
                 channel.basic_ack(delivery_tag=method.delivery_tag)
-                print(f"[worker] skip finished task task_id={task_id} status={claim_result.get('taskStatus')}", flush=True)
+                print(f"[worker] 任务已结束，跳过重复消息 task_id={task_id} status={claim_result.get('taskStatus')}", flush=True)
                 return
             if action != "CLAIMED":
-                self._requeue_or_reject(channel, method.delivery_tag, task_id, f"claim action={action}")
+                self._requeue_or_reject(channel, method.delivery_tag, task_id, f"任务抢占结果为 {action}")
                 return
 
             result = processor.process(message)
-            # 只有结果文件已经上传并完成回调后才 ack，保证消息确认与业务成功尽量同向。
+            # 只有结果文件已上传且 SUCCESS 回调成功后才 ack，尽量让消息确认与业务成功同向。
             self._callback_client.update_status(task_id, "SUCCESS", extra=result)
             channel.basic_ack(delivery_tag=method.delivery_tag)
-            print(f"[worker] task completed task_id={task_id} task_type={task_type}", flush=True)
+            print(f"[worker] 任务处理完成 task_id={task_id} task_type={task_type}", flush=True)
         except Exception as exc:
             task_id = self._extract_task_id(message)
             if task_id is not None and self._settings.requeue_on_error:
                 self._callback_client.safe_update_status(task_id, "RETRYING", message=str(exc))
 
             self._requeue_or_reject(channel, method.delivery_tag, task_id, str(exc))
-            print(f"[worker-error] task_id={task_id} reason={exc}", flush=True)
+            print(f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}", flush=True)
 
     def _requeue_or_reject(self, channel, delivery_tag: int, task_id: int | None, reason: str) -> None:
         if self._settings.requeue_on_error:

@@ -1,6 +1,9 @@
 package com.remotesensing.platform.mapper;
 
 import com.remotesensing.platform.entity.RsTask;
+import com.remotesensing.platform.vo.RsTaskListVO;
+import com.remotesensing.platform.vo.RsTaskVO;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -13,6 +16,12 @@ public interface RsTaskMapper {
     int insert(RsTask task);
 
     RsTask selectById(@Param("id") Long id);
+
+    RsTaskVO selectDetailById(@Param("id") Long id);
+
+    List<RsTaskListVO> selectPage(@Param("offset") int offset, @Param("pageSize") int pageSize);
+
+    long count();
 
     /**
      * 输出路径依赖 taskId，因此作为任务创建后的独立回写步骤。

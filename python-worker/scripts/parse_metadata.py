@@ -40,9 +40,9 @@ def bounds_tuple_to_dict(bounds):
 def parse_metadata(file_path):
     path = Path(file_path)
     if not path.exists():
-        raise FileNotFoundError(f"GeoTIFF file does not exist: {path}")
+        raise FileNotFoundError(f"GeoTIFF 文件不存在：{path}")
     if not path.is_file():
-        raise ValueError(f"Input path is not a file: {path}")
+        raise ValueError(f"输入路径不是文件：{path}")
 
     with rasterio.open(path) as dataset:
         raw_bounds = dataset.bounds
@@ -58,7 +58,7 @@ def parse_metadata(file_path):
             "bandCount": dataset.count,
             "crs": dataset.crs.to_string() if dataset.crs else None,
             "originalBounds": bounds_to_dict(raw_bounds) if dataset.crs else None,
-            # 后端的 footprint 字段固定为 geometry(Polygon, 4326)，这里统一输出 WGS84 范围。
+            # 后端 footprint 字段固定为 geometry(Polygon, 4326)，这里统一输出 WGS84 范围。
             "bounds": bounds_tuple_to_dict(wgs84_bounds) if wgs84_bounds else None,
             "boundsCrs": "EPSG:4326" if wgs84_bounds else None,
             "transform": transform_to_list(dataset.transform),
@@ -79,15 +79,15 @@ def response(success, data=None, error=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse GeoTIFF metadata with rasterio.")
-    parser.add_argument("file", help="Local GeoTIFF file path.")
+    parser = argparse.ArgumentParser(description="使用 rasterio 解析 GeoTIFF 元数据。")
+    parser.add_argument("file", help="本地 GeoTIFF 文件路径。")
     args = parser.parse_args()
 
     try:
         print(json.dumps(response(True, data=parse_metadata(args.file)), ensure_ascii=False))
         return 0
     except Exception as exc:
-        print(json.dumps(response(False, error=f"Failed to parse GeoTIFF metadata: {exc}"), ensure_ascii=False))
+        print(json.dumps(response(False, error=f"GeoTIFF 元数据解析失败：{exc}"), ensure_ascii=False))
         return 1
 
 

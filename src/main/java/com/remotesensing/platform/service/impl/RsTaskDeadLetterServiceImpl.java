@@ -23,7 +23,7 @@ public class RsTaskDeadLetterServiceImpl implements RsTaskDeadLetterService {
             return;
         }
 
-        // 消息进入 DLQ 说明 RabbitMQ 已经放弃主队列重试，业务任务也应进入最终失败态。
+        // 消息进入 DLQ 说明 RabbitMQ 已放弃主队列重试，业务任务也应进入最终失败态。
         taskFailureService.markFailedIfActive(
                 taskMessage.getTaskId(),
                 "任务消息进入死信队列",
