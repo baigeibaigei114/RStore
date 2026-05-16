@@ -61,6 +61,12 @@
             <version>8.5.12</version>
         </dependency>
 
+        <!-- 仅使用 BCrypt 做密码哈希校验，不接入 Spring Security 过滤链。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
         <!-- Lombok 用于减少 getter、setter、构造方法等样板代码。 -->
         <dependency>
             <groupId>org.projectlombok</groupId>

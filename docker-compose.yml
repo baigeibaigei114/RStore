@@ -75,6 +75,77 @@ services:
       postgres:
         condition: service_healthy
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rs-backend
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rs_image_asset
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 1234
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: remote-sensing-images
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_USERNAME: admin
+      GEOSERVER_PASSWORD: geoserver
+      GEOSERVER_SHARED_DATA_LOCAL_DIR: /app/data/geoserver-raster
+      GEOSERVER_SHARED_DATA_GEOSERVER_DIR: /opt/geoserver/raster-data
+      PYTHON_WORKER_PYTHON_EXECUTABLE: /opt/rs-python/bin/python
+      PYTHON_WORKER_PARSE_METADATA_SCRIPT: /app/python-worker/scripts/parse_metadata.py
+      PYTHON_WORKER_THUMBNAIL_SCRIPT: /app/python-worker/scripts/generate_thumbnail.py
+      APP_AUTH_JWT_SECRET: dev-secret-change-me
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/geoserver-raster:/app/data/geoserver-raster
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      redis:
+        condition: service_started
+      geoserver:
+        condition: service_started
+
+  python-worker:
+    build:
+      context: ./python-worker
+      dockerfile: Dockerfile
+    container_name: rs-python-worker
+    restart: unless-stopped
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+      RABBITMQ_QUEUE: rs.task.queue
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      BACKEND_BASE_URL: http://backend:8080
+      WORKER_TEMP_DIR: /tmp/rs-worker
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      backend:
+        condition: service_started
+
 volumes:
   postgres_data:
   rabbitmq_data:

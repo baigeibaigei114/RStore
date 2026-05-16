@@ -41,6 +41,11 @@ spring:
       simple:
         acknowledge-mode: manual
 
+app:
+  auth:
+    jwt-secret: dev-secret-change-me
+    token-expire-minutes: 1440
+
 rabbitmq:
   remote-sensing-task:
     exchange: rs.task.exchange

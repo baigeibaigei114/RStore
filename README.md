@@ -56,13 +56,15 @@ src/main/java/com/remotesensing/platform
 
 ## 本地开发环境启动
 
-### 1. 启动基础依赖服务
+### 1. 使用 Docker Compose 启动完整环境
 
 项目根目录下执行：
 
 ```powershell
-docker compose up -d
+docker compose up -d --build
 ```
+
+该命令会启动 PostgreSQL/PostGIS、RabbitMQ、MinIO、Redis、GeoServer、Spring Boot 后端和 Python Worker。后端容器内已经安装 Python、GDAL、rasterio，并包含 `python-worker/scripts` 下的元数据解析和缩略图脚本，保证上传链路在容器内也能正常执行。
 
 停止服务：
 
@@ -76,15 +78,21 @@ docker compose down
 docker compose down -v
 ```
 
-### 2. 启动 Spring Boot 后端
+### 2. 本地方式启动 Spring Boot 后端
 
-确认已安装 JDK 17 和 Maven，然后执行：
+如果希望在 IDE 或 Maven 中直接运行后端，可以只启动依赖服务：
+
+```powershell
+docker compose up -d postgres rabbitmq minio redis geoserver
+```
+
+确认已安装 JDK 17、Maven，以及 Python 3.11 和 `python-worker/requirements.txt` 中的依赖，然后执行：
 
 ```powershell
 mvn spring-boot:run
 ```
 
-当前 Python 脚本路径使用项目内相对路径配置，请在项目根目录启动后端；后续 Docker 化时建议改为绝对路径配置或独立 Python Worker 容器。
+本地方式仍使用项目内相对脚本路径，请在项目根目录启动后端。后续如果把元数据解析和缩略图也迁移到 Worker，Spring Boot 容器就可以进一步简化为纯 Java 镜像。
 
 后端默认访问地址：
 
@@ -119,9 +127,8 @@ mvn test
 | `python-worker-check` | 使用 Python 3.11 执行 `python -m compileall python-worker -q`，检查 Python Worker 语法 |
 | `docker-compose-check` | 执行 `docker compose config`，检查本地开发环境编排文件是否有效 |
 
-当前阶段先做 CI，不直接做 CD 自动部署。原因是 CD 需要额外准备镜像仓库、服务器、部署密钥和环境变量。后续可以继续扩展为：
-- 构建 Spring Boot Docker 镜像。
-- 构建 Python Worker Docker 镜像。
+当前阶段先做 CI，不直接做 CD 自动部署。项目已经提供 Spring Boot 后端镜像和 Python Worker 镜像的本地构建配置，后续可以继续扩展为：
+- 在 CI 中构建并缓存 Spring Boot / Python Worker 镜像。
 - 推送镜像到 Docker Hub 或 GitHub Container Registry。
 - 通过 SSH 或 Kubernetes 将新版本部署到服务器。
 
@@ -129,7 +136,9 @@ mvn test
 
 | 服务 | 地址/端口 | 默认账号 | 默认密码 | 说明 |
 | --- | --- | --- | --- | --- |
-| PostgreSQL/PostGIS | `localhost:5432` | `postgres` | `postgres` | 数据库名：`rs_image_asset` |
+| Spring Boot 后端 | `http://localhost:8080/api` | `admin` | `admin123` | 后端 REST API |
+| Python Worker | 容器内部运行 | 无 | 无 | 消费 RabbitMQ 遥感任务并回调后端 |
+| PostgreSQL/PostGIS | `localhost:5433` | `postgres` | `1234` | 数据库名：`rs_image_asset` |
 | RabbitMQ | `localhost:5672` | `guest` | `guest` | AMQP 连接端口 |
 | RabbitMQ 管理控制台 | `http://localhost:15672` | `guest` | `guest` | 队列、交换机和连接管理 |
 | MinIO API | `http://localhost:9000` | `minioadmin` | `minioadmin` | 对象存储 API |
@@ -576,28 +585,39 @@ psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260509_tas
 
 ## 当前已完成
 
-- 搭建 Maven + Spring Boot 3 后端项目基础结构。
-- 使用 Java 17 作为项目开发版本。
-- 建立 `config`、`controller`、`service`、`service.impl`、`entity`、`dto`、`vo`、`mapper`、`common`、`exception` 分层包结构。
-- 添加统一接口返回结构 `Result<T>`。
-- 添加统一响应码 `ResultCode`。
-- 添加业务异常 `BusinessException`。
-- 添加全局异常处理器 `GlobalExceptionHandler`。
-- 添加基础 `application.yml` 配置结构。
-- 添加 Docker Compose 本地开发环境，包含 PostgreSQL/PostGIS、RabbitMQ、MinIO、Redis、GeoServer。
-- 添加 PostGIS 初始化脚本。
+- 完成 Maven + Spring Boot 3 + Java 17 后端基础工程，采用 controller、service、mapper、entity、dto、vo、config、common、exception 分层结构。
+- 完成统一返回结构 `Result<T>`、统一响应码、业务异常和全局异常处理。
+- 完成本地 Docker Compose 开发环境，包含 PostgreSQL/PostGIS、RabbitMQ、Redis、MinIO、GeoServer、Spring Boot 后端和 Python Worker。
+- 完成 PostgreSQL/PostGIS 第一版表结构，覆盖影像资产、处理任务、任务日志、结果文件、行政区和 Outbox 可靠消息表。
+- 完成影像资产基础模块，支持新增、详情、分页、删除、组合检索和行政区空间范围检索。
+- 完成 GeoTIFF 上传链路，支持 MinIO 对象存储、rasterio 元数据解析、EPSG:4326 footprint 写入、缩略图异步生成和预签名 URL 访问。
+- 完成第一版最小登录和权限模型，支持 `Authorization: Bearer <token>` 识别当前用户，并保留 `X-User-Id` 开发阶段兼容能力。
+- 完成影像可见性修改接口，查询、任务提交、任务详情、任务日志、结果文件访问和 GeoServer 手动发布均已接入基础权限校验。
+- 完成 RabbitMQ 遥感任务提交链路，支持 NDVI、NDWI、CHANGE_DETECTION 消息模型和任务状态机。
+- 完成 RabbitMQ 可靠投递增强，支持 publisher confirm/return、死信队列、失败兜底、Worker claim 幂等抢占和简化版 Outbox 补偿投递。
+- 完成 Python Worker 基础框架，支持 RabbitMQ 消费、MinIO 下载/上传、Spring Boot 状态回调。
+- 完成 Spring Boot 后端和 Python Worker 容器化；后端镜像短期内内置 Python、GDAL、rasterio 和上传链路脚本，保证 GeoTIFF 元数据解析与缩略图生成可在容器内运行。
+- 完成 Python Worker NDVI、NDWI 和简化变化检测计算逻辑，并复用公共栅格处理工具。
+- 完成任务查询接口，支持任务详情、分页列表和任务日志升序查询。
+- 完成 GeoServer REST API 接入，支持 workspace 创建、coverage store 创建、任务结果 GeoTIFF 发布和异步发布状态记录。
+- 完成 GeoServer 结果发布可靠性优化，使用共享挂载目录替代 MinIO 预签名 URL 作为图层数据源，并增加 REST 超时、发布幂等和结果文件唯一约束。
+- 完成 GitHub Actions 基础 CI，覆盖后端测试、Python Worker 语法检查和 Docker Compose 配置检查。
+- 已补充多轮关键路径单元测试，覆盖上传、任务状态流转、Outbox、权限模型和 GeoServer 发布权限。
 
 ## 后续计划
 
-- 接入 PostgreSQL/PostGIS，设计影像资产元数据表结构。
-- 添加影像资产管理接口，包括新增、查询、分页、详情和删除。
-- 对接 MinIO，实现遥感影像文件上传与下载。
-- 添加 RabbitMQ 异步任务队列，用于影像处理和智能解译任务调度。
-- 接入 Redis，缓存任务状态和高频查询结果。
-- 对接 GeoServer，实现影像图层和解译结果图层发布。
-- 接入 Elasticsearch，实现影像资产和解译结果检索。
-- 预留 Python GDAL/Rasterio 处理服务调用能力。
-- 添加接口文档、单元测试和基础权限控制。
+- 接入真正的认证体系，将当前 `CurrentUserContext` 从请求头方案替换为 Spring Security + JWT 或统一网关认证。
+- 扩展权限模型，支持组织、项目空间、共享授权、角色权限和 GeoServer 图层访问控制。
+- 增加结果文件管理接口，支持结果文件列表、详情、发布状态查询、人工重试发布和可见性调整。
+- 增加任务取消、人工重试、死信任务查询、死信重投和任务超时补偿机制。
+- 将缩略图生成、元数据解析和 GeoServer 发布进一步任务化，逐步迁移到 Worker，最终让 Spring Boot 镜像回归纯 Java 运行环境。
+- 完善 Python Worker 多实例部署、日志采集、资源限制和运行监控。
+- 优化大文件处理能力，支持分片上传、断点续传、上传进度、文件校验和异步入库流程。
+- 接入 Elasticsearch，实现影像资产、任务和结果文件的全文检索与标签检索。
+- 接入 Redis，用于热点查询缓存、任务状态缓存或轻量分布式锁。
+- 增强遥感算法能力，扩展裁剪、重投影、波段合成、栅格统计和更复杂的变化检测/智能解译模型。
+- 增加 OpenAPI/Swagger 接口文档，补充端到端集成测试和接口示例集合。
+- 完善生产化部署方案，补充镜像推送、服务器部署、环境变量密钥管理和 CI/CD 发布流程。
 
 ## 项目定位
 

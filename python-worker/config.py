@@ -15,13 +15,21 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.lower() in {"1", "true", "yes", "y"}
 
 
+def _env_first(names: tuple[str, ...], default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
 @dataclass(frozen=True)
 class RabbitMqSettings:
     host: str = os.getenv("RABBITMQ_HOST", "localhost")
     port: int = _env_int("RABBITMQ_PORT", 5672)
     username: str = os.getenv("RABBITMQ_USERNAME", "guest")
     password: str = os.getenv("RABBITMQ_PASSWORD", "guest")
-    queue: str = os.getenv("RABBITMQ_TASK_QUEUE", "rs.task.queue")
+    queue: str = _env_first(("RABBITMQ_QUEUE", "RABBITMQ_TASK_QUEUE"), "rs.task.queue")
     prefetch_count: int = _env_int("RABBITMQ_PREFETCH_COUNT", 1)
     requeue_on_error: bool = _env_bool("RABBITMQ_REQUEUE_ON_ERROR", True)
 
@@ -36,7 +44,7 @@ class MinioSettings:
 
 @dataclass(frozen=True)
 class CallbackSettings:
-    base_url: str = os.getenv("CALLBACK_BASE_URL", "http://localhost:8080")
+    base_url: str = _env_first(("BACKEND_BASE_URL", "CALLBACK_BASE_URL"), "http://localhost:8080")
     timeout_seconds: int = _env_int("CALLBACK_TIMEOUT_SECONDS", 10)
     enabled: bool = _env_bool("CALLBACK_ENABLED", True)
 

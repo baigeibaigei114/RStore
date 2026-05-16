@@ -36,6 +36,11 @@ spring:
       direct:
         auto-startup: false
 
+app:
+  auth:
+    jwt-secret: test-secret-change-me
+    token-expire-minutes: 60
+
 rabbitmq:
   remote-sensing-task:
     exchange: rs.task.exchange
