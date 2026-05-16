@@ -3,6 +3,7 @@ services:
     image: postgis/postgis:16-3.4
     container_name: rs-postgres
     restart: unless-stopped
+    mem_limit: 768m
     environment:
       POSTGRES_DB: rs_image_asset
       POSTGRES_USER: postgres
@@ -23,6 +24,7 @@ services:
     image: rabbitmq:3.13-management
     container_name: rs-rabbitmq
     restart: unless-stopped
+    mem_limit: 384m
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -37,6 +39,7 @@ services:
     image: minio/minio:RELEASE.2024-10-13T13-34-11Z
     container_name: rs-minio
     restart: unless-stopped
+    mem_limit: 512m
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -52,7 +55,8 @@ services:
     image: redis:7.4
     container_name: rs-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    mem_limit: 128m
+    command: redis-server --appendonly yes --maxmemory 96mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -62,9 +66,11 @@ services:
     image: kartoza/geoserver:2.25.2
     container_name: rs-geoserver
     restart: unless-stopped
+    mem_limit: 1536m
     environment:
       GEOSERVER_ADMIN_USER: admin
       GEOSERVER_ADMIN_PASSWORD: geoserver
+      JAVA_OPTS: -Xms256m -Xmx1152m
       TZ: Asia/Shanghai
     ports:
       - "8081:8080"
@@ -81,7 +87,9 @@ services:
       dockerfile: Dockerfile
     container_name: rs-backend
     restart: unless-stopped
+    mem_limit: 2g
     environment:
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx1024m
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rs_image_asset
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: 1234
@@ -126,6 +134,7 @@ services:
       dockerfile: Dockerfile
     container_name: rs-python-worker
     restart: unless-stopped
+    mem_limit: 2816m
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
