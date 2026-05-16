@@ -2,23 +2,29 @@ package com.remotesensing.platform.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
+import com.remotesensing.platform.common.enums.ResultFileStatus;
 import com.remotesensing.platform.common.enums.TaskClaimAction;
 import com.remotesensing.platform.common.enums.TaskStatus;
+import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.config.RabbitTaskProperties;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.entity.RsImage;
+import com.remotesensing.platform.entity.RsResultFile;
 import com.remotesensing.platform.entity.RsTask;
 import com.remotesensing.platform.entity.RsTaskLog;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
+import com.remotesensing.platform.mapper.RsResultFileMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
+import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
@@ -36,6 +42,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -51,28 +59,37 @@ public class RsTaskServiceImpl implements RsTaskService {
     private final RsImageMapper imageMapper;
     private final RsTaskMapper taskMapper;
     private final RsTaskLogMapper taskLogMapper;
+    private final RsResultFileMapper resultFileMapper;
     private final RabbitTaskProperties rabbitTaskProperties;
     private final MinioProperties minioProperties;
     private final ObjectMapper objectMapper;
     private final MessageOutboxService messageOutboxService;
+    private final GeoServerService geoServerService;
     private final TransactionTemplate transactionTemplate;
+    private final CurrentUserContext currentUserContext;
 
     public RsTaskServiceImpl(RsImageMapper imageMapper,
                              RsTaskMapper taskMapper,
                              RsTaskLogMapper taskLogMapper,
+                             RsResultFileMapper resultFileMapper,
                              RabbitTaskProperties rabbitTaskProperties,
                              MinioProperties minioProperties,
                              ObjectMapper objectMapper,
                              MessageOutboxService messageOutboxService,
-                             PlatformTransactionManager transactionManager) {
+                             GeoServerService geoServerService,
+                             PlatformTransactionManager transactionManager,
+                             CurrentUserContext currentUserContext) {
         this.imageMapper = imageMapper;
         this.taskMapper = taskMapper;
         this.taskLogMapper = taskLogMapper;
+        this.resultFileMapper = resultFileMapper;
         this.rabbitTaskProperties = rabbitTaskProperties;
         this.minioProperties = minioProperties;
         this.objectMapper = objectMapper;
         this.messageOutboxService = messageOutboxService;
+        this.geoServerService = geoServerService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.currentUserContext = currentUserContext;
     }
 
     @Override
@@ -98,7 +115,7 @@ public class RsTaskServiceImpl implements RsTaskService {
 
     @Override
     public RsTaskVO getById(Long taskId) {
-        RsTaskVO task = taskMapper.selectDetailById(taskId);
+        RsTaskVO task = taskMapper.selectDetailByIdForOwner(taskId, currentUserContext.getCurrentUserId());
         if (task == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
         }
@@ -111,23 +128,25 @@ public class RsTaskServiceImpl implements RsTaskService {
         int currentPageSize = normalizePageSize(pageSize);
         int offset = (currentPageNum - 1) * currentPageSize;
 
-        List<RsTaskListVO> records = taskMapper.selectPage(offset, currentPageSize);
-        long total = taskMapper.count();
+        String currentUserId = currentUserContext.getCurrentUserId();
+        List<RsTaskListVO> records = taskMapper.selectPage(offset, currentPageSize, currentUserId);
+        long total = taskMapper.count(currentUserId);
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
     @Override
     public List<RsTaskLogVO> listLogs(Long taskId) {
-        if (taskMapper.selectById(taskId) == null) {
+        if (taskMapper.selectByIdForOwner(taskId, currentUserContext.getCurrentUserId()) == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
         }
         return taskLogMapper.selectByTaskIdOrderByCreatedAt(taskId);
     }
 
     private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO) {
-        RsImage image = imageMapper.selectById(submitDTO.getImageId());
+        String currentUserId = currentUserContext.getCurrentUserId();
+        RsImage image = imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId);
         if (image == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在");
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权访问");
         }
         if (!ImageStatus.fromDb(image.getStatus()).canSubmitTask()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
@@ -137,7 +156,7 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许提交处理任务");
         }
 
-        RsTask task = buildPendingTask(submitDTO);
+        RsTask task = buildPendingTask(submitDTO, currentUserId);
         taskMapper.insert(task);
 
         String outputObjectKey = buildOutputObjectKey(submitDTO.getTaskType().name(), task.getId());
@@ -216,11 +235,16 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务状态已被并发更新，请重试回调");
         }
         insertStatusLog(task, targetStatus.dbValue(), updateDTO, errorMessage);
+        if (targetStatus == TaskStatus.SUCCESS) {
+            createOrUpdateResultFile(task, updateDTO);
+            registerGeoServerPublishAfterCommit(taskId);
+        }
         releaseImageIfTaskFinished(task, targetStatus);
     }
 
-    private RsTask buildPendingTask(RsTaskSubmitDTO submitDTO) {
+    private RsTask buildPendingTask(RsTaskSubmitDTO submitDTO, String ownerId) {
         RsTask task = new RsTask();
+        task.setOwnerId(ownerId);
         task.setTaskCode("TASK_" + UUID.randomUUID().toString().replace("-", ""));
         task.setImageId(submitDTO.getImageId());
         task.setTaskType(submitDTO.getTaskType().name());
@@ -318,6 +342,61 @@ public class RsTaskServiceImpl implements RsTaskService {
         taskLog.setMessage(buildStatusLogMessage(task.getStatus(), targetStatus, updateDTO));
         taskLog.setDetail(toJson(detail));
         taskLogMapper.insert(taskLog);
+    }
+
+    private void createOrUpdateResultFile(RsTask task, RsTaskStatusUpdateDTO updateDTO) {
+        String outputObjectKey = isBlank(updateDTO.getOutputObjectKey())
+                ? task.getOutputObjectKey()
+                : updateDTO.getOutputObjectKey();
+        String outputBucket = isBlank(task.getOutputBucket())
+                ? minioProperties.getBucketName()
+                : task.getOutputBucket();
+
+        RsResultFile resultFile = buildResultFile(task, outputBucket, outputObjectKey);
+        RsResultFile existing = resultFileMapper.selectByTaskId(task.getId());
+        if (existing == null) {
+            resultFileMapper.insert(resultFile);
+            return;
+        }
+
+        resultFile.setId(existing.getId());
+        resultFileMapper.resetPendingPublish(resultFile);
+    }
+
+    private RsResultFile buildResultFile(RsTask task, String outputBucket, String outputObjectKey) {
+        RsResultFile resultFile = new RsResultFile();
+        resultFile.setOwnerId(task.getOwnerId());
+        resultFile.setVisibility(Visibility.PRIVATE.dbValue());
+        resultFile.setTaskId(task.getId());
+        resultFile.setImageId(task.getImageId());
+        resultFile.setFileName(extractFilename(outputObjectKey));
+        resultFile.setFileType("GEOTIFF");
+        resultFile.setMinioBucket(outputBucket);
+        resultFile.setObjectKey(outputObjectKey);
+        resultFile.setMimeType("image/tiff");
+        resultFile.setStatus(ResultFileStatus.PENDING_PUBLISH.dbValue());
+        return resultFile;
+    }
+
+    private void registerGeoServerPublishAfterCommit(Long taskId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            geoServerService.publishTaskResultAsync(taskId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                geoServerService.publishTaskResultAsync(taskId);
+            }
+        });
+    }
+
+    private String extractFilename(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            return "result.tif";
+        }
+        int index = objectKey.lastIndexOf('/');
+        return index >= 0 ? objectKey.substring(index + 1) : objectKey;
     }
 
     private void releaseImageIfTaskFinished(RsTask task, TaskStatus targetStatus) {

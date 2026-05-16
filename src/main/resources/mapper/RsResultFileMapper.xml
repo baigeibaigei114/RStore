@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.RsResultFileMapper">
+
+    <insert id="insert" parameterType="com.remotesensing.platform.entity.RsResultFile"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rs_result_file (
+            owner_id,
+            visibility,
+            task_id,
+            image_id,
+            file_name,
+            file_type,
+            minio_bucket,
+            object_key,
+            file_size,
+            mime_type,
+            checksum,
+            result_metadata,
+            status
+        ) VALUES (
+            #{ownerId},
+            COALESCE(#{visibility}, 'PRIVATE'),
+            #{taskId},
+            #{imageId},
+            #{fileName},
+            #{fileType},
+            #{minioBucket},
+            #{objectKey},
+            #{fileSize},
+            #{mimeType},
+            #{checksum},
+            CAST(NULLIF(#{resultMetadata}, '') AS jsonb),
+            #{status}
+        )
+        ON CONFLICT (task_id) DO UPDATE
+        SET owner_id = EXCLUDED.owner_id,
+            visibility = EXCLUDED.visibility,
+            image_id = EXCLUDED.image_id,
+            file_name = EXCLUDED.file_name,
+            file_type = EXCLUDED.file_type,
+            minio_bucket = EXCLUDED.minio_bucket,
+            object_key = EXCLUDED.object_key,
+            file_size = EXCLUDED.file_size,
+            mime_type = EXCLUDED.mime_type,
+            checksum = EXCLUDED.checksum,
+            result_metadata = EXCLUDED.result_metadata,
+            status = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.status
+                ELSE EXCLUDED.status
+            END,
+            workspace = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.workspace
+                ELSE NULL
+            END,
+            store_name = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.store_name
+                ELSE NULL
+            END,
+            layer_name = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.layer_name
+                ELSE NULL
+            END,
+            wms_url = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.wms_url
+                ELSE NULL
+            END,
+            wcs_url = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.wcs_url
+                ELSE NULL
+            END,
+            publish_error_message = NULL,
+            published_at = CASE
+                WHEN rs_result_file.status = 'PUBLISHED' AND rs_result_file.object_key = EXCLUDED.object_key THEN rs_result_file.published_at
+                ELSE NULL
+            END,
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <select id="selectById" resultType="com.remotesensing.platform.entity.RsResultFile">
+        SELECT
+            id,
+            owner_id,
+            visibility,
+            task_id,
+            image_id,
+            file_name,
+            file_type,
+            minio_bucket,
+            object_key,
+            file_size,
+            mime_type,
+            checksum,
+            result_metadata::text AS result_metadata,
+            status,
+            workspace,
+            store_name,
+            layer_name,
+            wms_url,
+            wcs_url,
+            publish_error_message,
+            published_at,
+            created_at,
+            updated_at
+        FROM rs_result_file
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByTaskId" resultType="com.remotesensing.platform.entity.RsResultFile">
+        SELECT
+            id,
+            owner_id,
+            visibility,
+            task_id,
+            image_id,
+            file_name,
+            file_type,
+            minio_bucket,
+            object_key,
+            file_size,
+            mime_type,
+            checksum,
+            result_metadata::text AS result_metadata,
+            status,
+            workspace,
+            store_name,
+            layer_name,
+            wms_url,
+            wcs_url,
+            publish_error_message,
+            published_at,
+            created_at,
+            updated_at
+        FROM rs_result_file
+        WHERE task_id = #{taskId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <update id="resetPendingPublish" parameterType="com.remotesensing.platform.entity.RsResultFile">
+        UPDATE rs_result_file
+        SET owner_id = #{ownerId},
+            visibility = #{visibility},
+            image_id = #{imageId},
+            file_name = #{fileName},
+            file_type = #{fileType},
+            minio_bucket = #{minioBucket},
+            object_key = #{objectKey},
+            file_size = #{fileSize},
+            mime_type = #{mimeType},
+            checksum = #{checksum},
+            result_metadata = CAST(NULLIF(#{resultMetadata}, '') AS jsonb),
+            status = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN status
+                ELSE 'PENDING_PUBLISH'
+            END,
+            workspace = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN workspace
+                ELSE NULL
+            END,
+            store_name = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN store_name
+                ELSE NULL
+            END,
+            layer_name = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN layer_name
+                ELSE NULL
+            END,
+            wms_url = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN wms_url
+                ELSE NULL
+            END,
+            wcs_url = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN wcs_url
+                ELSE NULL
+            END,
+            publish_error_message = NULL,
+            published_at = CASE
+                WHEN status = 'PUBLISHED' AND object_key = #{objectKey} THEN published_at
+                ELSE NULL
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="markPublishing">
+        UPDATE rs_result_file
+        SET status = 'PUBLISHING',
+            publish_error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('PENDING_PUBLISH', 'PUBLISH_FAILED')
+    </update>
+
+    <update id="markPublished">
+        UPDATE rs_result_file
+        SET status = 'PUBLISHED',
+            workspace = #{workspace},
+            store_name = #{storeName},
+            layer_name = #{layerName},
+            wms_url = #{wmsUrl},
+            wcs_url = #{wcsUrl},
+            publish_error_message = NULL,
+            published_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="markPublishFailed">
+        UPDATE rs_result_file
+        SET status = 'PUBLISH_FAILED',
+            publish_error_message = #{errorMessage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+</mapper>

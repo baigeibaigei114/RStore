@@ -137,6 +137,22 @@ mvn test
 | Redis | `localhost:6379` | 无 | 无 | 本地缓存服务 |
 | GeoServer | `http://localhost:8081/geoserver` | `admin` | `geoserver` | 地理空间服务发布平台 |
 
+### GeoServer 结果影像发布目录
+
+任务结果发布到 GeoServer 时，不再使用 MinIO 预签名 URL 作为图层数据源。后端会先把 `result/` 目录下的 GeoTIFF 从 MinIO 同步到本地共享目录：
+
+```text
+data/geoserver-raster
+```
+
+Docker Compose 会把该目录挂载到 GeoServer 容器内：
+
+```text
+/opt/geoserver/raster-data
+```
+
+Spring Boot 发布 coverage store 时传给 GeoServer 的是稳定的 `file:///opt/geoserver/raster-data/...` 路径，避免预签名 URL 过期后 WMS/WCS 无法继续读取影像。
+
 PostgreSQL 使用 `postgis/postgis` 镜像，并在首次初始化数据库时执行：
 
 ```text

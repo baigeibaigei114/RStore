@@ -1,6 +1,7 @@
 package com.remotesensing.platform.service.impl;
 
 import com.remotesensing.platform.common.ResultCode;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.FileObjectMapper;
@@ -34,13 +35,16 @@ public class MinioServiceImpl implements MinioService {
     private final MinioClient minioClient;
     private final MinioProperties minioProperties;
     private final FileObjectMapper fileObjectMapper;
+    private final CurrentUserContext currentUserContext;
 
     public MinioServiceImpl(MinioClient minioClient,
                             MinioProperties minioProperties,
-                            FileObjectMapper fileObjectMapper) {
+                            FileObjectMapper fileObjectMapper,
+                            CurrentUserContext currentUserContext) {
         this.minioClient = minioClient;
         this.minioProperties = minioProperties;
         this.fileObjectMapper = fileObjectMapper;
+        this.currentUserContext = currentUserContext;
     }
 
     @Override
@@ -175,7 +179,8 @@ public class MinioServiceImpl implements MinioService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 只能访问 raw、thumbnail 或 result 目录");
         }
         // 仅允许访问已经被业务表登记的文件，降低猜测 objectKey 访问私有 bucket 的风险。
-        if (fileObjectMapper.countAccessibleObjectKey(objectKey) <= 0) {
+        String currentUserId = currentUserContext.getCurrentUserId();
+        if (fileObjectMapper.countAccessibleObjectKey(objectKey, currentUserId) <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 未在业务表中登记，不能生成访问链接");
         }
     }

@@ -16,25 +16,35 @@ public interface RsImageMapper {
 
     RsImage selectById(@Param("id") Long id);
 
-    List<RsImage> selectPage(@Param("offset") int offset, @Param("pageSize") int pageSize);
+    RsImage selectAccessibleById(@Param("id") Long id,
+                                 @Param("currentUserId") String currentUserId);
+
+    List<RsImage> selectPage(@Param("offset") int offset,
+                             @Param("pageSize") int pageSize,
+                             @Param("currentUserId") String currentUserId);
 
     List<RsImage> searchPage(@Param("query") RsImageSearchDTO query,
                              @Param("offset") int offset,
-                             @Param("pageSize") int pageSize);
+                             @Param("pageSize") int pageSize,
+                             @Param("currentUserId") String currentUserId);
 
     List<RsImage> searchByRegionPage(@Param("query") RsImageSearchDTO query,
                                      @Param("offset") int offset,
-                                     @Param("pageSize") int pageSize);
+                                     @Param("pageSize") int pageSize,
+                                     @Param("currentUserId") String currentUserId);
 
-    long count();
+    long count(@Param("currentUserId") String currentUserId);
 
-    long countSearch(@Param("query") RsImageSearchDTO query);
+    long countSearch(@Param("query") RsImageSearchDTO query,
+                     @Param("currentUserId") String currentUserId);
 
-    long countSearchByRegion(@Param("query") RsImageSearchDTO query);
+    long countSearchByRegion(@Param("query") RsImageSearchDTO query,
+                             @Param("currentUserId") String currentUserId);
 
     List<Long> selectPendingThumbnailImageIds(@Param("limit") int limit);
 
     int softDeleteIfDeletable(@Param("id") Long id,
+                              @Param("ownerId") String ownerId,
                               @Param("deletedBy") String deletedBy,
                               @Param("deletedReason") String deletedReason);
 
@@ -47,6 +57,10 @@ public interface RsImageMapper {
      * 任务全部进入终态后释放影像，原始资产本身仍可继续被查询或再次处理。
      */
     int markReadyIfProcessing(@Param("id") Long id);
+
+    int updateVisibility(@Param("id") Long id,
+                         @Param("ownerId") String ownerId,
+                         @Param("visibility") String visibility);
 
     long countByImageCode(@Param("imageCode") String imageCode);
 

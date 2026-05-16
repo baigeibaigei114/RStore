@@ -17,11 +17,19 @@ public interface RsTaskMapper {
 
     RsTask selectById(@Param("id") Long id);
 
+    RsTask selectByIdForOwner(@Param("id") Long id,
+                              @Param("ownerId") String ownerId);
+
     RsTaskVO selectDetailById(@Param("id") Long id);
 
-    List<RsTaskListVO> selectPage(@Param("offset") int offset, @Param("pageSize") int pageSize);
+    RsTaskVO selectDetailByIdForOwner(@Param("id") Long id,
+                                      @Param("ownerId") String ownerId);
 
-    long count();
+    List<RsTaskListVO> selectPage(@Param("offset") int offset,
+                                  @Param("pageSize") int pageSize,
+                                  @Param("ownerId") String ownerId);
+
+    long count(@Param("ownerId") String ownerId);
 
     /**
      * 输出路径依赖 taskId，因此作为任务创建后的独立回写步骤。

@@ -7,6 +7,7 @@
     <insert id="insert" parameterType="com.remotesensing.platform.entity.RsTask"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO rs_task (
+            owner_id,
             task_code,
             image_id,
             task_type,
@@ -18,6 +19,7 @@
             max_retry_count,
             params
         ) VALUES (
+            #{ownerId},
             #{taskCode},
             #{imageId},
             #{taskType},
@@ -34,6 +36,7 @@
     <select id="selectById" resultType="com.remotesensing.platform.entity.RsTask">
         SELECT
             id,
+            owner_id,
             task_code,
             image_id,
             task_type,
@@ -56,9 +59,37 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectByIdForOwner" resultType="com.remotesensing.platform.entity.RsTask">
+        SELECT
+            id,
+            owner_id,
+            task_code,
+            image_id,
+            task_type,
+            task_name,
+            status,
+            priority,
+            progress,
+            retry_count,
+            max_retry_count,
+            output_bucket,
+            output_object_key,
+            params::text AS params,
+            error_message,
+            submitted_at,
+            started_at,
+            finished_at,
+            created_at,
+            updated_at
+        FROM rs_task
+        WHERE id = #{id}
+          AND owner_id = #{ownerId}
+    </select>
+
     <select id="selectDetailById" resultType="com.remotesensing.platform.vo.RsTaskVO">
         SELECT
             t.id,
+            t.owner_id,
             t.task_code,
             t.image_id,
             i.image_name,
@@ -84,9 +115,40 @@
         WHERE t.id = #{id}
     </select>
 
+    <select id="selectDetailByIdForOwner" resultType="com.remotesensing.platform.vo.RsTaskVO">
+        SELECT
+            t.id,
+            t.owner_id,
+            t.task_code,
+            t.image_id,
+            i.image_name,
+            t.task_type,
+            t.task_name,
+            t.status,
+            t.progress,
+            t.retry_count,
+            t.max_retry_count,
+            i.minio_bucket AS input_bucket,
+            i.object_key AS input_object_key,
+            t.output_bucket,
+            t.output_object_key,
+            t.params::text AS params,
+            t.error_message,
+            t.submitted_at,
+            t.started_at,
+            t.finished_at,
+            t.created_at,
+            t.updated_at
+        FROM rs_task t
+        LEFT JOIN rs_image i ON i.id = t.image_id
+        WHERE t.id = #{id}
+          AND t.owner_id = #{ownerId}
+    </select>
+
     <select id="selectPage" resultType="com.remotesensing.platform.vo.RsTaskListVO">
         SELECT
             t.id,
+            t.owner_id,
             t.task_code,
             t.image_id,
             i.image_name,
@@ -104,6 +166,7 @@
             t.finished_at
         FROM rs_task t
         LEFT JOIN rs_image i ON i.id = t.image_id
+        WHERE t.owner_id = #{ownerId}
         ORDER BY t.submitted_at DESC, t.id DESC
         LIMIT #{pageSize} OFFSET #{offset}
     </select>
@@ -111,6 +174,7 @@
     <select id="count" resultType="long">
         SELECT COUNT(1)
         FROM rs_task
+        WHERE owner_id = #{ownerId}
     </select>
 
     <update id="updateOutputObject">

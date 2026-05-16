@@ -6,6 +6,8 @@
 
     <resultMap id="RsImageResultMap" type="com.remotesensing.platform.entity.RsImage">
         <id property="id" column="id"/>
+        <result property="ownerId" column="owner_id"/>
+        <result property="visibility" column="visibility"/>
         <result property="imageCode" column="image_code"/>
         <result property="imageName" column="image_name"/>
         <result property="sensorType" column="sensor_type"/>
@@ -41,6 +43,8 @@
 
     <sql id="BaseColumnList">
         rs_image.id,
+        rs_image.owner_id,
+        rs_image.visibility,
         rs_image.image_code,
         rs_image.image_name,
         rs_image.sensor_type,
@@ -77,6 +81,7 @@
     <sql id="SearchWhere">
         <where>
             AND deleted_at IS NULL
+            AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
             <if test="query.keyword != null and query.keyword != ''">
                 AND image_name ILIKE CONCAT('%', #{query.keyword}, '%')
             </if>
@@ -105,6 +110,7 @@
     <sql id="RegionSearchWhere">
         <where>
             AND rs_image.deleted_at IS NULL
+            AND (rs_image.visibility = 'PUBLIC' OR rs_image.owner_id = #{currentUserId})
             AND footprint IS NOT NULL
             AND ST_Intersects(footprint, region.geom)
             <if test="query.startTime != null">
@@ -125,6 +131,8 @@
     <insert id="insert" parameterType="com.remotesensing.platform.entity.RsImage"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO rs_image (
+            owner_id,
+            visibility,
             image_code,
             image_name,
             sensor_type,
@@ -152,6 +160,8 @@
             status,
             description
         ) VALUES (
+            #{ownerId},
+            COALESCE(#{visibility}, 'PRIVATE'),
             #{imageCode},
             #{imageName},
             #{sensorType},
@@ -189,11 +199,21 @@
           AND deleted_at IS NULL
     </select>
 
+    <select id="selectAccessibleById" resultMap="RsImageResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_image
+        WHERE id = #{id}
+          AND deleted_at IS NULL
+          AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
+    </select>
+
     <select id="selectPage" resultMap="RsImageResultMap">
         SELECT
         <include refid="BaseColumnList"/>
         FROM rs_image
         WHERE deleted_at IS NULL
+          AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
         ORDER BY created_at DESC, id DESC
         LIMIT #{pageSize} OFFSET #{offset}
     </select>
@@ -221,6 +241,7 @@
         SELECT COUNT(1)
         FROM rs_image
         WHERE deleted_at IS NULL
+          AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
     </select>
 
     <select id="countSearch" resultType="long">
@@ -254,6 +275,7 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND deleted_at IS NULL
+          AND owner_id = #{ownerId}
           AND status IN ('READY', 'FAILED')
     </update>
 
@@ -272,6 +294,15 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND status = 'PROCESSING'
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="updateVisibility">
+        UPDATE rs_image
+        SET visibility = #{visibility},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND owner_id = #{ownerId}
           AND deleted_at IS NULL
     </update>
 

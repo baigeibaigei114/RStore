@@ -70,6 +70,7 @@ services:
       - "8081:8080"
     volumes:
       - geoserver_data:/opt/geoserver/data_dir
+      - ./data/geoserver-raster:/opt/geoserver/raster-data
     depends_on:
       postgres:
         condition: service_healthy

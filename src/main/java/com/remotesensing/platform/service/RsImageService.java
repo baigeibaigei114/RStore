@@ -26,5 +26,7 @@ public interface RsImageService {
 
     PageResult<RsImageListVO> searchByRegion(RsImageSearchDTO query, Integer pageNum, Integer pageSize);
 
+    RsImageVO updateVisibility(Long id, String visibility);
+
     void deleteById(Long id);
 }

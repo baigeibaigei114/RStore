@@ -5,6 +5,7 @@ import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
+import com.remotesensing.platform.dto.RsImageVisibilityUpdateDTO;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.vo.RsImageListVO;
@@ -16,6 +17,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -116,6 +118,12 @@ public class RsImageController {
     public Result<Void> deleteById(@PathVariable Long id) {
         imageService.deleteById(id);
         return Result.success();
+    }
+
+    @PatchMapping("/{id}/visibility")
+    public Result<RsImageVO> updateVisibility(@PathVariable Long id,
+                                              @Valid @RequestBody RsImageVisibilityUpdateDTO updateDTO) {
+        return Result.success(imageService.updateVisibility(id, updateDTO.getVisibility()));
     }
 
     private void parseBbox(RsImageSearchDTO query, String bbox) {

@@ -73,6 +73,11 @@ geoserver:
   url: http://127.0.0.1:18081/geoserver
   username: test
   password: test
+  workspace: test_remote_sensing
+  shared-data-local-dir: target/test-geoserver-raster
+  shared-data-geoserver-dir: /opt/geoserver/raster-data
+  connect-timeout-seconds: 1
+  read-timeout-seconds: 2
 
 elasticsearch:
   uris: http://127.0.0.1:19200

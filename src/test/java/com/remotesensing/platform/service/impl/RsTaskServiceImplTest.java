@@ -2,12 +2,15 @@ package com.remotesensing.platform.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.enums.ImageStatus;
+import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.common.enums.TaskStatus;
 import com.remotesensing.platform.config.MinioProperties;
 import com.remotesensing.platform.config.RabbitTaskProperties;
@@ -18,8 +21,10 @@ import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.entity.RsTask;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
+import com.remotesensing.platform.mapper.RsResultFileMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
+import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +51,9 @@ class RsTaskServiceImplTest {
     private RsTaskLogMapper taskLogMapper;
 
     @Mock
+    private RsResultFileMapper resultFileMapper;
+
+    @Mock
     private RabbitTaskProperties rabbitTaskProperties;
 
     @Mock
@@ -55,23 +63,32 @@ class RsTaskServiceImplTest {
     private MessageOutboxService messageOutboxService;
 
     @Mock
+    private GeoServerService geoServerService;
+
+    @Mock
+    private CurrentUserContext currentUserContext;
+
+    @Mock
     private PlatformTransactionManager transactionManager;
 
     private RsTaskServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+        lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
                 .thenReturn(new SimpleTransactionStatus());
         service = new RsTaskServiceImpl(
                 imageMapper,
                 taskMapper,
                 taskLogMapper,
+                resultFileMapper,
                 rabbitTaskProperties,
                 minioProperties,
                 new ObjectMapper(),
                 messageOutboxService,
-                transactionManager
+                geoServerService,
+                transactionManager,
+                currentUserContext
         );
     }
 
@@ -81,6 +98,8 @@ class RsTaskServiceImplTest {
         RsImage image = new RsImage();
         image.setId(10L);
         image.setStatus(ImageStatus.READY.dbValue());
+        image.setVisibility(Visibility.PRIVATE.dbValue());
+        image.setOwnerId("user-a");
         image.setMinioBucket("remote-sensing-images");
         image.setObjectKey("raw/2026/05/source.tif");
 
@@ -89,7 +108,8 @@ class RsTaskServiceImplTest {
         dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
         dto.setParams(Map.of("redBand", 3, "nirBand", 4));
 
-        when(imageMapper.selectById(10L)).thenReturn(image);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(image);
         when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
         when(rabbitTaskProperties.getMaxRetryCount()).thenReturn(3);
         when(minioProperties.getBucketName()).thenReturn("remote-sensing-images");
@@ -100,6 +120,64 @@ class RsTaskServiceImplTest {
 
         verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), any(RemoteSensingTaskMessage.class));
         verify(messageOutboxService).publishById(99L);
+    }
+
+    @Test
+    @DisplayName("用户不能提交无权访问的私有影像任务")
+    void submitShouldRejectPrivateImageWithoutAccess() {
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setParams(Map.of("redBand", 3, "nirBand", 4));
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.selectAccessibleById(10L, "user-b")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权访问");
+
+        verify(taskMapper, never()).insert(any(RsTask.class));
+    }
+
+    @Test
+    @DisplayName("用户可以提交他人 PUBLIC 影像任务，任务归属当前用户")
+    void submitShouldAllowPublicImageAndOwnTask() {
+        RsImage image = new RsImage();
+        image.setId(10L);
+        image.setStatus(ImageStatus.READY.dbValue());
+        image.setVisibility(Visibility.PUBLIC.dbValue());
+        image.setOwnerId("user-a");
+        image.setMinioBucket("remote-sensing-images");
+        image.setObjectKey("raw/2026/05/public.tif");
+
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setParams(Map.of("redBand", 3, "nirBand", 4));
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.selectAccessibleById(10L, "user-b")).thenReturn(image);
+        when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
+        when(rabbitTaskProperties.getMaxRetryCount()).thenReturn(3);
+        when(minioProperties.getBucketName()).thenReturn("remote-sensing-images");
+        when(messageOutboxService.createTaskMessage(any(), any())).thenReturn(99L);
+        when(taskMapper.insert(any(RsTask.class))).thenAnswer(this::fillTaskId);
+
+        service.submit(dto);
+
+        verify(taskMapper).insert(org.mockito.ArgumentMatchers.argThat(task -> "user-b".equals(task.getOwnerId())));
+    }
+
+    @Test
+    @DisplayName("用户不能查看他人的任务详情")
+    void getByIdShouldRejectOtherUsersTask() {
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(taskMapper.selectDetailByIdForOwner(1L, "user-b")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getById(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务不存在");
     }
 
     @Test

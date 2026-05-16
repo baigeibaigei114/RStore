@@ -7,6 +7,7 @@ import lombok.Data;
 public class RsTaskListVO {
 
     private Long id;
+    private String ownerId;
     private String taskCode;
     private Long imageId;
     private String imageName;

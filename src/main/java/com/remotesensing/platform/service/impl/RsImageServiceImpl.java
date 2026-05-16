@@ -2,10 +2,12 @@ package com.remotesensing.platform.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.ThumbnailStatus;
+import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.UploadProperties;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
@@ -59,6 +61,7 @@ public class RsImageServiceImpl implements RsImageService {
     private final ThumbnailAsyncService thumbnailAsyncService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final CurrentUserContext currentUserContext;
     // 大文件上传会占用磁盘 IO、请求线程和 Python 进程，这里先用轻量闸门限制并发。
     private final Semaphore uploadSemaphore;
 
@@ -69,7 +72,8 @@ public class RsImageServiceImpl implements RsImageService {
                               ThumbnailAsyncService thumbnailAsyncService,
                               ObjectMapper objectMapper,
                               UploadProperties uploadProperties,
-                              PlatformTransactionManager transactionManager) {
+                              PlatformTransactionManager transactionManager,
+                              CurrentUserContext currentUserContext) {
         this.imageMapper = imageMapper;
         this.taskMapper = taskMapper;
         this.minioService = minioService;
@@ -77,6 +81,7 @@ public class RsImageServiceImpl implements RsImageService {
         this.thumbnailAsyncService = thumbnailAsyncService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.currentUserContext = currentUserContext;
         this.uploadSemaphore = new Semaphore(Math.max(1, uploadProperties.getMaxConcurrent()));
     }
 
@@ -88,6 +93,8 @@ public class RsImageServiceImpl implements RsImageService {
         }
 
         RsImage image = toEntity(createDTO);
+        image.setOwnerId(currentUserContext.getCurrentUserId());
+        image.setVisibility(Visibility.PRIVATE.dbValue());
         try {
             imageMapper.insert(image);
         } catch (DataIntegrityViolationException exception) {
@@ -118,6 +125,8 @@ public class RsImageServiceImpl implements RsImageService {
             GeoTiffMetadataVO metadata = geoTiffMetadataService.parse(localFile.filePath());
             uploadVO = minioService.uploadGeoTiff(localFile.filePath(), localFile.originalFilename(), localFile.contentType());
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
+            image.setOwnerId(currentUserContext.getCurrentUserId());
+            image.setVisibility(Visibility.PRIVATE.dbValue());
             insertImageInTransaction(image);
 
             return getById(image.getId());
@@ -138,7 +147,7 @@ public class RsImageServiceImpl implements RsImageService {
     @Override
     @Transactional(readOnly = true)
     public RsImageVO getById(Long id) {
-        RsImage image = imageMapper.selectById(id);
+        RsImage image = imageMapper.selectAccessibleById(id, currentUserContext.getCurrentUserId());
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
         }
@@ -152,10 +161,11 @@ public class RsImageServiceImpl implements RsImageService {
         int currentPageSize = normalizePageSize(pageSize);
         int offset = (currentPageNum - 1) * currentPageSize;
 
-        List<RsImageVO> records = imageMapper.selectPage(offset, currentPageSize).stream()
+        String currentUserId = currentUserContext.getCurrentUserId();
+        List<RsImageVO> records = imageMapper.selectPage(offset, currentPageSize, currentUserId).stream()
                 .map(this::toVO)
                 .toList();
-        long total = imageMapper.count();
+        long total = imageMapper.count(currentUserId);
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
@@ -167,10 +177,11 @@ public class RsImageServiceImpl implements RsImageService {
         int currentPageSize = normalizePageSize(pageSize);
         int offset = (currentPageNum - 1) * currentPageSize;
 
-        List<RsImageListVO> records = imageMapper.searchPage(query, offset, currentPageSize).stream()
+        String currentUserId = currentUserContext.getCurrentUserId();
+        List<RsImageListVO> records = imageMapper.searchPage(query, offset, currentPageSize, currentUserId).stream()
                 .map(this::toListVO)
                 .toList();
-        long total = imageMapper.countSearch(query);
+        long total = imageMapper.countSearch(query, currentUserId);
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
@@ -185,19 +196,36 @@ public class RsImageServiceImpl implements RsImageService {
         int currentPageSize = normalizePageSize(pageSize);
         int offset = (currentPageNum - 1) * currentPageSize;
 
-        List<RsImageListVO> records = imageMapper.searchByRegionPage(query, offset, currentPageSize).stream()
+        String currentUserId = currentUserContext.getCurrentUserId();
+        List<RsImageListVO> records = imageMapper.searchByRegionPage(query, offset, currentPageSize, currentUserId).stream()
                 .map(this::toListVO)
                 .toList();
-        long total = imageMapper.countSearchByRegion(query);
+        long total = imageMapper.countSearchByRegion(query, currentUserId);
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
     @Override
     @Transactional
+    public RsImageVO updateVisibility(Long id, String visibility) {
+        Visibility targetVisibility = normalizeVisibility(visibility);
+        String currentUserId = currentUserContext.getCurrentUserId();
+        int updated = imageMapper.updateVisibility(id, currentUserId, targetVisibility.dbValue());
+        if (updated <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权修改可见性");
+        }
+        return getById(id);
+    }
+
+    @Override
+    @Transactional
     public void deleteById(Long id) {
-        RsImage image = imageMapper.selectById(id);
+        String currentUserId = currentUserContext.getCurrentUserId();
+        RsImage image = imageMapper.selectAccessibleById(id, currentUserId);
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
+        }
+        if (!currentUserId.equals(image.getOwnerId())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只能删除自己拥有的影像");
         }
         // 活跃处理任务仍依赖原始影像，删除前先用业务状态拦截，而不是依赖数据库外键报错。
         if (taskMapper.countActiveByImageId(id) > 0) {
@@ -206,7 +234,7 @@ public class RsImageServiceImpl implements RsImageService {
 
         try {
             // 历史任务需要保留审计链路，这里只隐藏影像资产，不级联清理任务、日志和结果文件。
-            int updated = imageMapper.softDeleteIfDeletable(id, null, "用户删除影像资产");
+            int updated = imageMapper.softDeleteIfDeletable(id, currentUserId, currentUserId, "用户删除影像资产");
             if (updated <= 0) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像当前状态不允许删除，请确认没有处理任务正在执行");
             }
@@ -320,6 +348,8 @@ public class RsImageServiceImpl implements RsImageService {
     private RsImageVO toVO(RsImage image) {
         RsImageVO vo = new RsImageVO();
         vo.setId(image.getId());
+        vo.setOwnerId(image.getOwnerId());
+        vo.setVisibility(image.getVisibility());
         vo.setImageCode(image.getImageCode());
         vo.setImageName(image.getImageName());
         vo.setSensorType(image.getSensorType());
@@ -356,6 +386,8 @@ public class RsImageServiceImpl implements RsImageService {
     private RsImageListVO toListVO(RsImage image) {
         RsImageListVO vo = new RsImageListVO();
         vo.setId(image.getId());
+        vo.setOwnerId(image.getOwnerId());
+        vo.setVisibility(image.getVisibility());
         vo.setImageCode(image.getImageCode());
         vo.setImageName(image.getImageName());
         vo.setSensorType(image.getSensorType());
@@ -385,6 +417,14 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String defaultIfBlank(String value, String defaultValue) {
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private Visibility normalizeVisibility(String visibility) {
+        try {
+            return Visibility.fromDb(visibility);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "非法可见性：" + visibility);
+        }
     }
 
     private String generateImageCode() {

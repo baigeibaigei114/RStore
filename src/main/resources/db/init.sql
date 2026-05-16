@@ -6,6 +6,8 @@ CREATE EXTENSION IF NOT EXISTS postgis_topology;
 
 CREATE TABLE IF NOT EXISTS rs_image (
     id BIGSERIAL PRIMARY KEY,
+    owner_id VARCHAR(100) NOT NULL DEFAULT 'dev-user',
+    visibility VARCHAR(20) NOT NULL DEFAULT 'PRIVATE',
     image_code VARCHAR(64) NOT NULL UNIQUE,
     image_name VARCHAR(255) NOT NULL,
     sensor_type VARCHAR(100),
@@ -45,10 +47,13 @@ CREATE TABLE IF NOT EXISTS rs_image (
         AND (file_size IS NULL OR file_size >= 0)
     ),
     CONSTRAINT ck_rs_image_status CHECK (status IN ('UPLOADING', 'PARSING', 'READY', 'PROCESSING', 'DELETE_LOCKED', 'DELETED', 'FAILED')),
-    CONSTRAINT ck_rs_image_thumbnail_status CHECK (thumbnail_status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED'))
+    CONSTRAINT ck_rs_image_thumbnail_status CHECK (thumbnail_status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED')),
+    CONSTRAINT ck_rs_image_visibility CHECK (visibility IN ('PRIVATE', 'PUBLIC'))
 );
 
 COMMENT ON TABLE rs_image IS '影像资产表，保存 GeoTIFF 影像元数据、对象存储路径和空间范围';
+COMMENT ON COLUMN rs_image.owner_id IS '影像归属用户标识';
+COMMENT ON COLUMN rs_image.visibility IS '影像可见性：PRIVATE、PUBLIC';
 COMMENT ON COLUMN rs_image.image_code IS '影像唯一编码，用于业务侧稳定引用';
 COMMENT ON COLUMN rs_image.object_key IS 'MinIO 中原始影像文件对象路径';
 COMMENT ON COLUMN rs_image.thumbnail_object_key IS 'MinIO 中 PNG 缩略图对象路径';
@@ -71,6 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_object_key ON rs_image (thumbn
 CREATE INDEX IF NOT EXISTS idx_rs_image_thumbnail_status ON rs_image (thumbnail_status);
 CREATE INDEX IF NOT EXISTS idx_rs_image_deleted_at ON rs_image (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_rs_image_status ON rs_image (status);
+CREATE INDEX IF NOT EXISTS idx_rs_image_owner_visibility ON rs_image (owner_id, visibility);
 
 CREATE TABLE IF NOT EXISTS rs_admin_region (
     id BIGSERIAL PRIMARY KEY,
@@ -95,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_rs_admin_region_geom_gist ON rs_admin_region USIN
 
 CREATE TABLE IF NOT EXISTS rs_task (
     id BIGSERIAL PRIMARY KEY,
+    owner_id VARCHAR(100) NOT NULL DEFAULT 'dev-user',
     task_code VARCHAR(64) NOT NULL UNIQUE,
     image_id BIGINT NOT NULL,
     task_type VARCHAR(50) NOT NULL,
@@ -121,6 +128,7 @@ CREATE TABLE IF NOT EXISTS rs_task (
 );
 
 COMMENT ON TABLE rs_task IS '遥感处理任务表，记录影像处理、智能解译等异步任务';
+COMMENT ON COLUMN rs_task.owner_id IS '任务归属用户标识';
 COMMENT ON COLUMN rs_task.task_type IS '任务类型，例如 PREPROCESS、CLASSIFICATION、DETECTION、CHANGE_DETECTION';
 COMMENT ON COLUMN rs_task.status IS '任务状态：PENDING、RUNNING、SUCCESS、FAILED、RETRYING、CANCELED';
 COMMENT ON COLUMN rs_task.output_bucket IS '任务结果文件输出 bucket';
@@ -132,6 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_rs_task_status ON rs_task (status);
 CREATE INDEX IF NOT EXISTS idx_rs_task_type ON rs_task (task_type);
 CREATE INDEX IF NOT EXISTS idx_rs_task_submitted_at ON rs_task (submitted_at);
 CREATE INDEX IF NOT EXISTS idx_rs_task_output_object_key ON rs_task (output_object_key);
+CREATE INDEX IF NOT EXISTS idx_rs_task_owner_id ON rs_task (owner_id);
 
 CREATE TABLE IF NOT EXISTS rs_task_log (
     id BIGSERIAL PRIMARY KEY,
@@ -152,6 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_rs_task_log_created_at ON rs_task_log (created_at
 
 CREATE TABLE IF NOT EXISTS rs_result_file (
     id BIGSERIAL PRIMARY KEY,
+    owner_id VARCHAR(100) NOT NULL DEFAULT 'dev-user',
+    visibility VARCHAR(20) NOT NULL DEFAULT 'PRIVATE',
     task_id BIGINT NOT NULL,
     image_id BIGINT,
     file_name VARCHAR(255) NOT NULL,
@@ -162,20 +173,40 @@ CREATE TABLE IF NOT EXISTS rs_result_file (
     mime_type VARCHAR(100),
     checksum VARCHAR(128),
     result_metadata JSONB,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_PUBLISH',
+    workspace VARCHAR(100),
+    store_name VARCHAR(255),
+    layer_name VARCHAR(255),
+    wms_url TEXT,
+    wcs_url TEXT,
+    publish_error_message TEXT,
+    published_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_rs_result_file_task FOREIGN KEY (task_id) REFERENCES rs_task (id) ON DELETE CASCADE,
     CONSTRAINT fk_rs_result_file_image FOREIGN KEY (image_id) REFERENCES rs_image (id),
-    CONSTRAINT ck_rs_result_file_size CHECK (file_size IS NULL OR file_size >= 0)
+    CONSTRAINT ck_rs_result_file_size CHECK (file_size IS NULL OR file_size >= 0),
+    CONSTRAINT ck_rs_result_file_status CHECK (status IN ('PENDING_PUBLISH', 'PUBLISHING', 'PUBLISHED', 'PUBLISH_FAILED')),
+    CONSTRAINT ck_rs_result_file_visibility CHECK (visibility IN ('PRIVATE', 'PUBLIC'))
 );
 
 COMMENT ON TABLE rs_result_file IS '处理结果文件表，记录任务输出文件及其对象存储位置';
+COMMENT ON COLUMN rs_result_file.owner_id IS '结果文件归属用户标识';
+COMMENT ON COLUMN rs_result_file.visibility IS '结果文件可见性：PRIVATE、PUBLIC';
 COMMENT ON COLUMN rs_result_file.file_type IS '结果文件类型，例如 GEOTIFF、SHAPEFILE、GEOJSON、PNG、JSON';
 COMMENT ON COLUMN rs_result_file.object_key IS 'MinIO 中结果文件对象路径';
 COMMENT ON COLUMN rs_result_file.result_metadata IS '结果文件扩展元数据，例如类别统计、空间范围、模型版本';
+COMMENT ON COLUMN rs_result_file.status IS '结果文件发布状态：PENDING_PUBLISH、PUBLISHING、PUBLISHED、PUBLISH_FAILED';
+COMMENT ON COLUMN rs_result_file.layer_name IS 'GeoServer 图层名称';
+COMMENT ON COLUMN rs_result_file.wms_url IS 'GeoServer WMS 访问地址';
+COMMENT ON COLUMN rs_result_file.wcs_url IS 'GeoServer WCS 访问地址';
+COMMENT ON COLUMN rs_result_file.publish_error_message IS 'GeoServer 发布失败原因';
 
-CREATE INDEX IF NOT EXISTS idx_rs_result_file_task_id ON rs_result_file (task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_result_file_task_id ON rs_result_file (task_id);
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_image_id ON rs_result_file (image_id);
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_object_location ON rs_result_file (minio_bucket, object_key);
+CREATE INDEX IF NOT EXISTS idx_rs_result_file_status ON rs_result_file (status);
+CREATE INDEX IF NOT EXISTS idx_rs_result_file_owner_visibility ON rs_result_file (owner_id, visibility);
 
 CREATE TABLE IF NOT EXISTS message_outbox (
     id BIGSERIAL PRIMARY KEY,

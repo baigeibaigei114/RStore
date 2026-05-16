@@ -11,20 +11,30 @@
             FROM rs_image
             WHERE object_key = #{objectKey}
               AND deleted_at IS NULL
+              AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
             UNION ALL
             SELECT thumbnail_object_key AS object_key
             FROM rs_image
             WHERE thumbnail_object_key = #{objectKey}
               AND deleted_at IS NULL
+              AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
             UNION ALL
             SELECT overview_object_key AS object_key
             FROM rs_image
             WHERE overview_object_key = #{objectKey}
               AND deleted_at IS NULL
+              AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
             UNION ALL
             SELECT object_key AS object_key
             FROM rs_result_file
             WHERE object_key = #{objectKey}
+              AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
+            UNION ALL
+            SELECT output_object_key AS object_key
+            FROM rs_task t
+            WHERE t.output_object_key = #{objectKey}
+              AND t.status = 'SUCCESS'
+              AND t.owner_id = #{currentUserId}
         ) accessible_file
     </select>
 </mapper>

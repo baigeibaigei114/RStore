@@ -10,6 +10,7 @@ import lombok.Data;
 public class RsTask {
 
     private Long id;
+    private String ownerId;
     private String taskCode;
     private Long imageId;
     private String taskType;

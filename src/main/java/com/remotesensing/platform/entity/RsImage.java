@@ -12,6 +12,8 @@ import lombok.Data;
 public class RsImage {
 
     private Long id;
+    private String ownerId;
+    private String visibility;
     private String imageCode;
     private String imageName;
     private String sensorType;

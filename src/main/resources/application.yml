@@ -78,6 +78,11 @@ geoserver:
   url: http://localhost:8081/geoserver
   username: admin
   password: geoserver
+  workspace: remote_sensing
+  shared-data-local-dir: data/geoserver-raster
+  shared-data-geoserver-dir: /opt/geoserver/raster-data
+  connect-timeout-seconds: 5
+  read-timeout-seconds: 30
 
 elasticsearch:
   uris: http://localhost:9200
