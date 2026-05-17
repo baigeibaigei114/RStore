@@ -1,7 +1,7 @@
 <template>
   <el-container class="app-layout">
     <AppSidebar />
-    <el-container>
+    <el-container class="app-content">
       <AppHeader />
       <el-main class="app-main">
         <router-view />
