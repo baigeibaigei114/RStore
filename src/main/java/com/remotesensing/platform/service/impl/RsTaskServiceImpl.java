@@ -28,6 +28,7 @@ import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
+import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
 import com.remotesensing.platform.vo.RsTaskLogVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
@@ -120,6 +121,24 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
         }
         return task;
+    }
+
+    @Override
+    public RsResultFileVO getResultFile(Long taskId) {
+        RsTask task = taskMapper.selectByIdForOwner(taskId, currentUserContext.getCurrentUserId());
+        if (task == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
+        }
+
+        RsResultFile resultFile = resultFileMapper.selectByTaskId(taskId);
+        if (resultFile == null) {
+            TaskStatus taskStatus = TaskStatus.fromDb(task.getStatus());
+            if (!taskStatus.isTerminal() || taskStatus != TaskStatus.SUCCESS) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务尚未成功，暂无结果文件");
+            }
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务结果文件尚未生成，请稍后重试");
+        }
+        return toResultFileVO(resultFile);
     }
 
     @Override
@@ -316,7 +335,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     }
 
     private String resolveErrorMessage(TaskStatus targetStatus, RsTaskStatusUpdateDTO updateDTO) {
-        if (targetStatus != TaskStatus.FAILED) {
+        if (targetStatus == TaskStatus.SUCCESS) {
             return updateDTO.getErrorMessage();
         }
         if (!isBlank(updateDTO.getErrorMessage())) {
@@ -397,6 +416,34 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
         int index = objectKey.lastIndexOf('/');
         return index >= 0 ? objectKey.substring(index + 1) : objectKey;
+    }
+
+    private RsResultFileVO toResultFileVO(RsResultFile resultFile) {
+        RsResultFileVO vo = new RsResultFileVO();
+        vo.setId(resultFile.getId());
+        vo.setOwnerId(resultFile.getOwnerId());
+        vo.setVisibility(resultFile.getVisibility());
+        vo.setTaskId(resultFile.getTaskId());
+        vo.setImageId(resultFile.getImageId());
+        vo.setFileName(resultFile.getFileName());
+        vo.setFileType(resultFile.getFileType());
+        vo.setMinioBucket(resultFile.getMinioBucket());
+        vo.setObjectKey(resultFile.getObjectKey());
+        vo.setFileSize(resultFile.getFileSize());
+        vo.setMimeType(resultFile.getMimeType());
+        vo.setChecksum(resultFile.getChecksum());
+        vo.setResultMetadata(resultFile.getResultMetadata());
+        vo.setStatus(resultFile.getStatus());
+        vo.setWorkspace(resultFile.getWorkspace());
+        vo.setStoreName(resultFile.getStoreName());
+        vo.setLayerName(resultFile.getLayerName());
+        vo.setWmsUrl(resultFile.getWmsUrl());
+        vo.setWcsUrl(resultFile.getWcsUrl());
+        vo.setPublishErrorMessage(resultFile.getPublishErrorMessage());
+        vo.setPublishedAt(resultFile.getPublishedAt());
+        vo.setCreatedAt(resultFile.getCreatedAt());
+        vo.setUpdatedAt(resultFile.getUpdatedAt());
+        return vo;
     }
 
     private void releaseImageIfTaskFinished(RsTask task, TaskStatus targetStatus) {

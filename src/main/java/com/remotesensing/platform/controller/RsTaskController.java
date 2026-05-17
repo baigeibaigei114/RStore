@@ -6,6 +6,7 @@ import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
+import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
 import com.remotesensing.platform.vo.RsTaskLogVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
@@ -41,6 +42,11 @@ public class RsTaskController {
     @GetMapping("/{taskId}")
     public Result<RsTaskVO> getById(@PathVariable Long taskId) {
         return Result.success(taskService.getById(taskId));
+    }
+
+    @GetMapping("/{taskId}/result")
+    public Result<RsResultFileVO> getResultFile(@PathVariable Long taskId) {
+        return Result.success(taskService.getResultFile(taskId));
     }
 
     @GetMapping

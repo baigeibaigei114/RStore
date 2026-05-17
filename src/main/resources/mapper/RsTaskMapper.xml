@@ -198,15 +198,19 @@
         SET status = #{status},
             progress = CASE
                 WHEN #{status} = 'SUCCESS' THEN 100
-                WHEN #{progress} IS NOT NULL THEN #{progress}
+                WHEN #{progress,jdbcType=INTEGER} IS NOT NULL THEN #{progress,jdbcType=INTEGER}
                 ELSE progress
             END,
+            retry_count = CASE
+                WHEN #{status} = 'RETRYING' THEN LEAST(retry_count + 1, max_retry_count)
+                ELSE retry_count
+            END,
             output_object_key = CASE
-                WHEN #{outputObjectKey} IS NOT NULL AND #{outputObjectKey} != '' THEN #{outputObjectKey}
+                WHEN #{outputObjectKey,jdbcType=VARCHAR} IS NOT NULL AND #{outputObjectKey,jdbcType=VARCHAR} != '' THEN #{outputObjectKey,jdbcType=VARCHAR}
                 ELSE output_object_key
             END,
             error_message = CASE
-                WHEN #{status} = 'FAILED' THEN #{errorMessage}
+                WHEN #{status} IN ('FAILED', 'RETRYING') THEN #{errorMessage,jdbcType=VARCHAR}
                 WHEN #{status} = 'SUCCESS' THEN NULL
                 ELSE error_message
             END,

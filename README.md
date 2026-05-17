@@ -348,6 +348,8 @@ GET http://localhost:8080/api/files/presigned-url?objectKey=raw/2026/05/example.
 
 为避免私有 bucket 中任意对象被猜路径访问，当前接口只允许 `raw/`、`thumbnail/`、`result/` 前缀，并会校验 objectKey 是否已登记在 `rs_image` 或 `rs_result_file` 中。
 
+Docker Compose 部署时，后端容器通过 `MINIO_ENDPOINT=http://minio:9000` 访问 MinIO；返回给浏览器的预签名 URL 使用 `MINIO_PUBLIC_ENDPOINT=http://localhost:9000` 生成。预签名 URL 会把访问域名纳入签名，不能先用内部地址签名后再替换域名，因此后端会直接使用 public endpoint 和固定 region 生成可被浏览器访问的签名地址。
+
 ## 行政区范围查询
 
 行政区表：

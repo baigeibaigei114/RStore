@@ -24,8 +24,15 @@ body {
 }
 
 .app-layout {
+  display: flex;
   min-height: 100vh;
   background: #f5f7fb;
+}
+
+.app-content {
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
 .app-sidebar {
@@ -80,10 +87,11 @@ body {
 
 .app-header {
   display: flex;
+  flex: 0 0 56px;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
-  padding: 0 24px;
+  height: 56px;
+  padding: 0 22px;
   background: #ffffff;
   border-bottom: 1px solid #eaecf0;
 }
@@ -98,7 +106,7 @@ body {
 .header-left h1 {
   margin: 0;
   color: #101828;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -115,17 +123,19 @@ body {
 }
 
 .app-main {
-  padding: 24px;
+  min-width: 0;
+  padding: 18px 22px;
 }
 
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  max-width: 1280px;
 }
 
 .page-title {
-  padding: 8px 0;
+  padding: 2px 0 4px;
 }
 
 .page-title span {
@@ -135,21 +145,25 @@ body {
 }
 
 .page-title h2 {
-  margin: 8px 0;
+  margin: 4px 0 6px;
   color: #101828;
-  font-size: 28px;
+  font-size: 24px;
 }
 
 .page-title p {
-  max-width: 760px;
+  max-width: 960px;
   margin: 0;
   color: #667085;
-  line-height: 1.7;
+  line-height: 1.55;
 }
 
 .module-card {
-  min-height: 180px;
+  min-height: 144px;
   border-radius: 8px;
+}
+
+.module-card .el-card__body {
+  padding: 20px 24px;
 }
 
 .module-card .el-icon {
@@ -157,19 +171,27 @@ body {
 }
 
 .module-card h3 {
-  margin: 16px 0 8px;
+  margin: 12px 0 6px;
   color: #101828;
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .module-card p {
   margin: 0;
   color: #667085;
-  line-height: 1.7;
+  line-height: 1.55;
 }
 
 .dev-card {
   border-radius: 8px;
+}
+
+.dev-card .el-card__header {
+  padding: 14px 24px;
+}
+
+.dev-card .el-card__body {
+  padding: 16px 24px 18px;
 }
 
 .placeholder-card {

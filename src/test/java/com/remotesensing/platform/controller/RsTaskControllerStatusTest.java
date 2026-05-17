@@ -15,6 +15,7 @@ import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
 import com.remotesensing.platform.vo.RsTaskLogVO;
@@ -81,6 +82,29 @@ class RsTaskControllerStatusTest {
                 .andExpect(jsonPath("$.data.records[0].status").value("RUNNING"));
 
         verify(taskService).page(1, 10);
+    }
+
+    @Test
+    @DisplayName("查询任务结果文件成功")
+    void getTaskResultShouldReturnSuccess() throws Exception {
+        RsResultFileVO resultFile = new RsResultFileVO();
+        resultFile.setId(10L);
+        resultFile.setTaskId(1L);
+        resultFile.setObjectKey("result/NDVI/2026/05/task_1.tif");
+        resultFile.setStatus("PUBLISHED");
+        resultFile.setLayerName("rs_task_1");
+        resultFile.setWmsUrl("http://localhost:8081/geoserver/remote_sensing/wms?layers=remote_sensing:rs_task_1");
+        when(taskService.getResultFile(1L)).thenReturn(resultFile);
+
+        mockMvc.perform(get("/api/tasks/{taskId}/result", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.objectKey").value("result/NDVI/2026/05/task_1.tif"))
+                .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.data.layerName").value("rs_task_1"));
+
+        verify(taskService).getResultFile(1L);
     }
 
     @Test

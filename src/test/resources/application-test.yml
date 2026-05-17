@@ -56,6 +56,8 @@ rabbitmq:
 
 minio:
   endpoint: http://127.0.0.1:19000
+  public-endpoint: http://127.0.0.1:19000
+  region: us-east-1
   access-key: test-access-key
   secret-key: test-secret-key
   bucket-name: test-remote-sensing-images

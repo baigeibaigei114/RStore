@@ -2,6 +2,8 @@ package com.remotesensing.platform.exception;
 
 import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.common.ResultCode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,6 +15,8 @@ import org.springframework.web.multipart.MultipartException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException exception) {
@@ -47,6 +51,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception exception) {
+        log.error("Unhandled request exception", exception);
         return Result.fail(ResultCode.FAIL.getCode(), "系统异常，请联系管理员");
     }
 }

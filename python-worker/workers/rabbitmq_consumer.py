@@ -56,6 +56,10 @@ class RabbitMqConsumer:
             self._callback_client.update_status(task_id, "SUCCESS", extra=result)
             channel.basic_ack(delivery_tag=method.delivery_tag)
             print(f"[worker] 任务处理完成 task_id={task_id} task_type={task_type}", flush=True)
+        except ValueError as exc:
+            task_id = self._extract_task_id(message)
+            self._fail_non_retryable(channel, method.delivery_tag, task_id, str(exc))
+            print(f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}", flush=True)
         except Exception as exc:
             task_id = self._extract_task_id(message)
             if task_id is not None and self._settings.requeue_on_error:
@@ -63,6 +67,19 @@ class RabbitMqConsumer:
 
             self._requeue_or_reject(channel, method.delivery_tag, task_id, str(exc))
             print(f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}", flush=True)
+
+    def _fail_non_retryable(self, channel, delivery_tag: int, task_id: int | None, reason: str) -> None:
+        if task_id is None:
+            channel.basic_reject(delivery_tag=delivery_tag, requeue=False)
+            return
+
+        try:
+            self._callback_client.update_status(task_id, "FAILED", message=reason)
+            channel.basic_ack(delivery_tag=delivery_tag)
+        except Exception as callback_exc:
+            if self._settings.requeue_on_error:
+                self._callback_client.safe_update_status(task_id, "RETRYING", message=str(callback_exc))
+            self._requeue_or_reject(channel, delivery_tag, task_id, str(callback_exc))
 
     def _requeue_or_reject(self, channel, delivery_tag: int, task_id: int | None, reason: str) -> None:
         if self._settings.requeue_on_error:

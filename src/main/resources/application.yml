@@ -61,6 +61,8 @@ rabbitmq:
 
 minio:
   endpoint: http://localhost:9000
+  public-endpoint: http://localhost:9000
+  region: us-east-1
   access-key: minioadmin
   secret-key: minioadmin
   bucket-name: remote-sensing-images

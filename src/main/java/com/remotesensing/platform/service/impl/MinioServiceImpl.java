@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 @Service
 public class MinioServiceImpl implements MinioService {
@@ -74,10 +75,11 @@ public class MinioServiceImpl implements MinioService {
         validatePresignedObjectKey(objectKey);
 
         try {
-            String url = minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+            String url = buildPresignedClient().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(minioProperties.getBucketName())
                     .object(objectKey)
+                    .region(minioProperties.getRegion())
                     .expiry(DEFAULT_PRESIGNED_EXPIRE_SECONDS)
                     .build());
             return new FilePresignedUrlVO(objectKey, url, DEFAULT_PRESIGNED_EXPIRE_SECONDS);
@@ -163,6 +165,17 @@ public class MinioServiceImpl implements MinioService {
         if (!lowerFilename.endsWith(".tif") && !lowerFilename.endsWith(".tiff")) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只允许上传 .tif 或 .tiff 格式的 GeoTIFF 文件");
         }
+    }
+
+    private MinioClient buildPresignedClient() {
+        String endpoint = StringUtils.hasText(minioProperties.getPublicEndpoint())
+                ? minioProperties.getPublicEndpoint()
+                : minioProperties.getEndpoint();
+        return MinioClient.builder()
+                .endpoint(endpoint)
+                .credentials(minioProperties.getAccessKey(), minioProperties.getSecretKey())
+                .region(minioProperties.getRegion())
+                .build();
     }
 
     private void validatePresignedObjectKey(String objectKey) {

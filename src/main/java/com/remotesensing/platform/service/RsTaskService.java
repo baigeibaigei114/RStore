@@ -4,6 +4,7 @@ import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
+import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
 import com.remotesensing.platform.vo.RsTaskLogVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
@@ -28,6 +29,8 @@ public interface RsTaskService {
     RsTaskClaimVO claim(Long taskId);
 
     RsTaskVO getById(Long taskId);
+
+    RsResultFileVO getResultFile(Long taskId);
 
     PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize);
 
