@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.AdminRegionMapper">
+
+    <resultMap id="AdminRegionResultMap" type="com.remotesensing.platform.entity.AdminRegion">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="level" column="level"/>
+        <result property="parentId" column="parent_id"/>
+        <result property="boundaryGeoJson" column="boundary_geo_json"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id,
+        name,
+        level,
+        parent_id,
+        created_at,
+        updated_at
+    </sql>
+
+    <select id="selectChildren" resultMap="AdminRegionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_admin_region
+        <where>
+            <choose>
+                <when test="parentId == null">
+                    parent_id IS NULL
+                </when>
+                <otherwise>
+                    parent_id = #{parentId}
+                </otherwise>
+            </choose>
+        </where>
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectByLevel" resultMap="AdminRegionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_admin_region
+        WHERE level = #{level}
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectDetailById" resultMap="AdminRegionResultMap">
+        SELECT
+            id,
+            name,
+            level,
+            parent_id,
+            ST_AsGeoJSON(geom)::text AS boundary_geo_json,
+            created_at,
+            updated_at
+        FROM rs_admin_region
+        WHERE id = #{id}
+    </select>
+
+    <select id="searchByKeyword" resultMap="AdminRegionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM rs_admin_region
+        WHERE name ILIKE CONCAT('%', #{keyword}, '%')
+        ORDER BY id ASC
+        LIMIT 20
+    </select>
+</mapper>
