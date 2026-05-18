@@ -155,6 +155,22 @@ class RsImageServiceImplPermissionTest {
     }
 
     @Test
+    @DisplayName("行政区影像检索继续使用当前用户权限过滤")
+    void searchByRegionShouldKeepCurrentUserPermissionFilter() {
+        RsImageSearchDTO query = new RsImageSearchDTO();
+        query.setRegionId(310101L);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.searchByRegionPage(query, 0, 10, "user-b")).thenReturn(List.of());
+        when(imageMapper.countSearchByRegion(query, "user-b")).thenReturn(0L);
+
+        PageResult<RsImageListVO> result = service.searchByRegion(query, 1, 10);
+
+        assertThat(result.getRecords()).isEmpty();
+        verify(imageMapper).searchByRegionPage(query, 0, 10, "user-b");
+        verify(imageMapper).countSearchByRegion(query, "user-b");
+    }
+
+    @Test
     @DisplayName("只有 owner 可以修改影像可见性")
     void updateVisibilityShouldUseOwnerCondition() {
         RsImage image = new RsImage();

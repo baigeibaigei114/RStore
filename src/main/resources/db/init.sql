@@ -100,9 +100,12 @@ CREATE INDEX IF NOT EXISTS idx_rs_image_owner_visibility ON rs_image (owner_id, 
 
 CREATE TABLE IF NOT EXISTS rs_admin_region (
     id BIGSERIAL PRIMARY KEY,
+    adcode VARCHAR(20),
     name VARCHAR(255) NOT NULL,
     level VARCHAR(50) NOT NULL,
     parent_id BIGINT,
+    source VARCHAR(50),
+    source_version VARCHAR(50),
     geom geometry(MultiPolygon, 4326) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -118,6 +121,7 @@ COMMENT ON COLUMN rs_admin_region.geom IS '行政区空间范围，WGS84 坐标�
 CREATE INDEX IF NOT EXISTS idx_rs_admin_region_parent_id ON rs_admin_region (parent_id);
 CREATE INDEX IF NOT EXISTS idx_rs_admin_region_level ON rs_admin_region (level);
 CREATE INDEX IF NOT EXISTS idx_rs_admin_region_geom_gist ON rs_admin_region USING GIST (geom);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_admin_region_adcode ON rs_admin_region (adcode) WHERE adcode IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS rs_task (
     id BIGSERIAL PRIMARY KEY,

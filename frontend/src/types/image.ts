@@ -22,6 +22,16 @@ export interface ImageSearchParams {
   pageSize?: number
 }
 
+export interface ImageRegionSearchParams {
+  regionId: number
+  startTime?: string
+  endTime?: string
+  sensor?: string
+  maxCloudPercent?: number
+  pageNum?: number
+  pageSize?: number
+}
+
 export interface ImageListItem {
   id: number
   ownerId: string

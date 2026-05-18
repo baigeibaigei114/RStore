@@ -444,9 +444,7 @@ public class RsImageServiceImpl implements RsImageService {
         image.setHeight(metadata.getHeight());
         image.setBandCount(metadata.getBandCount());
         image.setProjection(metadata.getCrs());
-        if (metadata.getResolution() != null) {
-            image.setResolutionMeter(metadata.getResolution().getX());
-        }
+        image.setResolutionMeter(metadata.getResolutionMeter());
         if (metadata.getBounds() != null) {
             // rasterio 输出矩形 bounds，数据库侧用 Polygon footprint 支持 PostGIS 空间索引。
             image.setFootprintWkt(toPolygonWkt(metadata.getBounds()));

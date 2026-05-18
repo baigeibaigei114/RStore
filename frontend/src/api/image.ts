@@ -4,6 +4,7 @@ import type { PageResult } from '@/types/api'
 import type {
   ImageDetail,
   ImageListItem,
+  ImageRegionSearchParams,
   ImageSearchParams,
   ImageUploadParams,
   ImageVisibility,
@@ -11,6 +12,10 @@ import type {
 
 export function searchImagesApi(params: ImageSearchParams) {
   return request.get<unknown, PageResult<ImageListItem>>('/images/search', { params })
+}
+
+export function searchImagesByRegionApi(params: ImageRegionSearchParams) {
+  return request.get<unknown, PageResult<ImageListItem>>('/images/search-by-region', { params })
 }
 
 export function getImageDetailApi(id: number | string) {
