@@ -16,6 +16,8 @@ public class GeoTiffMetadataVO {
     private Bounds originalBounds;
     private List<BigDecimal> transform;
     private Resolution resolution;
+    private String resolutionUnit;
+    private BigDecimal resolutionMeter;
     private BigDecimal nodata;
 
     @Data

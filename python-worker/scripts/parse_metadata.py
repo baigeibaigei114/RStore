@@ -5,6 +5,7 @@ from pathlib import Path
 
 import rasterio
 from rasterio.warp import transform_bounds
+from math import cos, radians
 
 
 def transform_to_list(transform):
@@ -37,6 +38,45 @@ def bounds_tuple_to_dict(bounds):
     }
 
 
+def center_lat(bounds):
+    if not bounds:
+        return 0.0
+    return (bounds[1] + bounds[3]) / 2.0
+
+
+def projected_unit_factor(crs):
+    try:
+        factor = crs.linear_units_factor
+        if isinstance(factor, (list, tuple)) and len(factor) >= 2:
+            return float(factor[1])
+        if isinstance(factor, (int, float)):
+            return float(factor)
+    except Exception:
+        return None
+    return None
+
+
+def estimate_resolution_meter(dataset, wgs84_bounds):
+    if not dataset.crs:
+        return None
+
+    x_res = abs(dataset.res[0])
+    y_res = abs(dataset.res[1])
+    if dataset.crs.is_projected:
+        factor = projected_unit_factor(dataset.crs) or 1.0
+        return max(x_res, y_res) * factor
+
+    if dataset.crs.is_geographic:
+        lat = center_lat(wgs84_bounds)
+        meters_per_degree_lon = 111320.0 * cos(radians(lat))
+        meters_per_degree_lat = 110574.0
+        x_meter = x_res * abs(meters_per_degree_lon)
+        y_meter = y_res * meters_per_degree_lat
+        return max(x_meter, y_meter)
+
+    return None
+
+
 def parse_metadata(file_path):
     path = Path(file_path)
     if not path.exists():
@@ -52,6 +92,7 @@ def parse_metadata(file_path):
             if dataset.crs
             else None
         )
+        resolution_meter = estimate_resolution_meter(dataset, wgs84_bounds)
         return {
             "width": dataset.width,
             "height": dataset.height,
@@ -66,6 +107,10 @@ def parse_metadata(file_path):
                 "x": dataset.res[0],
                 "y": dataset.res[1],
             },
+            "resolutionUnit": "degree" if dataset.crs and dataset.crs.is_geographic else (
+                dataset.crs.linear_units if dataset.crs and dataset.crs.is_projected else None
+            ),
+            "resolutionMeter": resolution_meter,
             "nodata": dataset.nodata,
         }
 

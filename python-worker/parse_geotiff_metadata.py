@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import rasterio
+from math import cos, radians
 
 
 def transform_to_list(transform):
@@ -26,6 +27,41 @@ def bounds_to_dict(bounds):
     }
 
 
+def center_lat(bounds):
+    return (bounds.bottom + bounds.top) / 2.0
+
+
+def projected_unit_factor(crs):
+    try:
+        factor = crs.linear_units_factor
+        if isinstance(factor, (list, tuple)) and len(factor) >= 2:
+            return float(factor[1])
+        if isinstance(factor, (int, float)):
+            return float(factor)
+    except Exception:
+        return None
+    return None
+
+
+def estimate_resolution_meter(dataset):
+    if not dataset.crs:
+        return None
+
+    x_res = abs(dataset.res[0])
+    y_res = abs(dataset.res[1])
+    if dataset.crs.is_projected:
+        factor = projected_unit_factor(dataset.crs) or 1.0
+        return max(x_res, y_res) * factor
+
+    if dataset.crs.is_geographic:
+        lat = center_lat(dataset.bounds)
+        meters_per_degree_lon = 111320.0 * cos(radians(lat))
+        meters_per_degree_lat = 110574.0
+        return max(x_res * abs(meters_per_degree_lon), y_res * meters_per_degree_lat)
+
+    return None
+
+
 def parse_metadata(file_path):
     path = Path(file_path)
     if not path.exists():
@@ -46,6 +82,10 @@ def parse_metadata(file_path):
                 "x": dataset.res[0],
                 "y": dataset.res[1],
             },
+            "resolutionUnit": "degree" if dataset.crs and dataset.crs.is_geographic else (
+                dataset.crs.linear_units if dataset.crs and dataset.crs.is_projected else None
+            ),
+            "resolutionMeter": estimate_resolution_meter(dataset),
             "nodata": dataset.nodata,
         }
         return metadata
