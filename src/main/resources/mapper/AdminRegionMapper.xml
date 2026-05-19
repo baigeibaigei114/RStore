@@ -6,6 +6,7 @@
 
     <resultMap id="AdminRegionResultMap" type="com.remotesensing.platform.entity.AdminRegion">
         <id property="id" column="id"/>
+        <result property="adcode" column="adcode"/>
         <result property="name" column="name"/>
         <result property="level" column="level"/>
         <result property="parentId" column="parent_id"/>
@@ -16,6 +17,7 @@
 
     <sql id="BaseColumnList">
         id,
+        COALESCE(adcode, id::text) AS adcode,
         name,
         level,
         parent_id,
@@ -51,10 +53,16 @@
     <select id="selectDetailById" resultMap="AdminRegionResultMap">
         SELECT
             id,
+            COALESCE(adcode, id::text) AS adcode,
             name,
             level,
             parent_id,
-            ST_AsGeoJSON(geom)::text AS boundary_geo_json,
+            ST_AsGeoJSON(
+                CASE
+                    WHEN #{simplifyTolerance} &gt; 0 THEN ST_SimplifyPreserveTopology(geom, #{simplifyTolerance})
+                    ELSE geom
+                END
+            )::text AS boundary_geo_json,
             created_at,
             updated_at
         FROM rs_admin_region

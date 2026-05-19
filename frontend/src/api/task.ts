@@ -1,5 +1,6 @@
 import request from '@/api/request'
 import type { PageResult } from '@/types/api'
+import type { FilePresignedUrl } from '@/types/file'
 import type {
   TaskDetail,
   TaskListItem,
@@ -23,4 +24,8 @@ export function getTaskDetailApi(taskId: number | string) {
 
 export function listTaskLogsApi(taskId: number | string) {
   return request.get<unknown, TaskLog[]>(`/tasks/${taskId}/logs`)
+}
+
+export function getTaskResultDownloadUrlApi(taskId: number | string) {
+  return request.get<unknown, FilePresignedUrl>(`/tasks/${taskId}/result/download-url`)
 }

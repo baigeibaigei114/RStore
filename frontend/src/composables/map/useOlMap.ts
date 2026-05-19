@@ -2,8 +2,8 @@ import { onBeforeUnmount, ref, shallowRef } from 'vue'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import TileLayer from 'ol/layer/Tile'
-import OSM from 'ol/source/OSM'
 import TileWMS from 'ol/source/TileWMS'
+import XYZ from 'ol/source/XYZ'
 import { defaults as defaultControls, FullScreen, ScaleLine } from 'ol/control'
 import { fromLonLat, toLonLat } from 'ol/proj'
 import type { Coordinate } from 'ol/coordinate'
@@ -22,9 +22,12 @@ export interface WmsLayerOptions {
   opacity?: number
 }
 
+const CHINA_BASE_TILE_URL =
+  'https://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
+
 export function useOlMap(options: UseOlMapOptions = {}) {
   const map = shallowRef<Map>()
-  const baseLayer = shallowRef<TileLayer<OSM>>()
+  const baseLayer = shallowRef<TileLayer<XYZ>>()
   const wmsLayer = shallowRef<TileLayer<TileWMS>>()
   const pointerLonLat = ref<Coordinate | null>(null)
   const zoom = ref(options.zoom ?? 5)
@@ -37,7 +40,10 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     }
 
     baseLayer.value = new TileLayer({
-      source: new OSM(),
+      source: new XYZ({
+        url: CHINA_BASE_TILE_URL,
+        attributions: '地图底图 © 高德地图',
+      }),
       zIndex: 0,
     })
 

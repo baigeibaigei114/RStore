@@ -9,6 +9,14 @@
     <div class="detail-actions">
       <el-button @click="router.push('/tasks')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="refreshAll">刷新</el-button>
+      <el-button
+        type="primary"
+        :loading="resultDownloadLoading"
+        :disabled="!task?.outputObjectKey"
+        @click="downloadTaskResult"
+      >
+        下载结果影像
+      </el-button>
     </div>
 
     <el-row :gutter="16">
@@ -119,13 +127,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getTaskDetailApi, listTaskLogsApi } from '@/api/task'
+import { getTaskDetailApi, getTaskResultDownloadUrlApi, listTaskLogsApi } from '@/api/task'
 import type { TaskDetail, TaskLog, TaskStatus, TaskType } from '@/types/task'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const logLoading = ref(false)
+const resultDownloadLoading = ref(false)
 const polling = ref(false)
 const task = ref<TaskDetail | null>(null)
 const logs = ref<TaskLog[]>([])
@@ -179,6 +188,20 @@ async function fetchLogs() {
     logs.value = await listTaskLogsApi(taskId.value)
   } finally {
     logLoading.value = false
+  }
+}
+
+async function downloadTaskResult() {
+  if (!task.value?.outputObjectKey) {
+    return
+  }
+
+  resultDownloadLoading.value = true
+  try {
+    const presigned = await getTaskResultDownloadUrlApi(taskId.value)
+    window.open(presigned.url, '_blank', 'noopener,noreferrer')
+  } finally {
+    resultDownloadLoading.value = false
   }
 }
 

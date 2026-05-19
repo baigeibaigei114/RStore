@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AdminRegionServiceImpl implements AdminRegionService {
 
+    private static final double DEFAULT_SIMPLIFY_TOLERANCE = 0.001D;
+
     private final AdminRegionMapper adminRegionMapper;
 
     public AdminRegionServiceImpl(AdminRegionMapper adminRegionMapper) {
@@ -43,8 +45,8 @@ public class AdminRegionServiceImpl implements AdminRegionService {
 
     @Override
     @Transactional(readOnly = true)
-    public AdminRegionDetailVO getDetail(Long id) {
-        AdminRegion region = adminRegionMapper.selectDetailById(id);
+    public AdminRegionDetailVO getDetail(Long id, Double simplifyTolerance) {
+        AdminRegion region = adminRegionMapper.selectDetailById(id, normalizeSimplifyTolerance(simplifyTolerance));
         if (region == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "行政区不存在");
         }
@@ -65,6 +67,7 @@ public class AdminRegionServiceImpl implements AdminRegionService {
     private AdminRegionVO toVO(AdminRegion region) {
         AdminRegionVO vo = new AdminRegionVO();
         vo.setId(region.getId());
+        vo.setAdcode(region.getAdcode());
         vo.setName(region.getName());
         vo.setLevel(region.getLevel());
         vo.setParentId(region.getParentId());
@@ -74,10 +77,21 @@ public class AdminRegionServiceImpl implements AdminRegionService {
     private AdminRegionDetailVO toDetailVO(AdminRegion region) {
         AdminRegionDetailVO vo = new AdminRegionDetailVO();
         vo.setId(region.getId());
+        vo.setAdcode(region.getAdcode());
         vo.setName(region.getName());
         vo.setLevel(region.getLevel());
         vo.setParentId(region.getParentId());
         vo.setBoundaryGeoJson(region.getBoundaryGeoJson());
         return vo;
+    }
+
+    private double normalizeSimplifyTolerance(Double simplifyTolerance) {
+        if (simplifyTolerance == null) {
+            return DEFAULT_SIMPLIFY_TOLERANCE;
+        }
+        if (simplifyTolerance < 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "simplifyTolerance 不能小于 0");
+        }
+        return simplifyTolerance;
     }
 }

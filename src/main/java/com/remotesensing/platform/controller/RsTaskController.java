@@ -5,6 +5,7 @@ import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
@@ -47,6 +48,11 @@ public class RsTaskController {
     @GetMapping("/{taskId}/result")
     public Result<RsResultFileVO> getResultFile(@PathVariable Long taskId) {
         return Result.success(taskService.getResultFile(taskId));
+    }
+
+    @GetMapping("/{taskId}/result/download-url")
+    public Result<FilePresignedUrlVO> getResultDownloadUrl(@PathVariable Long taskId) {
+        return Result.success(taskService.getResultDownloadUrl(taskId));
     }
 
     @GetMapping

@@ -10,7 +10,7 @@ public interface AdminRegionService {
 
     List<AdminRegionVO> listByLevel(String level);
 
-    AdminRegionDetailVO getDetail(Long id);
+    AdminRegionDetailVO getDetail(Long id, Double simplifyTolerance);
 
     List<AdminRegionVO> search(String keyword);
 }

@@ -15,6 +15,7 @@ import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
@@ -105,6 +106,22 @@ class RsTaskControllerStatusTest {
                 .andExpect(jsonPath("$.data.layerName").value("rs_task_1"));
 
         verify(taskService).getResultFile(1L);
+    }
+
+    @Test
+    @DisplayName("获取任务结果下载 URL 成功")
+    void getTaskResultDownloadUrlShouldReturnSuccess() throws Exception {
+        when(taskService.getResultDownloadUrl(1L))
+                .thenReturn(new FilePresignedUrlVO("result/NDVI/2026/05/task_1.tif", "http://minio/result", 1800));
+
+        mockMvc.perform(get("/api/tasks/{taskId}/result/download-url", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.objectKey").value("result/NDVI/2026/05/task_1.tif"))
+                .andExpect(jsonPath("$.data.url").value("http://minio/result"));
+
+        verify(taskService).getResultDownloadUrl(1L);
     }
 
     @Test

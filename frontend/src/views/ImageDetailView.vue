@@ -9,6 +9,9 @@
     <div class="detail-actions">
       <el-button @click="router.push('/images')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="fetchDetail">刷新</el-button>
+      <el-button type="primary" :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
+        下载原始影像
+      </el-button>
     </div>
 
     <el-skeleton v-if="loading && !image" :rows="8" animated />
@@ -133,14 +136,19 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getFilePresignedUrlApi } from '@/api/file'
-import { getImageDetailApi, updateImageVisibilityApi } from '@/api/image'
+import {
+  getImageDetailApi,
+  getImageDownloadUrlApi,
+  getImageThumbnailUrlApi,
+  updateImageVisibilityApi,
+} from '@/api/image'
 import type { ImageDetail, ImageStatus, ImageVisibility, ThumbnailStatus } from '@/types/image'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
+const downloadLoading = ref(false)
 const visibilitySaving = ref(false)
 const image = ref<ImageDetail | null>(null)
 const thumbnailUrl = ref('')
@@ -174,11 +182,25 @@ async function fetchDetail() {
     visibilityValue.value = detail.visibility
 
     if (detail.thumbnailObjectKey) {
-      const presigned = await getFilePresignedUrlApi(detail.thumbnailObjectKey)
+      const presigned = await getImageThumbnailUrlApi(detail.id)
       thumbnailUrl.value = presigned.url
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function downloadOriginalImage() {
+  if (!image.value) {
+    return
+  }
+
+  downloadLoading.value = true
+  try {
+    const presigned = await getImageDownloadUrlApi(image.value.id)
+    window.open(presigned.url, '_blank', 'noopener,noreferrer')
+  } finally {
+    downloadLoading.value = false
   }
 }
 

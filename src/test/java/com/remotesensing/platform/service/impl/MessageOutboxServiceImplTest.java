@@ -74,7 +74,7 @@ class MessageOutboxServiceImplTest {
 
         service.publishById(99L);
 
-        verify(outboxMapper).markSentByTaskId(1L);
+        verify(outboxMapper).markSentIfNotFailed(99L);
         verify(outboxMapper, never()).markPublishAttempt(org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         verifyNoInteractions(rabbitTemplate);

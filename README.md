@@ -375,6 +375,24 @@ CREATE INDEX IF NOT EXISTS idx_rs_admin_region_geom_gist ON rs_admin_region USIN
 psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260509_admin_region.sql
 ```
 
+当前演示数据导入约定使用行政区划代码 `adcode` 作为 `rs_admin_region.id`，接口会同时返回 `id` 和字符串类型的 `adcode`。现阶段二者取值相同，`/api/images/search-by-region` 仍使用 `regionId` 参数保持兼容；后续如果改为独立数据库主键，可以继续用 `adcode` 作为稳定行政区划编码。
+
+行政区级联与边界接口：
+
+```text
+GET http://localhost:8080/api/admin-regions/children
+GET http://localhost:8080/api/admin-regions/children?parentId=310000
+GET http://localhost:8080/api/admin-regions?level=province
+GET http://localhost:8080/api/admin-regions/310101
+GET http://localhost:8080/api/admin-regions/search?keyword=黄浦
+```
+
+`/api/admin-regions/{id}` 返回 `boundaryGeoJson` 用于前端绘制边界。默认使用展示级简化边界；如果确实需要原始边界，可以传：
+
+```text
+GET http://localhost:8080/api/admin-regions/310101?simplifyTolerance=0
+```
+
 接口地址：
 
 ```text

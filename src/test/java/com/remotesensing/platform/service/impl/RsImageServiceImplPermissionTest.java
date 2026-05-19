@@ -1,6 +1,7 @@
 package com.remotesensing.platform.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
@@ -15,11 +16,13 @@ import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.UploadProperties;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;
+import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.ThumbnailAsyncService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import com.remotesensing.platform.vo.RsImageListVO;
@@ -185,6 +188,69 @@ class RsImageServiceImplPermissionTest {
         service.updateVisibility(1L, "PUBLIC");
 
         verify(imageMapper).updateVisibility(1L, "user-a", Visibility.PUBLIC.dbValue());
+    }
+
+    @Test
+    @DisplayName("用户 A 可以获取自己 PRIVATE 影像的原始下载 URL")
+    void getDownloadUrlShouldAllowOwnerPrivateImage() {
+        RsImage image = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(1L, "user-a")).thenReturn(image);
+        when(minioService.generatePresignedUrl("raw/2026/05/a.tif"))
+                .thenReturn(new FilePresignedUrlVO("raw/2026/05/a.tif", "http://minio/a", 1800));
+
+        FilePresignedUrlVO result = service.getDownloadUrl(1L);
+
+        assertThat(result.getObjectKey()).isEqualTo("raw/2026/05/a.tif");
+        verify(minioService).generatePresignedUrl("raw/2026/05/a.tif");
+    }
+
+    @Test
+    @DisplayName("用户 B 不能获取用户 A PRIVATE 影像的原始下载 URL")
+    void getDownloadUrlShouldRejectOtherUsersPrivateImage() {
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.selectAccessibleById(1L, "user-b")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getDownloadUrl(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("影像记录不存在");
+    }
+
+    @Test
+    @DisplayName("用户 B 可以获取用户 A PUBLIC 影像的原始下载 URL")
+    void getDownloadUrlShouldAllowPublicImage() {
+        RsImage image = image(1L, "user-a", Visibility.PUBLIC.dbValue(), "raw/2026/05/public.tif", null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.selectAccessibleById(1L, "user-b")).thenReturn(image);
+        when(minioService.generatePresignedUrl("raw/2026/05/public.tif"))
+                .thenReturn(new FilePresignedUrlVO("raw/2026/05/public.tif", "http://minio/public", 1800));
+
+        FilePresignedUrlVO result = service.getDownloadUrl(1L);
+
+        assertThat(result.getUrl()).isEqualTo("http://minio/public");
+    }
+
+    @Test
+    @DisplayName("缩略图不存在时返回明确业务异常")
+    void getThumbnailUrlShouldFailWhenThumbnailMissing() {
+        RsImage image = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(1L, "user-a")).thenReturn(image);
+
+        assertThatThrownBy(() -> service.getThumbnailUrl(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("缩略图尚未生成");
+    }
+
+    private RsImage image(Long id, String ownerId, String visibility, String objectKey, String thumbnailObjectKey) {
+        RsImage image = new RsImage();
+        image.setId(id);
+        image.setOwnerId(ownerId);
+        image.setVisibility(visibility);
+        image.setObjectKey(objectKey);
+        image.setThumbnailObjectKey(thumbnailObjectKey);
+        image.setStatus(ImageStatus.READY.dbValue());
+        return image;
     }
 
     private GeoTiffMetadataVO metadata() {

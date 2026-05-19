@@ -32,8 +32,9 @@ public class AdminRegionController {
     }
 
     @GetMapping("/{id}")
-    public Result<AdminRegionDetailVO> getDetail(@PathVariable Long id) {
-        return Result.success(adminRegionService.getDetail(id));
+    public Result<AdminRegionDetailVO> getDetail(@PathVariable Long id,
+                                                 @RequestParam(required = false) Double simplifyTolerance) {
+        return Result.success(adminRegionService.getDetail(id, simplifyTolerance));
     }
 
     @GetMapping("/search")

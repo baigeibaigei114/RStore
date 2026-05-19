@@ -121,7 +121,7 @@ public class MessageOutboxServiceImpl implements MessageOutboxService {
                         rabbitMessage.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
                         return rabbitMessage;
                     },
-                    new CorrelationData(String.valueOf(taskId))
+                    new CorrelationData(String.valueOf(outbox.getId()))
             );
         } catch (AmqpException | JsonProcessingException exception) {
             handlePublishException(outbox, exception, nextRetryAt);
@@ -134,7 +134,7 @@ public class MessageOutboxServiceImpl implements MessageOutboxService {
             return false;
         }
         if (TaskStatus.fromDb(task.getStatus()).isTerminal()) {
-            outboxMapper.markSentByTaskId(outbox.getAggregateId());
+            outboxMapper.markSentIfNotFailed(outbox.getId());
             log.info("任务已进入终态，跳过 Outbox 投递，taskId={}, status={}",
                     task.getId(), task.getStatus());
             return true;
@@ -144,8 +144,11 @@ public class MessageOutboxServiceImpl implements MessageOutboxService {
 
     private void handlePublishException(MessageOutbox outbox, Exception exception, OffsetDateTime nextRetryAt) {
         String errorMessage = truncate("Outbox 投递失败：" + exception.getMessage());
-        outboxMapper.markFailedByTaskId(outbox.getAggregateId(), errorMessage, nextRetryAt);
-        MessageOutbox latest = outboxMapper.selectByTaskId(outbox.getAggregateId());
+        int updated = outboxMapper.markFailedIfSending(outbox.getId(), errorMessage, nextRetryAt);
+        if (updated <= 0) {
+            return;
+        }
+        MessageOutbox latest = outboxMapper.selectById(outbox.getId());
         if (latest != null && latest.getRetryCount() >= latest.getMaxRetryCount()) {
             taskFailureService.markFailedIfActive(
                     outbox.getAggregateId(),

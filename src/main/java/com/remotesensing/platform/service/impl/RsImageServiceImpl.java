@@ -20,6 +20,7 @@ import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.ThumbnailAsyncService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
@@ -147,11 +148,27 @@ public class RsImageServiceImpl implements RsImageService {
     @Override
     @Transactional(readOnly = true)
     public RsImageVO getById(Long id) {
-        RsImage image = imageMapper.selectAccessibleById(id, currentUserContext.getCurrentUserId());
-        if (image == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
+        return toVO(getAccessibleImage(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public FilePresignedUrlVO getDownloadUrl(Long id) {
+        RsImage image = getAccessibleImage(id);
+        if (isBlank(image.getObjectKey())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "原始影像文件不存在");
         }
-        return toVO(image);
+        return minioService.generatePresignedUrl(image.getObjectKey());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public FilePresignedUrlVO getThumbnailUrl(Long id) {
+        RsImage image = getAccessibleImage(id);
+        if (isBlank(image.getThumbnailObjectKey())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "缩略图尚未生成");
+        }
+        return minioService.generatePresignedUrl(image.getThumbnailObjectKey());
     }
 
     @Override
@@ -263,6 +280,14 @@ public class RsImageServiceImpl implements RsImageService {
         image.setObjectKey(uploadVO.getObjectKey());
         image.setStatus(ImageStatus.READY.dbValue());
         image.setThumbnailStatus(ThumbnailStatus.PENDING.dbValue());
+        return image;
+    }
+
+    private RsImage getAccessibleImage(Long id) {
+        RsImage image = imageMapper.selectAccessibleById(id, currentUserContext.getCurrentUserId());
+        if (image == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录不存在");
+        }
         return image;
     }
 
@@ -417,6 +442,10 @@ public class RsImageServiceImpl implements RsImageService {
 
     private String defaultIfBlank(String value, String defaultValue) {
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private Visibility normalizeVisibility(String visibility) {

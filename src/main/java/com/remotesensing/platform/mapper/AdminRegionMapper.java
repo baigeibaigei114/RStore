@@ -12,7 +12,7 @@ public interface AdminRegionMapper {
 
     List<AdminRegion> selectByLevel(@Param("level") String level);
 
-    AdminRegion selectDetailById(@Param("id") Long id);
+    AdminRegion selectDetailById(@Param("id") Long id, @Param("simplifyTolerance") double simplifyTolerance);
 
     List<AdminRegion> searchByKeyword(@Param("keyword") String keyword);
 }

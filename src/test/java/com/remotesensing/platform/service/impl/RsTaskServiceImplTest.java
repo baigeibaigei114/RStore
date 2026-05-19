@@ -29,6 +29,8 @@ import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
+import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,6 +71,9 @@ class RsTaskServiceImplTest {
     private GeoServerService geoServerService;
 
     @Mock
+    private MinioService minioService;
+
+    @Mock
     private CurrentUserContext currentUserContext;
 
     @Mock
@@ -90,6 +95,7 @@ class RsTaskServiceImplTest {
                 new ObjectMapper(),
                 messageOutboxService,
                 geoServerService,
+                minioService,
                 transactionManager,
                 currentUserContext
         );
@@ -223,6 +229,67 @@ class RsTaskServiceImplTest {
     }
 
     @Test
+    @DisplayName("用户可以获取自己 SUCCESS 任务的结果下载 URL，优先使用结果文件记录")
+    void getResultDownloadUrlShouldUseResultFileObjectKeyFirst() {
+        RsTask task = task(1L, "user-a", TaskStatus.SUCCESS.dbValue(), "result/NDVI/2026/05/task_1_old.tif");
+        RsResultFile resultFile = new RsResultFile();
+        resultFile.setObjectKey("result/NDVI/2026/05/task_1.tif");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(1L, "user-a")).thenReturn(task);
+        when(resultFileMapper.selectByTaskId(1L)).thenReturn(resultFile);
+        when(minioService.generatePresignedUrl("result/NDVI/2026/05/task_1.tif"))
+                .thenReturn(new FilePresignedUrlVO("result/NDVI/2026/05/task_1.tif", "http://minio/result", 1800));
+
+        FilePresignedUrlVO result = service.getResultDownloadUrl(1L);
+
+        assertThat(result.getObjectKey()).isEqualTo("result/NDVI/2026/05/task_1.tif");
+        verify(minioService).generatePresignedUrl("result/NDVI/2026/05/task_1.tif");
+    }
+
+    @Test
+    @DisplayName("结果文件记录不存在时 fallback 使用任务输出 objectKey")
+    void getResultDownloadUrlShouldFallbackToTaskOutputObjectKey() {
+        RsTask task = task(1L, "user-a", TaskStatus.SUCCESS.dbValue(), "result/NDVI/2026/05/task_1.tif");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(1L, "user-a")).thenReturn(task);
+        when(resultFileMapper.selectByTaskId(1L)).thenReturn(null);
+        when(minioService.generatePresignedUrl("result/NDVI/2026/05/task_1.tif"))
+                .thenReturn(new FilePresignedUrlVO("result/NDVI/2026/05/task_1.tif", "http://minio/fallback", 1800));
+
+        FilePresignedUrlVO result = service.getResultDownloadUrl(1L);
+
+        assertThat(result.getUrl()).isEqualTo("http://minio/fallback");
+    }
+
+    @Test
+    @DisplayName("非 SUCCESS 任务获取结果下载 URL 失败")
+    void getResultDownloadUrlShouldRejectNonSuccessTask() {
+        RsTask task = task(1L, "user-a", TaskStatus.RUNNING.dbValue(), "result/NDVI/2026/05/task_1.tif");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(1L, "user-a")).thenReturn(task);
+
+        assertThatThrownBy(() -> service.getResultDownloadUrl(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务尚未成功");
+
+        verify(resultFileMapper, never()).selectByTaskId(any());
+    }
+
+    @Test
+    @DisplayName("用户 B 不能获取用户 A 的任务结果下载 URL")
+    void getResultDownloadUrlShouldRejectOtherUsersTask() {
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(taskMapper.selectByIdForOwner(1L, "user-b")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getResultDownloadUrl(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务不存在");
+    }
+
+    @Test
     @DisplayName("Worker 状态回调使用当前状态保护")
     void updateStatusShouldRejectConcurrentOverwrite() {
         RsTask task = new RsTask();
@@ -291,5 +358,14 @@ class RsTaskServiceImplTest {
         RsTask task = invocation.getArgument(0);
         task.setId(1L);
         return 1;
+    }
+
+    private RsTask task(Long id, String ownerId, String status, String outputObjectKey) {
+        RsTask task = new RsTask();
+        task.setId(id);
+        task.setOwnerId(ownerId);
+        task.setStatus(status);
+        task.setOutputObjectKey(outputObjectKey);
+        return task;
     }
 }

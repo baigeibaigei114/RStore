@@ -124,25 +124,33 @@
           AND next_retry_at &lt;= #{now}
     </update>
 
-    <update id="markSentByTaskId">
+    <update id="markSentIfSending">
         UPDATE message_outbox
         SET status = 'SENT',
             sent_at = CURRENT_TIMESTAMP,
             error_message = NULL,
             updated_at = CURRENT_TIMESTAMP
-        WHERE aggregate_type = 'RS_TASK'
-          AND aggregate_id = #{taskId}
-          AND status IN ('PENDING', 'FAILED', 'SENDING')
+        WHERE id = #{id}
+          AND status = 'SENDING'
     </update>
 
-    <update id="markFailedByTaskId">
+    <update id="markSentIfNotFailed">
+        UPDATE message_outbox
+        SET status = 'SENT',
+            sent_at = CURRENT_TIMESTAMP,
+            error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('PENDING', 'SENDING')
+    </update>
+
+    <update id="markFailedIfSending">
         UPDATE message_outbox
         SET status = 'FAILED',
             error_message = #{errorMessage},
             next_retry_at = #{nextRetryAt},
             updated_at = CURRENT_TIMESTAMP
-        WHERE aggregate_type = 'RS_TASK'
-          AND aggregate_id = #{taskId}
-          AND status IN ('PENDING', 'SENDING')
+        WHERE id = #{id}
+          AND status = 'SENDING'
     </update>
 </mapper>

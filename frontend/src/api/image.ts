@@ -1,6 +1,7 @@
 import request from '@/api/request'
 import type { AxiosProgressEvent } from 'axios'
 import type { PageResult } from '@/types/api'
+import type { FilePresignedUrl } from '@/types/file'
 import type {
   ImageDetail,
   ImageListItem,
@@ -20,6 +21,14 @@ export function searchImagesByRegionApi(params: ImageRegionSearchParams) {
 
 export function getImageDetailApi(id: number | string) {
   return request.get<unknown, ImageDetail>(`/images/${id}`)
+}
+
+export function getImageDownloadUrlApi(imageId: number | string) {
+  return request.get<unknown, FilePresignedUrl>(`/images/${imageId}/download-url`)
+}
+
+export function getImageThumbnailUrlApi(imageId: number | string) {
+  return request.get<unknown, FilePresignedUrl>(`/images/${imageId}/thumbnail-url`)
 }
 
 export function uploadImageApi(

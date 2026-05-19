@@ -3,6 +3,7 @@ package com.remotesensing.platform.service;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
@@ -31,6 +32,8 @@ public interface RsTaskService {
     RsTaskVO getById(Long taskId);
 
     RsResultFileVO getResultFile(Long taskId);
+
+    FilePresignedUrlVO getResultDownloadUrl(Long taskId);
 
     PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize);
 

@@ -26,7 +26,9 @@ import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
+import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsTaskService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
@@ -66,6 +68,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private final ObjectMapper objectMapper;
     private final MessageOutboxService messageOutboxService;
     private final GeoServerService geoServerService;
+    private final MinioService minioService;
     private final TransactionTemplate transactionTemplate;
     private final CurrentUserContext currentUserContext;
 
@@ -78,6 +81,7 @@ public class RsTaskServiceImpl implements RsTaskService {
                              ObjectMapper objectMapper,
                              MessageOutboxService messageOutboxService,
                              GeoServerService geoServerService,
+                             MinioService minioService,
                              PlatformTransactionManager transactionManager,
                              CurrentUserContext currentUserContext) {
         this.imageMapper = imageMapper;
@@ -89,6 +93,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         this.objectMapper = objectMapper;
         this.messageOutboxService = messageOutboxService;
         this.geoServerService = geoServerService;
+        this.minioService = minioService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.currentUserContext = currentUserContext;
     }
@@ -139,6 +144,23 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务结果文件尚未生成，请稍后重试");
         }
         return toResultFileVO(resultFile);
+    }
+
+    @Override
+    public FilePresignedUrlVO getResultDownloadUrl(Long taskId) {
+        RsTask task = taskMapper.selectByIdForOwner(taskId, currentUserContext.getCurrentUserId());
+        if (task == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
+        }
+        if (TaskStatus.fromDb(task.getStatus()) != TaskStatus.SUCCESS) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务尚未成功，暂无结果文件");
+        }
+
+        String objectKey = resolveResultObjectKey(task);
+        if (isBlank(objectKey)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务结果文件尚未生成，请稍后重试");
+        }
+        return minioService.generatePresignedUrl(objectKey);
     }
 
     @Override
@@ -444,6 +466,14 @@ public class RsTaskServiceImpl implements RsTaskService {
         vo.setCreatedAt(resultFile.getCreatedAt());
         vo.setUpdatedAt(resultFile.getUpdatedAt());
         return vo;
+    }
+
+    private String resolveResultObjectKey(RsTask task) {
+        RsResultFile resultFile = resultFileMapper.selectByTaskId(task.getId());
+        if (resultFile != null && !isBlank(resultFile.getObjectKey())) {
+            return resultFile.getObjectKey();
+        }
+        return task.getOutputObjectKey();
     }
 
     private void releaseImageIfTaskFinished(RsTask task, TaskStatus targetStatus) {

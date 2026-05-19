@@ -21,9 +21,11 @@ public interface MessageOutboxMapper {
                            @Param("now") OffsetDateTime now,
                            @Param("nextRetryAt") OffsetDateTime nextRetryAt);
 
-    int markSentByTaskId(@Param("taskId") Long taskId);
+    int markSentIfSending(@Param("id") Long id);
 
-    int markFailedByTaskId(@Param("taskId") Long taskId,
-                           @Param("errorMessage") String errorMessage,
-                           @Param("nextRetryAt") OffsetDateTime nextRetryAt);
+    int markSentIfNotFailed(@Param("id") Long id);
+
+    int markFailedIfSending(@Param("id") Long id,
+                            @Param("errorMessage") String errorMessage,
+                            @Param("nextRetryAt") OffsetDateTime nextRetryAt);
 }

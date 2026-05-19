@@ -5,6 +5,7 @@ import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +20,10 @@ public interface RsImageService {
     RsImageVO upload(MultipartFile file, String name, String sensor, OffsetDateTime captureTime, BigDecimal cloudPercent);
 
     RsImageVO getById(Long id);
+
+    FilePresignedUrlVO getDownloadUrl(Long id);
+
+    FilePresignedUrlVO getThumbnailUrl(Long id);
 
     PageResult<RsImageVO> page(Integer pageNum, Integer pageSize);
 

@@ -8,6 +8,7 @@ import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.dto.RsImageVisibilityUpdateDTO;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.RsImageService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import jakarta.validation.Valid;
@@ -62,6 +63,16 @@ public class RsImageController {
     @GetMapping("/{id}")
     public Result<RsImageVO> getById(@PathVariable Long id) {
         return Result.success(imageService.getById(id));
+    }
+
+    @GetMapping("/{id}/download-url")
+    public Result<FilePresignedUrlVO> getDownloadUrl(@PathVariable Long id) {
+        return Result.success(imageService.getDownloadUrl(id));
+    }
+
+    @GetMapping("/{id}/thumbnail-url")
+    public Result<FilePresignedUrlVO> getThumbnailUrl(@PathVariable Long id) {
+        return Result.success(imageService.getThumbnailUrl(id));
     }
 
     @GetMapping

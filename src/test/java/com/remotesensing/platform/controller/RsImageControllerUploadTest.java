@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -14,6 +15,7 @@ import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.RsImageService;
+import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -155,6 +157,38 @@ class RsImageControllerUploadTest {
                 .andExpect(jsonPath("$.code").value(ResultCode.PARAM_ERROR.getCode()));
 
         verify(imageService, never()).upload(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("获取原始影像下载 URL 成功")
+    void getDownloadUrlShouldReturnSuccess() throws Exception {
+        when(imageService.getDownloadUrl(1L))
+                .thenReturn(new FilePresignedUrlVO("raw/2026/05/source.tif", "http://minio/raw", 1800));
+
+        mockMvc.perform(get("/api/images/{id}/download-url", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.objectKey").value("raw/2026/05/source.tif"))
+                .andExpect(jsonPath("$.data.url").value("http://minio/raw"));
+
+        verify(imageService).getDownloadUrl(1L);
+    }
+
+    @Test
+    @DisplayName("获取缩略图 URL 成功")
+    void getThumbnailUrlShouldReturnSuccess() throws Exception {
+        when(imageService.getThumbnailUrl(1L))
+                .thenReturn(new FilePresignedUrlVO("thumbnail/2026/05/1.png", "http://minio/thumbnail", 1800));
+
+        mockMvc.perform(get("/api/images/{id}/thumbnail-url", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.objectKey").value("thumbnail/2026/05/1.png"))
+                .andExpect(jsonPath("$.data.url").value("http://minio/thumbnail"));
+
+        verify(imageService).getThumbnailUrl(1L);
     }
 
     private RsImageVO buildMockImageVO() {
