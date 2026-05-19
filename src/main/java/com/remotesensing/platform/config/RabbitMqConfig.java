@@ -1,6 +1,7 @@
 package com.remotesensing.platform.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.config.properties.RabbitTaskProperties;
 import com.remotesensing.platform.service.RabbitPublishFailureService;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;

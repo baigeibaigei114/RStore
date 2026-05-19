@@ -8,7 +8,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.enums.MessageOutboxStatus;
 import com.remotesensing.platform.common.enums.TaskStatus;
-import com.remotesensing.platform.config.RabbitTaskProperties;
+import com.remotesensing.platform.config.properties.RabbitTaskProperties;
 import com.remotesensing.platform.entity.MessageOutbox;
 import com.remotesensing.platform.entity.RsTask;
 import com.remotesensing.platform.mapper.MessageOutboxMapper;

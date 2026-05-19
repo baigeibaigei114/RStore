@@ -1,5 +1,6 @@
 package com.remotesensing.platform.config;
 
+import com.remotesensing.platform.config.properties.UploadProperties;
 import java.util.concurrent.ThreadPoolExecutor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

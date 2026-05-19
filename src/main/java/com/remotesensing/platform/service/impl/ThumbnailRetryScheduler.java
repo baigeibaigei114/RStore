@@ -1,6 +1,6 @@
 package com.remotesensing.platform.service.impl;
 
-import com.remotesensing.platform.config.UploadProperties;
+import com.remotesensing.platform.config.properties.UploadProperties;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.service.ThumbnailAsyncService;
 import java.util.List;

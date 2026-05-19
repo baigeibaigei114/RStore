@@ -5,7 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.enums.MessageOutboxStatus;
 import com.remotesensing.platform.common.enums.TaskStatus;
-import com.remotesensing.platform.config.RabbitTaskProperties;
+import com.remotesensing.platform.config.properties.RabbitTaskProperties;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage;
 import com.remotesensing.platform.entity.MessageOutbox;
 import com.remotesensing.platform.entity.RsTask;

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @Service
 public class LayerServiceImpl implements LayerService {
@@ -26,8 +27,19 @@ public class LayerServiceImpl implements LayerService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final String PROXY_WMS_PATH = "/api/layers/%d/wms";
     private static final String PROXY_WCS_PATH = "/api/layers/%d/wcs";
+    private static final int MAX_RENDER_SIZE = 4096;
     private static final Set<String> WMS_FORCED_KEYS = Set.of("service", "layers");
     private static final Set<String> WCS_FORCED_KEYS = Set.of("service", "coverageid");
+    private static final Set<String> WMS_ALLOWED_KEYS = Set.of(
+            "request", "version", "bbox", "width", "height", "srs", "crs",
+            "format", "transparent", "styles", "exceptions", "tiled"
+    );
+    private static final Set<String> WCS_ALLOWED_KEYS = Set.of(
+            "request", "version", "format", "bbox", "subset", "width", "height",
+            "crs", "srs", "outputcrs"
+    );
+    private static final Set<String> WMS_ALLOWED_FORMATS = Set.of("image/png", "image/jpeg", "image/jpg");
+    private static final Set<String> WCS_ALLOWED_FORMATS = Set.of("image/tiff", "image/geotiff", "application/geotiff", "geotiff");
     private static final String REQUEST_PARAM = "request";
 
     private final LayerMapper layerMapper;
@@ -59,20 +71,24 @@ public class LayerServiceImpl implements LayerService {
     }
 
     @Override
-    public ResponseEntity<byte[]> proxyWms(Long id, MultiValueMap<String, String> queryParams) {
+    public ResponseEntity<StreamingResponseBody> proxyWms(Long id, MultiValueMap<String, String> queryParams) {
         LayerVO layer = getAccessiblePublishedLayer(id);
-        rejectCapabilitiesRequest(queryParams);
-        MultiValueMap<String, String> forwardedParams = copyWithoutKeys(queryParams, WMS_FORCED_KEYS);
+        validateRequest(queryParams, "GetMap", "WMS 代理只支持 GetMap 请求");
+        validateRenderSize(queryParams);
+        validateFormat(queryParams, WMS_ALLOWED_FORMATS, "WMS format 仅支持 image/png 或 image/jpeg");
+        MultiValueMap<String, String> forwardedParams = copyAllowedWithoutKeys(queryParams, WMS_ALLOWED_KEYS, WMS_FORCED_KEYS);
         forwardedParams.set("service", "WMS");
         forwardedParams.set("layers", qualifiedLayerName(layer));
         return geoServerProxyClient.proxy("/wms", forwardedParams);
     }
 
     @Override
-    public ResponseEntity<byte[]> proxyWcs(Long id, MultiValueMap<String, String> queryParams) {
+    public ResponseEntity<StreamingResponseBody> proxyWcs(Long id, MultiValueMap<String, String> queryParams) {
         LayerVO layer = getAccessiblePublishedLayer(id);
-        rejectCapabilitiesRequest(queryParams);
-        MultiValueMap<String, String> forwardedParams = copyWithoutKeys(queryParams, WCS_FORCED_KEYS);
+        validateRequest(queryParams, "GetCoverage", "WCS 代理只支持 GetCoverage 请求");
+        validateRenderSize(queryParams);
+        validateFormat(queryParams, WCS_ALLOWED_FORMATS, "WCS format 仅支持 GeoTIFF 输出");
+        MultiValueMap<String, String> forwardedParams = copyAllowedWithoutKeys(queryParams, WCS_ALLOWED_KEYS, WCS_FORCED_KEYS);
         forwardedParams.set("service", "WCS");
         forwardedParams.set("coverageId", qualifiedLayerName(layer));
         return geoServerProxyClient.proxy("/wcs", forwardedParams);
@@ -97,23 +113,55 @@ public class LayerServiceImpl implements LayerService {
         return layer.getWorkspace() + ":" + layer.getLayerName();
     }
 
-    private MultiValueMap<String, String> copyWithoutKeys(MultiValueMap<String, String> source, Set<String> excludedKeys) {
+    private MultiValueMap<String, String> copyAllowedWithoutKeys(MultiValueMap<String, String> source,
+                                                                 Set<String> allowedKeys,
+                                                                 Set<String> excludedKeys) {
         MultiValueMap<String, String> target = new LinkedMultiValueMap<>();
         if (source == null) {
             return target;
         }
         source.forEach((key, values) -> {
-            if (!excludedKeys.contains(key.toLowerCase(Locale.ROOT))) {
+            String normalizedKey = key.toLowerCase(Locale.ROOT);
+            if (allowedKeys.contains(normalizedKey) && !excludedKeys.contains(normalizedKey)) {
                 target.put(key, values);
             }
         });
         return target;
     }
 
-    private void rejectCapabilitiesRequest(MultiValueMap<String, String> queryParams) {
+    private void validateRequest(MultiValueMap<String, String> queryParams, String expectedRequest, String errorMessage) {
         String request = firstValueIgnoreCase(queryParams, REQUEST_PARAM);
-        if ("GetCapabilities".equalsIgnoreCase(request)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "图层代理暂不支持 GetCapabilities 请求");
+        if (!expectedRequest.equalsIgnoreCase(request)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), errorMessage);
+        }
+    }
+
+    private void validateRenderSize(MultiValueMap<String, String> queryParams) {
+        validatePositiveIntMax(firstValueIgnoreCase(queryParams, "width"), "width");
+        validatePositiveIntMax(firstValueIgnoreCase(queryParams, "height"), "height");
+    }
+
+    private void validatePositiveIntMax(String value, String paramName) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        try {
+            int size = Integer.parseInt(value.trim());
+            if (size < 1 || size > MAX_RENDER_SIZE) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 必须在 1 到 " + MAX_RENDER_SIZE + " 之间");
+            }
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 必须是整数");
+        }
+    }
+
+    private void validateFormat(MultiValueMap<String, String> queryParams, Set<String> allowedFormats, String errorMessage) {
+        String format = firstValueIgnoreCase(queryParams, "format");
+        if (format == null || format.isBlank()) {
+            return;
+        }
+        if (!allowedFormats.contains(format.trim().toLowerCase(Locale.ROOT))) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), errorMessage);
         }
     }
 

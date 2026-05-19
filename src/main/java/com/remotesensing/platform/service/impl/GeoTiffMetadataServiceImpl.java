@@ -3,7 +3,7 @@ package com.remotesensing.platform.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.ResultCode;
-import com.remotesensing.platform.config.PythonWorkerProperties;
+import com.remotesensing.platform.config.properties.PythonWorkerProperties;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;

@@ -10,6 +10,7 @@ public class LayerVO {
     private Long taskId;
     private Long imageId;
     private String imageName;
+    private OffsetDateTime imageDeletedAt;
     private String taskType;
     private String taskName;
     private String fileName;

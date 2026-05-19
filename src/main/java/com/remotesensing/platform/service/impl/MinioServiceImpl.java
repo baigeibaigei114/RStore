@@ -2,7 +2,7 @@ package com.remotesensing.platform.service.impl;
 
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.CurrentUserContext;
-import com.remotesensing.platform.config.MinioProperties;
+import com.remotesensing.platform.config.properties.MinioProperties;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.FileObjectMapper;
 import com.remotesensing.platform.service.MinioService;

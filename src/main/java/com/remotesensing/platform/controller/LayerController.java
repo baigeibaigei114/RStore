@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @RestController
 @RequestMapping("/layers")
@@ -37,14 +38,14 @@ public class LayerController {
     }
 
     @GetMapping("/{id}/wms")
-    public ResponseEntity<byte[]> proxyWms(@PathVariable Long id,
-                                           @RequestParam MultiValueMap<String, String> queryParams) {
+    public ResponseEntity<StreamingResponseBody> proxyWms(@PathVariable Long id,
+                                                          @RequestParam MultiValueMap<String, String> queryParams) {
         return layerService.proxyWms(id, queryParams);
     }
 
     @GetMapping("/{id}/wcs")
-    public ResponseEntity<byte[]> proxyWcs(@PathVariable Long id,
-                                           @RequestParam MultiValueMap<String, String> queryParams) {
+    public ResponseEntity<StreamingResponseBody> proxyWcs(@PathVariable Long id,
+                                                          @RequestParam MultiValueMap<String, String> queryParams) {
         return layerService.proxyWcs(id, queryParams);
     }
 }

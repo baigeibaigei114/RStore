@@ -1,4 +1,4 @@
-package com.remotesensing.platform.config;
+package com.remotesensing.platform.config.properties;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

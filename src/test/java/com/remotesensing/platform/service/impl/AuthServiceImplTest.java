@@ -6,7 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
-import com.remotesensing.platform.config.AuthProperties;
+import com.remotesensing.platform.config.properties.AuthProperties;
 import com.remotesensing.platform.dto.LoginRequestDTO;
 import com.remotesensing.platform.entity.SysUser;
 import com.remotesensing.platform.exception.BusinessException;
@@ -40,7 +40,7 @@ class AuthServiceImplTest {
         passwordEncoder = new BCryptPasswordEncoder();
         AuthProperties authProperties = new AuthProperties();
         authProperties.setJwtSecret("test-secret");
-        JwtTokenService jwtTokenService = new JwtTokenService(authProperties, new ObjectMapper());
+        JwtTokenService jwtTokenService = new JwtTokenServiceImpl(authProperties, new ObjectMapper());
         authService = new AuthServiceImpl(sysUserMapper, passwordEncoder, jwtTokenService, currentUserContext);
     }
 

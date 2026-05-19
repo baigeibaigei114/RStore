@@ -26,6 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @ActiveProfiles("test")
 @WebMvcTest(LayerController.class)
@@ -85,7 +86,7 @@ class LayerControllerTest {
         when(layerService.proxyWms(eq(12L), any()))
                 .thenReturn(ResponseEntity.ok()
                         .contentType(MediaType.IMAGE_PNG)
-                        .body(new byte[]{1, 2, 3}));
+                        .body(streaming(new byte[]{1, 2, 3})));
 
         mockMvc.perform(get("/api/layers/{id}/wms", 12L)
                         .contextPath("/api")
@@ -104,7 +105,7 @@ class LayerControllerTest {
         when(layerService.proxyWcs(eq(12L), any()))
                 .thenReturn(ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                        .body(new byte[]{4, 5, 6}));
+                        .body(streaming(new byte[]{4, 5, 6})));
 
         mockMvc.perform(get("/api/layers/{id}/wcs", 12L)
                         .contextPath("/api")
@@ -115,5 +116,9 @@ class LayerControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(new byte[]{4, 5, 6}));
 
         verify(layerService).proxyWcs(eq(12L), any());
+    }
+
+    private StreamingResponseBody streaming(byte[] bytes) {
+        return outputStream -> outputStream.write(bytes);
     }
 }

@@ -12,6 +12,7 @@ import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.LayerMapper;
 import com.remotesensing.platform.service.GeoServerProxyClient;
 import com.remotesensing.platform.vo.LayerVO;
+import java.io.ByteArrayOutputStream;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @ExtendWith(MockitoExtension.class)
 @SuppressWarnings("unchecked")
@@ -124,25 +126,27 @@ class LayerServiceImplTest {
         MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("request", "GetMap");
         params.add("format", "image/png");
+        params.add("sld_body", "<StyledLayerDescriptor/>");
         params.add("layers", "other:layer");
-        ResponseEntity<byte[]> response = ResponseEntity.ok()
+        ResponseEntity<StreamingResponseBody> response = ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_PNG)
-                .body(new byte[]{1, 2, 3});
+                .body(streaming(new byte[]{1, 2, 3}));
 
         when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
         when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
         when(geoServerProxyClient.proxy(org.mockito.ArgumentMatchers.eq("/wms"), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(response);
 
-        ResponseEntity<byte[]> result = service.proxyWms(12L, params);
+        ResponseEntity<StreamingResponseBody> result = service.proxyWms(12L, params);
 
         ArgumentCaptor<MultiValueMap<String, String>> captor = ArgumentCaptor.forClass(MultiValueMap.class);
         verify(geoServerProxyClient).proxy(org.mockito.ArgumentMatchers.eq("/wms"), captor.capture());
         assertThat(captor.getValue().getFirst("service")).isEqualTo("WMS");
         assertThat(captor.getValue().getFirst("layers")).isEqualTo("remote_sensing:task_5_ndvi");
         assertThat(captor.getValue().getFirst("format")).isEqualTo("image/png");
+        assertThat(captor.getValue()).doesNotContainKey("sld_body");
         assertThat(result.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);
-        assertThat(result.getBody()).containsExactly(1, 2, 3);
+        assertThat(streamToBytes(result.getBody())).containsExactly(1, 2, 3);
     }
 
     @Test
@@ -151,12 +155,13 @@ class LayerServiceImplTest {
         LayerVO layer = layer(12L, "user-a", Visibility.PUBLIC.dbValue(), "remote_sensing", "task_5_ndvi");
         MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("request", "GetCoverage");
+        params.add("format", "image/tiff");
         params.add("coverageId", "other:coverage");
 
         when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
         when(layerMapper.selectAccessiblePublishedById(12L, "user-b")).thenReturn(layer);
         when(geoServerProxyClient.proxy(org.mockito.ArgumentMatchers.eq("/wcs"), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(ResponseEntity.ok(new byte[]{4, 5}));
+                .thenReturn(ResponseEntity.ok(streaming(new byte[]{4, 5})));
 
         service.proxyWcs(12L, params);
 
@@ -178,8 +183,8 @@ class LayerServiceImplTest {
     }
 
     @Test
-    @DisplayName("WMS/WCS 代理暂不支持 GetCapabilities")
-    void proxyShouldRejectGetCapabilities() {
+    @DisplayName("WMS 代理只允许 GetMap 请求")
+    void proxyWmsShouldOnlyAllowGetMap() {
         LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_ndvi");
         MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("request", "GetCapabilities");
@@ -188,7 +193,22 @@ class LayerServiceImplTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.proxyWms(12L, params))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("GetCapabilities");
+                .hasMessageContaining("GetMap");
+    }
+
+    @Test
+    @DisplayName("WMS 代理限制渲染尺寸")
+    void proxyWmsShouldLimitRenderSize() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_ndvi");
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("request", "GetMap");
+        params.add("width", "4097");
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.proxyWms(12L, params))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("width");
     }
 
     @Test
@@ -204,6 +224,7 @@ class LayerServiceImplTest {
         assertThat(xml).contains("rf.workspace IS NOT NULL");
         assertThat(xml).contains("(rf.visibility = 'PUBLIC' OR rf.owner_id = #{currentUserId})");
         assertThat(xml).contains("selectAccessiblePublishedById");
+        assertThat(xml).contains("i.deleted_at AS image_deleted_at");
     }
 
     private LayerVO layer(Long id, String ownerId, String visibility, String workspace, String layerName) {
@@ -223,5 +244,19 @@ class LayerServiceImplTest {
         layer.setLayerName(layerName);
         layer.setPublishedAt(OffsetDateTime.parse("2026-05-19T10:00:00+08:00"));
         return layer;
+    }
+
+    private StreamingResponseBody streaming(byte[] bytes) {
+        return outputStream -> outputStream.write(bytes);
+    }
+
+    private byte[] streamToBytes(StreamingResponseBody body) {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try {
+            body.writeTo(outputStream);
+        } catch (Exception exception) {
+            throw new AssertionError(exception);
+        }
+        return outputStream.toByteArray();
     }
 }

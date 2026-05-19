@@ -9,6 +9,7 @@
         rf.task_id,
         rf.image_id,
         i.image_name,
+        i.deleted_at AS image_deleted_at,
         t.task_type,
         t.task_name,
         rf.file_name,

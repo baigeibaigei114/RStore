@@ -8,7 +8,7 @@ import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.ThumbnailStatus;
 import com.remotesensing.platform.common.enums.Visibility;
-import com.remotesensing.platform.config.UploadProperties;
+import com.remotesensing.platform.config.properties.UploadProperties;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;

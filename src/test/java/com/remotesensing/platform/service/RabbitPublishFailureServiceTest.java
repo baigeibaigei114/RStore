@@ -7,9 +7,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.remotesensing.platform.config.RabbitTaskProperties;
+import com.remotesensing.platform.config.properties.RabbitTaskProperties;
 import com.remotesensing.platform.entity.MessageOutbox;
 import com.remotesensing.platform.mapper.MessageOutboxMapper;
+import com.remotesensing.platform.service.impl.RabbitPublishFailureServiceImpl;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,7 +39,7 @@ class RabbitPublishFailureServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RabbitPublishFailureService(outboxMapper, taskFailureService, rabbitTaskProperties);
+        service = new RabbitPublishFailureServiceImpl(outboxMapper, taskFailureService, rabbitTaskProperties);
     }
 
     @Test

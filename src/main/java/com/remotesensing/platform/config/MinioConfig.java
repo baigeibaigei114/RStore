@@ -1,5 +1,8 @@
 package com.remotesensing.platform.config;
 
+import com.remotesensing.platform.config.properties.MinioProperties;
+import com.remotesensing.platform.config.properties.PythonWorkerProperties;
+import com.remotesensing.platform.config.properties.UploadProperties;
 import io.minio.MinioClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;

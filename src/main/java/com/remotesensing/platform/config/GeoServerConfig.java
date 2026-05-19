@@ -1,5 +1,6 @@
 package com.remotesensing.platform.config;
 
+import com.remotesensing.platform.config.properties.GeoServerProperties;
 import java.util.List;
 import java.time.Duration;
 import java.util.concurrent.Executor;

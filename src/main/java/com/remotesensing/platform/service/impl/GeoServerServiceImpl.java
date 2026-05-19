@@ -5,7 +5,7 @@ import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.enums.ResultFileStatus;
 import com.remotesensing.platform.common.enums.TaskStatus;
 import com.remotesensing.platform.common.enums.Visibility;
-import com.remotesensing.platform.config.GeoServerProperties;
+import com.remotesensing.platform.config.properties.GeoServerProperties;
 import com.remotesensing.platform.entity.RsResultFile;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsResultFileMapper;
