@@ -60,3 +60,7 @@ python-worker/.pytest_cache/
 # Docker local data directories, if bind mounts are introduced later
 docker-data/
 data/
+
+docs/
+
+.claude/

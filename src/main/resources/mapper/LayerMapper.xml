@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.LayerMapper">
+
+    <sql id="LayerColumnList">
+        rf.id,
+        rf.task_id,
+        rf.image_id,
+        i.image_name,
+        t.task_type,
+        t.task_name,
+        rf.file_name,
+        rf.file_type,
+        rf.owner_id,
+        rf.visibility,
+        rf.workspace,
+        rf.store_name,
+        rf.layer_name,
+        rf.published_at,
+        rf.created_at,
+        rf.updated_at
+    </sql>
+
+    <sql id="LayerBaseFromWhere">
+        FROM rs_result_file rf
+        LEFT JOIN rs_task t ON t.id = rf.task_id
+        LEFT JOIN rs_image i ON i.id = rf.image_id
+        WHERE rf.status = 'PUBLISHED'
+          AND rf.layer_name IS NOT NULL
+          AND rf.layer_name != ''
+          AND rf.workspace IS NOT NULL
+          AND rf.workspace != ''
+          AND (rf.visibility = 'PUBLIC' OR rf.owner_id = #{currentUserId})
+        <if test="query.taskType != null">
+          AND t.task_type = #{query.taskType}
+        </if>
+        <if test="query.imageId != null">
+          AND rf.image_id = #{query.imageId}
+        </if>
+        <if test="query.keyword != null">
+          AND (
+            rf.file_name ILIKE CONCAT('%', #{query.keyword}, '%')
+            OR i.image_name ILIKE CONCAT('%', #{query.keyword}, '%')
+            OR t.task_name ILIKE CONCAT('%', #{query.keyword}, '%')
+          )
+        </if>
+    </sql>
+
+    <select id="selectPage" resultType="com.remotesensing.platform.vo.LayerVO">
+        SELECT
+        <include refid="LayerColumnList"/>
+        <include refid="LayerBaseFromWhere"/>
+        ORDER BY rf.published_at DESC NULLS LAST, rf.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        <include refid="LayerBaseFromWhere"/>
+    </select>
+
+    <select id="selectAccessiblePublishedById" resultType="com.remotesensing.platform.vo.LayerVO">
+        SELECT
+        <include refid="LayerColumnList"/>
+        FROM rs_result_file rf
+        LEFT JOIN rs_task t ON t.id = rf.task_id
+        LEFT JOIN rs_image i ON i.id = rf.image_id
+        WHERE rf.id = #{id}
+          AND rf.status = 'PUBLISHED'
+          AND rf.layer_name IS NOT NULL
+          AND rf.layer_name != ''
+          AND rf.workspace IS NOT NULL
+          AND rf.workspace != ''
+          AND (rf.visibility = 'PUBLIC' OR rf.owner_id = #{currentUserId})
+    </select>
+</mapper>
