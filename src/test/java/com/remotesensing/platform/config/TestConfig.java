@@ -1,10 +1,16 @@
 package com.remotesensing.platform.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.config.properties.AuthProperties;
 import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.impl.JwtTokenServiceImpl;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import io.minio.MinioClient;
 import org.mockito.Mockito;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -12,7 +18,20 @@ import org.springframework.context.annotation.Profile;
 
 @TestConfiguration
 @Profile("test")
+@EnableConfigurationProperties(AuthProperties.class)
 public class TestConfig {
+
+    @Bean
+    @Primary
+    public JwtTokenService testJwtTokenService(AuthProperties authProperties, ObjectMapper objectMapper) {
+        return new JwtTokenServiceImpl(authProperties, objectMapper);
+    }
+
+    @Bean
+    @Primary
+    public CurrentUserContext testCurrentUserContext(JwtTokenService jwtTokenService, AuthProperties authProperties) {
+        return new CurrentUserContext(jwtTokenService, authProperties);
+    }
 
     @Bean
     @Primary

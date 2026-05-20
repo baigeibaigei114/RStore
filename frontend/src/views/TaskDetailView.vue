@@ -103,6 +103,48 @@
         <el-card class="detail-card" shadow="never">
           <template #header>
             <div class="card-header">
+              <span>结果发布</span>
+              <el-tag v-if="resultFile?.status" :type="resultStatusType(resultFile.status)" effect="plain">
+                {{ resultStatusText(resultFile.status) }}
+              </el-tag>
+            </div>
+          </template>
+
+          <el-skeleton v-if="resultLoading" :rows="5" animated />
+          <template v-else-if="resultFile">
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="结果文件">{{ resultFile.fileName || '暂无' }}</el-descriptions-item>
+              <el-descriptions-item label="可见性">
+                {{ resultFile.visibility === 'PUBLIC' ? '公开' : '私有' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="图层名称">
+                {{ qualifiedResultLayerName || '暂无' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="发布时间">
+                {{ formatDateTime(resultFile.publishedAt) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="发布错误">
+                <span :class="{ 'error-text-inline': Boolean(resultFile.publishErrorMessage) }">
+                  {{ resultFile.publishErrorMessage || '无' }}
+                </span>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <div class="map-panel-actions">
+              <el-button
+                :disabled="!resultFile.imageId || !task?.taskType"
+                @click="openResultLayerInMap"
+              >
+                地图查看
+              </el-button>
+            </div>
+          </template>
+          <el-empty v-else description="暂无结果发布信息" />
+        </el-card>
+
+        <el-card class="detail-card" shadow="never">
+          <template #header>
+            <div class="card-header">
               <span>轮询状态</span>
               <el-tag :type="polling ? 'success' : 'info'" effect="plain">
                 {{ polling ? '自动刷新中' : '已停止' }}
@@ -127,16 +169,23 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getTaskDetailApi, getTaskResultDownloadUrlApi, listTaskLogsApi } from '@/api/task'
-import type { TaskDetail, TaskLog, TaskStatus, TaskType } from '@/types/task'
+import {
+  getTaskDetailApi,
+  getTaskResultDownloadUrlApi,
+  getTaskResultFileApi,
+  listTaskLogsApi,
+} from '@/api/task'
+import type { TaskDetail, TaskLog, TaskResultFile, TaskStatus, TaskType } from '@/types/task'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const logLoading = ref(false)
 const resultDownloadLoading = ref(false)
+const resultLoading = ref(false)
 const polling = ref(false)
 const task = ref<TaskDetail | null>(null)
+const resultFile = ref<TaskResultFile | null>(null)
 const logs = ref<TaskLog[]>([])
 const pollingTimer = ref<number>()
 
@@ -152,6 +201,13 @@ const formattedParams = computed(() => {
   } catch {
     return task.value.params
   }
+})
+
+const qualifiedResultLayerName = computed(() => {
+  if (!resultFile.value?.workspace || !resultFile.value?.layerName) {
+    return ''
+  }
+  return `${resultFile.value.workspace}:${resultFile.value.layerName}`
 })
 
 onMounted(() => {
@@ -170,7 +226,16 @@ watch(
 )
 
 async function refreshAll() {
-  await Promise.all([fetchTask(), fetchLogs()])
+  await fetchTask()
+
+  const jobs: Promise<void>[] = [fetchLogs()]
+  if (task.value?.status === 'SUCCESS' || task.value?.outputObjectKey) {
+    jobs.push(fetchResultFile())
+  } else {
+    resultFile.value = null
+  }
+
+  await Promise.all(jobs)
 }
 
 async function fetchTask() {
@@ -188,6 +253,17 @@ async function fetchLogs() {
     logs.value = await listTaskLogsApi(taskId.value)
   } finally {
     logLoading.value = false
+  }
+}
+
+async function fetchResultFile() {
+  resultLoading.value = true
+  try {
+    resultFile.value = await getTaskResultFileApi(taskId.value)
+  } catch {
+    resultFile.value = null
+  } finally {
+    resultLoading.value = false
   }
 }
 
@@ -211,6 +287,20 @@ function syncPolling() {
     return
   }
   stopPolling()
+}
+
+function openResultLayerInMap() {
+  if (!resultFile.value?.imageId || !task.value?.taskType) {
+    return
+  }
+
+  router.push({
+    path: '/map',
+    query: {
+      imageId: String(resultFile.value.imageId),
+      taskType: task.value.taskType,
+    },
+  })
 }
 
 function startPolling() {
@@ -263,6 +353,23 @@ function taskStatusType(status: TaskStatus) {
   if (status === 'SUCCESS') return 'success'
   if (status === 'FAILED' || status === 'CANCELED') return 'danger'
   if (status === 'RUNNING' || status === 'PENDING' || status === 'RETRYING') return 'warning'
+  return 'info'
+}
+
+function resultStatusText(status: string) {
+  const map: Record<string, string> = {
+    PENDING: '待发布',
+    PUBLISHING: '发布中',
+    PUBLISHED: '已发布',
+    FAILED: '发布失败',
+  }
+  return map[status] || status
+}
+
+function resultStatusType(status: string) {
+  if (status === 'PUBLISHED') return 'success'
+  if (status === 'FAILED') return 'danger'
+  if (status === 'PUBLISHING' || status === 'PENDING') return 'warning'
   return 'info'
 }
 

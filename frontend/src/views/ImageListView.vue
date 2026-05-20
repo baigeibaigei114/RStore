@@ -101,9 +101,18 @@
             {{ formatDateTime(row.acquisitionTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button
+              link
+              type="danger"
+              :disabled="!canDeleteImage(row)"
+              :loading="deletingId === row.id"
+              @click="confirmDelete(row)"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -125,9 +134,10 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
-import { searchImagesApi } from '@/api/image'
+import { deleteImageApi, searchImagesApi } from '@/api/image'
 import type {
   ImageListItem,
   ImageSearchParams,
@@ -144,6 +154,7 @@ interface QueryForm {
 
 const router = useRouter()
 const loading = ref(false)
+const deletingId = ref<number>()
 const imageList = ref<ImageListItem[]>([])
 
 const queryForm = reactive<QueryForm>({
@@ -205,6 +216,40 @@ function resetSearch() {
 
 function openDetail(row: ImageListItem) {
   router.push(`/images/${row.id}`)
+}
+
+function canDeleteImage(row: ImageListItem) {
+  return row.status === 'READY' || row.status === 'FAILED'
+}
+
+async function confirmDelete(row: ImageListItem) {
+  if (!canDeleteImage(row)) {
+    ElMessage.warning('当前影像状态不允许删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除影像“${row.imageName}”？删除后将从列表和空间检索中隐藏，历史任务记录仍会保留。`,
+      '删除影像',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deletingId.value = row.id
+  try {
+    await deleteImageApi(row.id)
+    ElMessage.success('影像已删除')
+    fetchImages()
+  } finally {
+    deletingId.value = undefined
+  }
 }
 
 function formatSize(width?: number, height?: number) {

@@ -422,9 +422,34 @@ body {
 
 .map-panel-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
+}
+
+.layer-option {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.45;
+}
+
+.layer-option span,
+.layer-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-option small,
+.layer-count {
+  color: #667085;
+  font-size: 12px;
+}
+
+.layer-count {
+  margin-right: auto;
 }
 
 .spatial-query-layout {

@@ -40,6 +40,9 @@ app:
   auth:
     jwt-secret: test-secret-change-me
     token-expire-minutes: 60
+    dev-user-header-enabled: true
+    default-user-id: dev-user
+    worker-token: test-worker-token
 
 rabbitmq:
   remote-sensing-task:

@@ -9,6 +9,14 @@
     <div class="detail-actions">
       <el-button @click="router.push('/images')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="fetchDetail">刷新</el-button>
+      <el-button
+        type="danger"
+        :loading="deleteLoading"
+        :disabled="!image || !canDeleteImage"
+        @click="confirmDelete"
+      >
+        删除影像
+      </el-button>
       <el-button type="primary" :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
         下载原始影像
       </el-button>
@@ -90,6 +98,8 @@
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ formatDateTime(image.createdAt) }}</el-descriptions-item>
+              <el-descriptions-item label="删除时间">{{ formatDateTime(image.deletedAt) }}</el-descriptions-item>
+              <el-descriptions-item label="删除原因">{{ image.deletedReason || '无' }}</el-descriptions-item>
             </el-descriptions>
           </el-card>
 
@@ -133,10 +143,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  deleteImageApi,
   getImageDetailApi,
   getImageDownloadUrlApi,
   getImageThumbnailUrlApi,
@@ -149,6 +160,7 @@ const router = useRouter()
 
 const loading = ref(false)
 const downloadLoading = ref(false)
+const deleteLoading = ref(false)
 const visibilitySaving = ref(false)
 const image = ref<ImageDetail | null>(null)
 const thumbnailUrl = ref('')
@@ -167,6 +179,8 @@ const formattedMetadata = computed(() => {
     return image.value.metadataJson
   }
 })
+
+const canDeleteImage = computed(() => image.value?.status === 'READY' || image.value?.status === 'FAILED')
 
 onMounted(() => {
   fetchDetail()
@@ -201,6 +215,40 @@ async function downloadOriginalImage() {
     window.open(presigned.url, '_blank', 'noopener,noreferrer')
   } finally {
     downloadLoading.value = false
+  }
+}
+
+async function confirmDelete() {
+  if (!image.value) {
+    return
+  }
+
+  if (!canDeleteImage.value) {
+    ElMessage.warning('当前影像状态不允许删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除影像“${image.value.imageName}”？删除后将从列表和空间检索中隐藏，历史任务记录仍会保留。`,
+      '删除影像',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deleteLoading.value = true
+  try {
+    await deleteImageApi(image.value.id)
+    ElMessage.success('影像已删除')
+    router.push('/images')
+  } finally {
+    deleteLoading.value = false
   }
 }
 

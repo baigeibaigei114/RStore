@@ -37,6 +37,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import(TestConfig.class)
 class RsTaskControllerStatusTest {
 
+    private static final String WORKER_TOKEN = "test-worker-token";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -152,13 +154,45 @@ class RsTaskControllerStatusTest {
         when(taskService.claim(1L)).thenReturn(new RsTaskClaimVO(true, "CLAIMED", "RUNNING", "任务抢占成功", "result/NDVI/2026/05/task_1.tif"));
 
         mockMvc.perform(post("/api/tasks/{taskId}/claim", 1L)
-                        .contextPath("/api"))
+                        .contextPath("/api")
+                        .header("X-Worker-Token", WORKER_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
                 .andExpect(jsonPath("$.data.claimed").value(true))
                 .andExpect(jsonPath("$.data.action").value("CLAIMED"));
 
         verify(taskService).claim(1L);
+    }
+
+    @Test
+    @DisplayName("Worker 抢占任务缺少 Token 时被拒绝")
+    void claimTaskWithoutWorkerTokenShouldBeRejected() throws Exception {
+        mockMvc.perform(post("/api/tasks/{taskId}/claim", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.FORBIDDEN.getCode()))
+                .andExpect(jsonPath("$.message").value("Worker Token 无效"));
+
+        verify(taskService, never()).claim(any());
+    }
+
+    @Test
+    @DisplayName("Worker 回调状态 Token 错误时被拒绝")
+    void updateStatusWithInvalidWorkerTokenShouldBeRejected() throws Exception {
+        mockMvc.perform(post("/api/tasks/{taskId}/status", 1L)
+                        .contextPath("/api")
+                        .header("X-Worker-Token", "wrong-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "status": "RUNNING"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.FORBIDDEN.getCode()))
+                .andExpect(jsonPath("$.message").value("Worker Token 无效"));
+
+        verify(taskService, never()).updateStatus(any(), any());
     }
 
     /**
@@ -169,6 +203,7 @@ class RsTaskControllerStatusTest {
     void updateRunningStatusShouldReturnSuccess() throws Exception {
         mockMvc.perform(post("/api/tasks/{taskId}/status", 1L)
                         .contextPath("/api")
+                        .header("X-Worker-Token", WORKER_TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -191,6 +226,7 @@ class RsTaskControllerStatusTest {
     void updateStatusWithoutStatusShouldNotCallService() throws Exception {
         mockMvc.perform(post("/api/tasks/{taskId}/status", 1L)
                         .contextPath("/api")
+                        .header("X-Worker-Token", WORKER_TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {

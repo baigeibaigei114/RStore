@@ -59,17 +59,17 @@ public class JwtTokenServiceImpl implements JwtTokenService {
         try {
             String[] parts = token.split("\\.");
             if (parts.length != 3) {
-                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "token 格式不正确");
+                throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "token 格式不正确");
             }
             String signingInput = parts[0] + "." + parts[1];
             if (!sign(signingInput).equals(parts[2])) {
-                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "token 签名无效");
+                throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "token 签名无效");
             }
 
             Map<String, Object> payload = objectMapper.readValue(Base64.getUrlDecoder().decode(parts[1]), MAP_TYPE);
             long exp = ((Number) payload.get("exp")).longValue();
             if (Instant.now().getEpochSecond() >= exp) {
-                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "token 已过期");
+                throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "token 已过期");
             }
             return new JwtUser(
                     String.valueOf(payload.get("userId")),
@@ -77,7 +77,7 @@ public class JwtTokenServiceImpl implements JwtTokenService {
                     String.valueOf(payload.get("role"))
             );
         } catch (IllegalArgumentException | IOException exception) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "token 解析失败");
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "token 解析失败");
         }
     }
 

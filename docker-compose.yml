@@ -114,6 +114,7 @@ services:
       PYTHON_WORKER_PARSE_METADATA_SCRIPT: /app/python-worker/scripts/parse_metadata.py
       PYTHON_WORKER_THUMBNAIL_SCRIPT: /app/python-worker/scripts/generate_thumbnail.py
       APP_AUTH_JWT_SECRET: dev-secret-change-me
+      APP_AUTH_WORKER_TOKEN: dev-worker-token-change-me
     ports:
       - "8080:8080"
     volumes:
@@ -148,6 +149,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_SECURE: "false"
       BACKEND_BASE_URL: http://backend:8080
+      WORKER_TOKEN: dev-worker-token-change-me
       WORKER_TEMP_DIR: /tmp/rs-worker
     depends_on:
       rabbitmq:

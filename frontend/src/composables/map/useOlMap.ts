@@ -20,6 +20,7 @@ export interface WmsLayerOptions {
   format?: string
   transparent?: boolean
   opacity?: number
+  authToken?: string
 }
 
 const CHINA_BASE_TILE_URL =
@@ -94,6 +95,9 @@ export function useOlMap(options: UseOlMapOptions = {}) {
         },
         serverType: 'geoserver',
         crossOrigin: 'anonymous',
+        tileLoadFunction: (tile, src) => {
+          loadAuthorizedImageTile(tile, src, options.authToken)
+        },
       }),
       opacity: options.opacity ?? 0.75,
       zIndex: 10,
@@ -128,6 +132,36 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     wmsLayer.value = undefined
     pointerLonLat.value = null
     ready.value = false
+  }
+
+  function loadAuthorizedImageTile(tile: unknown, src: string, authToken?: string) {
+    const image = (tile as { getImage: () => HTMLImageElement }).getImage()
+
+    if (!authToken) {
+      image.src = src
+      return
+    }
+
+    fetch(src, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`WMS 图层加载失败：${response.status}`)
+        }
+        return response.blob()
+      })
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob)
+        image.onload = () => URL.revokeObjectURL(objectUrl)
+        image.onerror = () => URL.revokeObjectURL(objectUrl)
+        image.src = objectUrl
+      })
+      .catch(() => {
+        image.src = ''
+      })
   }
 
   onBeforeUnmount(() => {

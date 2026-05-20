@@ -13,6 +13,9 @@ class CallbackClient:
     def __init__(self, settings: CallbackSettings):
         self._settings = settings
 
+    def _headers(self) -> dict[str, str]:
+        return {"X-Worker-Token": self._settings.worker_token}
+
     def update_status(self, task_id: int, status: str, message: str | None = None, extra: dict[str, Any] | None = None) -> None:
         if not self._settings.enabled:
             return
@@ -26,7 +29,7 @@ class CallbackClient:
             payload.update(extra)
 
         url = f"{self._settings.base_url.rstrip('/')}/api/tasks/{task_id}/status"
-        response = requests.post(url, json=payload, timeout=self._settings.timeout_seconds)
+        response = requests.post(url, json=payload, headers=self._headers(), timeout=self._settings.timeout_seconds)
         self._parse_result(response)
 
     def claim_task(self, task_id: int) -> dict[str, Any]:
@@ -34,7 +37,7 @@ class CallbackClient:
             return {"claimed": True, "action": "CLAIMED"}
 
         url = f"{self._settings.base_url.rstrip('/')}/api/tasks/{task_id}/claim"
-        response = requests.post(url, timeout=self._settings.timeout_seconds)
+        response = requests.post(url, headers=self._headers(), timeout=self._settings.timeout_seconds)
         return self._parse_result(response) or {}
 
     def safe_update_status(self, task_id: int, status: str, message: str | None = None, extra: dict[str, Any] | None = None) -> None:

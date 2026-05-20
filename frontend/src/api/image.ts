@@ -57,3 +57,7 @@ export function uploadImageApi(
 export function updateImageVisibilityApi(id: number | string, visibility: ImageVisibility) {
   return request.patch<unknown, ImageDetail>(`/images/${id}/visibility`, { visibility })
 }
+
+export function deleteImageApi(id: number | string) {
+  return request.delete<unknown, void>(`/images/${id}`)
+}

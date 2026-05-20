@@ -43,6 +43,32 @@ export interface TaskDetail extends TaskListItem {
   updatedAt?: string
 }
 
+export interface TaskResultFile {
+  id: number
+  ownerId?: string
+  visibility?: 'PRIVATE' | 'PUBLIC'
+  taskId: number
+  imageId?: number
+  fileName?: string
+  fileType?: string
+  minioBucket?: string
+  objectKey?: string
+  fileSize?: number
+  mimeType?: string
+  checksum?: string
+  resultMetadata?: string
+  status?: 'PENDING' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | string
+  workspace?: string
+  storeName?: string
+  layerName?: string
+  wmsUrl?: string
+  wcsUrl?: string
+  publishErrorMessage?: string
+  publishedAt?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface TaskLog {
   id: number
   taskId: number

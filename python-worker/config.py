@@ -47,6 +47,7 @@ class CallbackSettings:
     base_url: str = _env_first(("BACKEND_BASE_URL", "CALLBACK_BASE_URL"), "http://localhost:8080")
     timeout_seconds: int = _env_int("CALLBACK_TIMEOUT_SECONDS", 10)
     enabled: bool = _env_bool("CALLBACK_ENABLED", True)
+    worker_token: str = os.getenv("WORKER_TOKEN", "")
 
 
 @dataclass(frozen=True)

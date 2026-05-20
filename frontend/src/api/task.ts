@@ -6,6 +6,7 @@ import type {
   TaskListItem,
   TaskLog,
   TaskPageParams,
+  TaskResultFile,
   TaskSubmitParams,
   TaskSubmitResult,
 } from '@/types/task'
@@ -24,6 +25,10 @@ export function getTaskDetailApi(taskId: number | string) {
 
 export function listTaskLogsApi(taskId: number | string) {
   return request.get<unknown, TaskLog[]>(`/tasks/${taskId}/logs`)
+}
+
+export function getTaskResultFileApi(taskId: number | string) {
+  return request.get<unknown, TaskResultFile>(`/tasks/${taskId}/result`)
 }
 
 export function getTaskResultDownloadUrlApi(taskId: number | string) {

@@ -66,6 +66,8 @@ export interface ImageDetail extends ImageListItem {
   centerLat?: number
   description?: string
   thumbnailErrorMessage?: string
+  deletedAt?: string
+  deletedReason?: string
   updatedAt?: string
 }
 
