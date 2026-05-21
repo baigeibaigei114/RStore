@@ -9,13 +9,10 @@ import org.springframework.http.HttpMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * Worker 令牌拦截器。
- * <p>
- * 职责：
- * - 校验 Python Worker 回调请求（claim / status 更新）中携带的 X-Worker-Token 头。
- * - 防止未经授权的客户端模拟 Worker 抢占任务或篡改任务状态。
- * <p>
- * 应用于 /tasks/*/claim 和 /tasks/*/status 路径。
+ * Worker Token 拦截器。
+ *
+ * <p>用于校验 Python Worker 回调请求中的 X-Worker-Token，防止普通客户端伪造
+ * Worker 请求抢占任务或修改任务状态。</p>
  */
 public class WorkerTokenInterceptor implements HandlerInterceptor {
 
@@ -31,7 +28,7 @@ public class WorkerTokenInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        // OPTIONS 请求（CORS 预检）不校验令牌
+        // OPTIONS 请求（CORS 预检）不校验令牌。
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
