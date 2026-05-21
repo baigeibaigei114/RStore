@@ -92,7 +92,7 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
      * <ul>
      *   <li>超时退出并强制销毁进程；</li>
      *   <li>stdout 为空时以 stderr 作为错误信息；</li>
-     *   <li>脚本返回成功后仍需 {@link Files#exists(Path)} 确认 PNG 文件确实落盘。</li>
+     *   <li>脚本返回成功后仍需 {@link Files} 确认 PNG 文件确实落盘。</li>
      * </ul>
      *
      * @param inputFile     源 GeoTIFF 文件路径
