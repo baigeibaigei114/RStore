@@ -259,7 +259,7 @@ async function fetchLogs() {
 async function fetchResultFile() {
   resultLoading.value = true
   try {
-    resultFile.value = await getTaskResultFileApi(taskId.value)
+    resultFile.value = await getTaskResultFileApi(taskId.value, true)
   } catch {
     resultFile.value = null
   } finally {

@@ -88,6 +88,9 @@ geoserver:
   shared-data-geoserver-dir: /opt/geoserver/raster-data
   connect-timeout-seconds: 1
   read-timeout-seconds: 2
+  wms-max-width: 2048
+  wms-max-height: 2048
+  wms-default-tiled: true
 
 elasticsearch:
   uris: http://127.0.0.1:19200

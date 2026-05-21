@@ -13,9 +13,23 @@ import com.remotesensing.platform.vo.CurrentUserVO;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+/**
+ * 用户认证服务实现类。
+ *
+ * <p>职责：处理用户登录认证、当前登录用户信息查询等核心身份认证逻辑。
+ * 核心设计点：
+ * <ul>
+ *   <li>密码校验委托给 Spring Security {@link PasswordEncoder}，支持密码哈希策略的灵活切换；</li>
+ *   <li>登录成功后生成 JWT 令牌，由 {@link JwtTokenService} 负责令牌的生成与解析；</li>
+ *   <li>通过 {@link CurrentUserContext} 获取当前请求上下文中的用户标识，与服务层解耦；</li>
+ *   <li>用户状态检查在登录时执行，已禁用用户拒绝颁发令牌。</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public class AuthServiceImpl implements AuthService {
 
+    /** 用户状态为"激活"的数据库值，只有此状态允许登录。 */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
 
     private final SysUserMapper sysUserMapper;
@@ -33,22 +47,47 @@ public class AuthServiceImpl implements AuthService {
         this.currentUserContext = currentUserContext;
     }
 
+    /**
+     * 用户登录认证。
+     *
+     * <p>校验流程：用户名是否存在 -> 密码是否匹配 -> 用户是否被禁用。
+     * 认证通过后生成 JWT 访问令牌并返回给调用方。
+     * 事务属性：无事务要求，登录仅为查询操作。
+     *
+     * @param requestDTO 登录请求参数（用户名 + 密码）
+     * @return 登录成功后的用户信息及令牌
+     * @throws BusinessException 用户名或密码错误 / 用户已被禁用时抛出
+     */
     @Override
     public AuthLoginVO login(LoginRequestDTO requestDTO) {
+        // 第一步：按用户名查询用户记录。不存在则直接返回错误，避免枚举注册用户。
         SysUser user = sysUserMapper.selectByUsername(requestDTO.getUsername());
         if (user == null || !passwordEncoder.matches(requestDTO.getPassword(), user.getPasswordHash())) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户名或密码错误");
         }
+        // 第二步：校验用户状态。已禁用（非 ACTIVE）的用户即使密码正确也不允许登录。
         if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户已禁用");
         }
 
+        // 第三步：构造登录响应，生成 JWT 令牌。令牌中包含用户标识、角色和过期时间。
         AuthLoginVO vo = toLoginVO(user);
         vo.setAccessToken(jwtTokenService.generateToken(user));
         vo.setTokenType("Bearer");
         return vo;
     }
 
+    /**
+     * 获取当前登录用户信息。
+     *
+     * <p>从 {@link CurrentUserContext} 中解析当前用户 ID。
+     * 若用户 ID 非数字格式（如匿名用户），则返回包含默认角色的只读视图；
+     * 否则从数据库查询完整用户信息返回。
+     * 事务属性：只读事务。
+     *
+     * @return 当前用户信息视图对象
+     * @throws BusinessException 用户不存在时抛出
+     */
     @Override
     public CurrentUserVO me() {
         String currentUserId = currentUserContext.getCurrentUserId();

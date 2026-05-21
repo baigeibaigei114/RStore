@@ -47,6 +47,24 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * 遥感影像服务实现类。
+ *
+ * <p>职责：管理遥感影像（GeoTIFF）的完整生命周期，包括上传、创建、分页查询、
+ * 空间检索、可见性管理和软删除等操作。
+ *
+ * <p>核心设计点：
+ * <ul>
+ *   <li><b>并发控制</b>：大文件上传使用 {@link Semaphore} 限制并发数，超过上限时快速失败，
+ *   避免磁盘 IO 和请求线程过度堆积；</li>
+ *   <li><b>上传失败补偿</b>：上传流程中数据库事务无法回滚 MinIO 对象（资源管理器不支持分布式事务），
+ *   因此使用 try-finally 和异常捕获机制在失败时主动清理已上传的 MinIO 对象；</li>
+ *   <li><b>缩略图异步生成</b>：使用 {@link TransactionSynchronization#afterCommit()} 在事务提交后
+ *   触发缩略图生成，不阻塞上传响应；</li>
+ *   <li><b>软删除</b>：影像删除不物理删除记录，而是标记 deleted_at，保留审计链路；
+ *   删除前检查是否存在活跃处理任务（业务状态拦截）。</li>
+ * </ul>
+ */
 @Service
 public class RsImageServiceImpl implements RsImageService {
 
@@ -86,6 +104,15 @@ public class RsImageServiceImpl implements RsImageService {
         this.uploadSemaphore = new Semaphore(Math.max(1, uploadProperties.getMaxConcurrent()));
     }
 
+    /**
+     * 创建影像记录（手动录入方式，不涉及文件上传）。
+     *
+     * <p>事务属性：读写事务。创建前校验影像编码唯一性，防止重复录入。
+     *
+     * @param createDTO 影像创建参数（编码、名称、传感器、元数据、空间范围等）
+     * @return 创建后的影像详情
+     * @throws BusinessException 编码已存在或数据不合法时抛出
+     */
     @Override
     @Transactional
     public RsImageVO create(RsImageCreateDTO createDTO) {
@@ -104,6 +131,32 @@ public class RsImageServiceImpl implements RsImageService {
         return getById(image.getId());
     }
 
+    /**
+     * 上传 GeoTIFF 文件并创建影像记录。
+     *
+     * <p>上传流程分为五个阶段：
+     * <ol>
+     *   <li>并发限流：通过 {@link Semaphore#tryAcquire()} 快速判断是否达到并发上限；</li>
+     *   <li>本地暂存：将上传文件保存到临时目录，后续解析和 MinIO 上传复用同一份文件；</li>
+     *   <li>元数据解析：调用 Python Worker 解析 GeoTIFF 的空间参考、尺寸、波段等信息；</li>
+     *   <li>MinIO 上传：将文件上传到对象存储；</li>
+     *   <li>数据库入库：创建影像记录，并在事务提交后触发异步缩略图生成。</li>
+     * </ol>
+     *
+     * <p>失败补偿策略：
+     * <ul>
+     *   <li>数据库异常或运行时异常：在 catch 块中主动删除已上传的 MinIO 对象；</li>
+     *   <li>finally 块：始终清理本地临时文件和释放信号量。</li>
+     * </ul>
+     *
+     * @param file         上传的 MultipartFile
+     * @param name         影像名称
+     * @param sensor       传感器类型
+     * @param captureTime  采集时间
+     * @param cloudPercent 云量百分比
+     * @return 创建后的影像详情
+     * @throws BusinessException 上传失败 / 格式不合法 / 并发上限时抛出
+     */
     @Override
     public RsImageVO upload(MultipartFile file,
                             String name,
@@ -145,12 +198,30 @@ public class RsImageServiceImpl implements RsImageService {
         }
     }
 
+    /**
+     * 根据 ID 查询影像详情。
+     *
+     * <p>事务属性：只读事务。自动过滤当前用户无权限访问的记录。
+     *
+     * @param id 影像 ID
+     * @return 影像详情视图
+     * @throws BusinessException 影像不存在时抛出
+     */
     @Override
     @Transactional(readOnly = true)
     public RsImageVO getById(Long id) {
         return toVO(getAccessibleImage(id));
     }
 
+    /**
+     * 获取原始影像文件的预签名下载 URL。
+     *
+     * <p>事务属性：只读事务。
+     *
+     * @param id 影像 ID
+     * @return 预签名下载 URL
+     * @throws BusinessException 影像不存在或原始文件未上传时抛出
+     */
     @Override
     @Transactional(readOnly = true)
     public FilePresignedUrlVO getDownloadUrl(Long id) {
@@ -161,6 +232,15 @@ public class RsImageServiceImpl implements RsImageService {
         return minioService.generatePresignedUrl(image.getObjectKey());
     }
 
+    /**
+     * 获取影像缩略图的预签名 URL。
+     *
+     * <p>事务属性：只读事务。
+     *
+     * @param id 影像 ID
+     * @return 缩略图预签名 URL
+     * @throws BusinessException 影像不存在或缩略图尚未生成时抛出
+     */
     @Override
     @Transactional(readOnly = true)
     public FilePresignedUrlVO getThumbnailUrl(Long id) {
@@ -171,6 +251,15 @@ public class RsImageServiceImpl implements RsImageService {
         return minioService.generatePresignedUrl(image.getThumbnailObjectKey());
     }
 
+    /**
+     * 分页查询影像列表。
+     *
+     * <p>事务属性：只读事务。自动按当前用户过滤权限。
+     *
+     * @param pageNum  页码（从 1 开始，为空时默认 1）
+     * @param pageSize 每页条数（为空时默认 10，最大 100）
+     * @return 分页结果
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResult<RsImageVO> page(Integer pageNum, Integer pageSize) {
@@ -186,6 +275,17 @@ public class RsImageServiceImpl implements RsImageService {
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
+    /**
+     * 按查询条件搜索影像（支持关键字、时间范围、云量等筛选）。
+     *
+     * <p>事务属性：只读事务。
+     *
+     * @param query    搜索条件
+     * @param pageNum  页码
+     * @param pageSize 每页条数
+     * @return 分页搜索结果
+     * @throws BusinessException 时间范围不合法时抛出
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResult<RsImageListVO> search(RsImageSearchDTO query, Integer pageNum, Integer pageSize) {
@@ -202,6 +302,17 @@ public class RsImageServiceImpl implements RsImageService {
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
     }
 
+    /**
+     * 按行政区域查询影像（空间范围 + 属性条件联合过滤）。
+     *
+     * <p>事务属性：只读事务。必须提供 regionId。
+     *
+     * @param query    搜索条件（必须包含 regionId）
+     * @param pageNum  页码
+     * @param pageSize 每页条数
+     * @return 分页搜索结果
+     * @throws BusinessException regionId 为空或时间范围不合法时抛出
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResult<RsImageListVO> searchByRegion(RsImageSearchDTO query, Integer pageNum, Integer pageSize) {
@@ -554,6 +665,11 @@ public class RsImageServiceImpl implements RsImageService {
 
     /**
      * 保存上传阶段复用的临时文件信息，避免在多个参数间散落传递路径和原始文件名。
+     *
+     * @param tempDir          临时目录（finally 块中按此路径递归清理）
+     * @param filePath         实际文件路径
+     * @param originalFilename 原始文件名，用于 MinIO 对象路径中的可读标识
+     * @param contentType      Content-Type，向上传递
      */
     private record LocalGeoTiffFile(Path tempDir, Path filePath, String originalFilename, String contentType) {
     }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.enums.Visibility;
+import com.remotesensing.platform.config.properties.GeoServerProperties;
 import com.remotesensing.platform.dto.LayerSearchDTO;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.LayerMapper;
@@ -41,11 +42,14 @@ class LayerServiceImplTest {
     @Mock
     private GeoServerProxyClient geoServerProxyClient;
 
+    private GeoServerProperties geoServerProperties;
+
     private LayerServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new LayerServiceImpl(layerMapper, currentUserContext, geoServerProxyClient);
+        geoServerProperties = new GeoServerProperties();
+        service = new LayerServiceImpl(layerMapper, currentUserContext, geoServerProxyClient, geoServerProperties);
     }
 
     @Test
@@ -144,9 +148,49 @@ class LayerServiceImplTest {
         assertThat(captor.getValue().getFirst("service")).isEqualTo("WMS");
         assertThat(captor.getValue().getFirst("layers")).isEqualTo("remote_sensing:task_5_ndvi");
         assertThat(captor.getValue().getFirst("format")).isEqualTo("image/png");
+        assertThat(captor.getValue().getFirst("tiled")).isEqualTo("true");
         assertThat(captor.getValue()).doesNotContainKey("sld_body");
         assertThat(result.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);
         assertThat(streamToBytes(result.getBody())).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("WMS 代理未传 format 时默认使用 image/png")
+    void proxyWmsShouldUseDefaultPngWhenFormatMissing() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_ndvi");
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("request", "GetMap");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+        when(geoServerProxyClient.proxy(org.mockito.ArgumentMatchers.eq("/wms"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(ResponseEntity.ok(streaming(new byte[]{1})));
+
+        service.proxyWms(12L, params);
+
+        ArgumentCaptor<MultiValueMap<String, String>> captor = ArgumentCaptor.forClass(MultiValueMap.class);
+        verify(geoServerProxyClient).proxy(org.mockito.ArgumentMatchers.eq("/wms"), captor.capture());
+        assertThat(captor.getValue().getFirst("format")).isEqualTo("image/png");
+    }
+
+    @Test
+    @DisplayName("WMS 代理允许 GetFeatureInfo 请求")
+    void proxyWmsShouldAllowGetFeatureInfo() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_ndvi");
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("request", "GetFeatureInfo");
+        params.add("query_layers", "other:layer");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+        when(geoServerProxyClient.proxy(org.mockito.ArgumentMatchers.eq("/wms"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(ResponseEntity.ok(streaming(new byte[]{1})));
+
+        service.proxyWms(12L, params);
+
+        ArgumentCaptor<MultiValueMap<String, String>> captor = ArgumentCaptor.forClass(MultiValueMap.class);
+        verify(geoServerProxyClient).proxy(org.mockito.ArgumentMatchers.eq("/wms"), captor.capture());
+        assertThat(captor.getValue().getFirst("query_layers")).isEqualTo("remote_sensing:task_5_ndvi");
     }
 
     @Test
@@ -209,6 +253,21 @@ class LayerServiceImplTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.proxyWms(12L, params))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("width");
+    }
+
+    @Test
+    @DisplayName("WMS 代理限制 height 渲染尺寸")
+    void proxyWmsShouldLimitHeight() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_ndvi");
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        params.add("request", "GetMap");
+        params.add("height", "2049");
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.proxyWms(12L, params))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("height");
     }
 
     @Test

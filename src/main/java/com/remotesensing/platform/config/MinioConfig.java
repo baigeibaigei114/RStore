@@ -8,6 +8,13 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/**
+ * MinIO 对象存储配置类。
+ * <p>
+ * 职责：
+ * - 启用 MinioProperties、PythonWorkerProperties、UploadProperties 配置绑定。
+ * - 创建 MinioClient 单例 Bean，业务层通过依赖注入使用，避免泄露 accessKey/secretKey。
+ */
 @Configuration
 @EnableConfigurationProperties({MinioProperties.class, PythonWorkerProperties.class, UploadProperties.class})
 public class MinioConfig {

@@ -13,10 +13,21 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+/**
+ * GeoServer 集成配置类。
+ * <p>
+ * 职责：
+ * - 配置与 GeoServer 通信的 RestClient（含 BasicAuth 认证和超时设置）。
+ * - 提供用于异步发布图层到 GeoServer 的线程池。
+ */
 @Configuration
 @EnableConfigurationProperties(GeoServerProperties.class)
 public class GeoServerConfig {
 
+    /**
+     * GeoServer REST API 客户端 Bean。
+     * 配置连接超时（默认 5 秒）和读取超时（默认 30 秒），避免因 GeoServer 响应慢而阻塞 Web 线程。
+     */
     @Bean
     public RestClient geoServerRestClient(GeoServerProperties properties) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -33,6 +44,11 @@ public class GeoServerConfig {
                 .build();
     }
 
+    /**
+     * GeoServer 图层发布专用线程池。
+     * 核心线程数 1，最大 2，队列容量 50，避免过多并发发布请求压垮 GeoServer。
+     * 拒绝策略为 AbortPolicy，发布失败由上游重试逻辑处理。
+     */
     @Bean(name = "geoServerPublishExecutor")
     public Executor geoServerPublishExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -45,6 +61,7 @@ public class GeoServerConfig {
         return executor;
     }
 
+    /** 去除 URL 末尾的斜杠，避免 baseUrl 拼接时出现双斜杠。 */
     private String trimTrailingSlash(String url) {
         if (url == null || url.isBlank()) {
             return "";
