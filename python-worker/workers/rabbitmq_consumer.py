@@ -150,12 +150,12 @@ class RabbitMqConsumer:
             claim_result = self._callback_client.claim_task(task_id)
             action = claim_result.get("action")
 
-            if action == "ALREADY_FINISHED":
-                # 任务已经被其他 Worker 处理完成，直接 ACK 丢弃当前消息。
-                # 不重新入队，因为消息是重复的。
+            if action in {"ALREADY_FINISHED", "ALREADY_RUNNING"}:
+                # 任务已结束或已有其他 Worker 正在处理，当前消息都是重复投递，直接 ACK。
+                # ALREADY_RUNNING 不能重入 RabbitMQ 重试预算，否则多实例抢占会被误判为失败。
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 print(
-                    f"[worker] 任务已结束，跳过重复消息 task_id={task_id} status={claim_result.get('taskStatus')}",
+                    f"[worker] 跳过重复消息 task_id={task_id} action={action} status={claim_result.get('taskStatus')}",
                     flush=True,
                 )
                 return

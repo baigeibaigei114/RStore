@@ -19,6 +19,9 @@ public class RsTask {
     /** 任务提交者用户 ID。 */
     private String ownerId;
 
+    /** 客户端提交时传入的幂等请求 ID，同一用户下唯一。 */
+    private String clientRequestId;
+
     /** 任务业务编码，全局唯一。 */
     private String taskCode;
 

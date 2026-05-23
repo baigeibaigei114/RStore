@@ -42,6 +42,16 @@ public interface RsTaskMapper {
                               @Param("ownerId") String ownerId);
 
     /**
+     * 按用户和客户端幂等键查询已有任务，用于前端超时重试时返回原 taskId。
+     *
+     * @param ownerId         任务提交者用户 ID
+     * @param clientRequestId 客户端幂等请求 ID
+     * @return 已存在的任务，不存在返回 null
+     */
+    RsTask selectByOwnerAndClientRequestId(@Param("ownerId") String ownerId,
+                                           @Param("clientRequestId") String clientRequestId);
+
+    /**
      * 查询任务详情 VO，包含关联影像名称等扩展信息。
      *
      * @param id 任务主键

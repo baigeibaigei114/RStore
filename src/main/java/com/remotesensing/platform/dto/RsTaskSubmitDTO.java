@@ -2,6 +2,7 @@ package com.remotesensing.platform.dto;
 
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.Map;
 import lombok.Data;
 
@@ -19,6 +20,9 @@ public class RsTaskSubmitDTO {
     /** 任务类型枚举（NDVI / NDWI / CHANGE_DETECTION），对应 RemoteSensingTaskMessage.TaskType。不能为空。 */
     @NotNull(message = "任务类型不能为空")
     private TaskType taskType;
+
+    @Size(max = 100, message = "客户端幂等键长度不能超过 100")
+    private String clientRequestId;
 
     /**
      * 任务参数字典，按任务类型承载不同配置。

@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -143,13 +144,20 @@ public class RsTaskServiceImpl implements RsTaskService {
     @Override
     public RsTaskSubmitVO submit(RsTaskSubmitDTO submitDTO) {
         // 第一阶段：事务内完成所有数据变更。
-        PreparedTask preparedTask = transactionTemplate.execute(status -> prepareTask(submitDTO));
+        PreparedTask preparedTask;
+        try {
+            preparedTask = transactionTemplate.execute(status -> prepareTask(submitDTO));
+        } catch (DuplicateKeyException exception) {
+            return resolveDuplicateSubmit(submitDTO, exception);
+        }
         if (preparedTask == null) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "任务提交失败：事务未返回任务信息");
         }
 
         // 第二阶段：事务外执行消息投递，投递失败不影响数据库状态。
-        publishTaskMessage(preparedTask);
+        if (preparedTask.publishRequired()) {
+            publishTaskMessage(preparedTask);
+        }
         return new RsTaskSubmitVO(preparedTask.task().getId());
     }
 
@@ -314,6 +322,13 @@ public class RsTaskServiceImpl implements RsTaskService {
      */
     private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO) {
         String currentUserId = currentUserContext.getCurrentUserId();
+        String clientRequestId = normalizeClientRequestId(submitDTO.getClientRequestId());
+        if (!isBlank(clientRequestId)) {
+            RsTask existingTask = taskMapper.selectByOwnerAndClientRequestId(currentUserId, clientRequestId);
+            if (existingTask != null) {
+                return new PreparedTask(existingTask, existingTask.getOutputObjectKey(), null, false);
+            }
+        }
         // 第一步：校验影像是否存在且当前用户有访问权限。影像按用户隔离，不可越权提交。
         RsImage image = imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId);
         if (image == null) {
@@ -342,7 +357,22 @@ public class RsTaskServiceImpl implements RsTaskService {
                 task.getId(),
                 buildMessage(submitDTO, image, task.getId(), outputObjectKey)
         );
-        return new PreparedTask(task, outputObjectKey, outboxId);
+        return new PreparedTask(task, outputObjectKey, outboxId, true);
+    }
+
+    private RsTaskSubmitVO resolveDuplicateSubmit(RsTaskSubmitDTO submitDTO, DuplicateKeyException exception) {
+        String clientRequestId = normalizeClientRequestId(submitDTO.getClientRequestId());
+        if (isBlank(clientRequestId)) {
+            throw exception;
+        }
+        RsTask existingTask = taskMapper.selectByOwnerAndClientRequestId(
+                currentUserContext.getCurrentUserId(),
+                clientRequestId
+        );
+        if (existingTask == null) {
+            throw exception;
+        }
+        return new RsTaskSubmitVO(existingTask.getId());
     }
 
     /**
@@ -429,7 +459,11 @@ public class RsTaskServiceImpl implements RsTaskService {
 
         // 第一步：校验目标状态合法性和状态流转可行性。
         TaskStatus targetStatus = normalizeStatus(updateDTO.getStatus());
-        validateTransition(TaskStatus.fromDb(task.getStatus()), targetStatus);
+        TaskStatus currentStatus = TaskStatus.fromDb(task.getStatus());
+        validateTransition(currentStatus, targetStatus);
+        if (isDuplicateTerminalCallback(currentStatus, targetStatus)) {
+            return;
+        }
         // 第二步：解析错误信息。对于 SUCCESS，errorMessage 可能为空；对于 FAILED，errorMessage 必须存在。
         String errorMessage = resolveErrorMessage(targetStatus, updateDTO);
         if (targetStatus == TaskStatus.SUCCESS && isBlank(updateDTO.getOutputObjectKey()) && isBlank(task.getOutputObjectKey())) {
@@ -464,9 +498,14 @@ public class RsTaskServiceImpl implements RsTaskService {
         releaseImageIfTaskFinished(task, targetStatus);
     }
 
+    private boolean isDuplicateTerminalCallback(TaskStatus currentStatus, TaskStatus targetStatus) {
+        return currentStatus.isTerminal() && currentStatus == targetStatus;
+    }
+
     private RsTask buildPendingTask(RsTaskSubmitDTO submitDTO, String ownerId) {
         RsTask task = new RsTask();
         task.setOwnerId(ownerId);
+        task.setClientRequestId(normalizeClientRequestId(submitDTO.getClientRequestId()));
         task.setTaskCode("TASK_" + UUID.randomUUID().toString().replace("-", ""));
         task.setImageId(submitDTO.getImageId());
         task.setTaskType(submitDTO.getTaskType().name());
@@ -705,6 +744,13 @@ public class RsTaskServiceImpl implements RsTaskService {
         return value == null || value.isBlank();
     }
 
+    private String normalizeClientRequestId(String clientRequestId) {
+        if (isBlank(clientRequestId)) {
+            return null;
+        }
+        return clientRequestId.trim();
+    }
+
     private int normalizePageNum(Integer pageNum) {
         return pageNum == null || pageNum < 1 ? DEFAULT_PAGE_NUM : pageNum;
     }
@@ -716,6 +762,6 @@ public class RsTaskServiceImpl implements RsTaskService {
         return Math.min(pageSize, MAX_PAGE_SIZE);
     }
 
-    private record PreparedTask(RsTask task, String outputObjectKey, Long outboxId) {
+    private record PreparedTask(RsTask task, String outputObjectKey, Long outboxId, boolean publishRequired) {
     }
 }

@@ -126,6 +126,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_admin_region_adcode ON rs_admin_region (
 CREATE TABLE IF NOT EXISTS rs_task (
     id BIGSERIAL PRIMARY KEY,
     owner_id VARCHAR(100) NOT NULL DEFAULT 'dev-user',
+    client_request_id VARCHAR(100),
     task_code VARCHAR(64) NOT NULL UNIQUE,
     image_id BIGINT NOT NULL,
     task_type VARCHAR(50) NOT NULL,
@@ -153,6 +154,7 @@ CREATE TABLE IF NOT EXISTS rs_task (
 
 COMMENT ON TABLE rs_task IS '遥感处理任务表，记录影像处理、智能解译等异步任务';
 COMMENT ON COLUMN rs_task.owner_id IS '任务归属用户标识';
+COMMENT ON COLUMN rs_task.client_request_id IS '客户端幂等请求 ID，同一用户下唯一';
 COMMENT ON COLUMN rs_task.task_type IS '任务类型，例如 PREPROCESS、CLASSIFICATION、DETECTION、CHANGE_DETECTION';
 COMMENT ON COLUMN rs_task.status IS '任务状态：PENDING、RUNNING、SUCCESS、FAILED、RETRYING、CANCELED';
 COMMENT ON COLUMN rs_task.output_bucket IS '任务结果文件输出 bucket';
@@ -165,6 +167,9 @@ CREATE INDEX IF NOT EXISTS idx_rs_task_type ON rs_task (task_type);
 CREATE INDEX IF NOT EXISTS idx_rs_task_submitted_at ON rs_task (submitted_at);
 CREATE INDEX IF NOT EXISTS idx_rs_task_output_object_key ON rs_task (output_object_key);
 CREATE INDEX IF NOT EXISTS idx_rs_task_owner_id ON rs_task (owner_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_task_owner_client_request
+    ON rs_task (owner_id, client_request_id)
+    WHERE client_request_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS rs_task_log (
     id BIGSERIAL PRIMARY KEY,

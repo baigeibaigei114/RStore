@@ -31,14 +31,17 @@ import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.MessageOutboxService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
+import com.remotesensing.platform.vo.RsTaskSubmitVO;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.invocation.InvocationOnMock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -115,6 +118,7 @@ class RsTaskServiceImplTest {
         RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
         dto.setImageId(10L);
         dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setClientRequestId(" submit-001 ");
         dto.setParams(Map.of("redBand", 3, "nirBand", 4));
 
         when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
@@ -127,8 +131,72 @@ class RsTaskServiceImplTest {
 
         service.submit(dto);
 
+        ArgumentCaptor<RsTask> taskCaptor = ArgumentCaptor.forClass(RsTask.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        assertThat(taskCaptor.getValue().getClientRequestId()).isEqualTo("submit-001");
         verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), any(RemoteSensingTaskMessage.class));
         verify(messageOutboxService).publishById(99L);
+    }
+
+    @Test
+    @DisplayName("重复 clientRequestId 提交时返回已有任务且不重复抢占影像")
+    void submitShouldReturnExistingTaskWhenClientRequestIdExists() {
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setClientRequestId("submit-001");
+
+        RsTask existingTask = new RsTask();
+        existingTask.setId(88L);
+        existingTask.setOwnerId("user-a");
+        existingTask.setClientRequestId("submit-001");
+        existingTask.setStatus(TaskStatus.PENDING.dbValue());
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByOwnerAndClientRequestId("user-a", "submit-001")).thenReturn(existingTask);
+
+        RsTaskSubmitVO result = service.submit(dto);
+
+        assertThat(result.getTaskId()).isEqualTo(88L);
+        verify(imageMapper, never()).selectAccessibleById(any(), any());
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+        verify(messageOutboxService, never()).createTaskMessage(any(), any());
+        verify(messageOutboxService, never()).publishById(any());
+    }
+
+    @Test
+    @DisplayName("并发撞唯一索引时根据 clientRequestId 返回已有任务")
+    void submitShouldResolveDuplicateKeyByClientRequestId() {
+        RsImage image = new RsImage();
+        image.setId(10L);
+        image.setStatus(ImageStatus.READY.dbValue());
+        image.setMinioBucket("remote-sensing-images");
+        image.setObjectKey("raw/2026/05/source.tif");
+
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setClientRequestId("submit-001");
+
+        RsTask existingTask = new RsTask();
+        existingTask.setId(89L);
+        existingTask.setOwnerId("user-a");
+        existingTask.setClientRequestId("submit-001");
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByOwnerAndClientRequestId("user-a", "submit-001"))
+                .thenReturn(null, existingTask);
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(image);
+        when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
+        when(rabbitTaskProperties.getMaxRetryCount()).thenReturn(3);
+        when(taskMapper.insert(any(RsTask.class))).thenThrow(new DuplicateKeyException("duplicate"));
+
+        RsTaskSubmitVO result = service.submit(dto);
+
+        assertThat(result.getTaskId()).isEqualTo(89L);
+        verify(messageOutboxService, never()).createTaskMessage(any(), any());
+        verify(messageOutboxService, never()).publishById(any());
     }
 
     @Test
@@ -319,6 +387,56 @@ class RsTaskServiceImplTest {
 
         verify(taskLogMapper, never()).insert(any());
         verify(imageMapper, never()).markReadyIfProcessing(10L);
+    }
+
+    @Test
+    @DisplayName("重复 SUCCESS 回调应幂等返回且不触发副作用")
+    void duplicateSuccessCallbackShouldNotTriggerSideEffects() {
+        RsTask task = new RsTask();
+        task.setId(1L);
+        task.setImageId(10L);
+        task.setStatus(TaskStatus.SUCCESS.dbValue());
+        task.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
+
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus(TaskStatus.SUCCESS.dbValue());
+        dto.setProgress(100);
+        dto.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
+
+        when(taskMapper.selectById(1L)).thenReturn(task);
+
+        service.updateStatus(1L, dto);
+
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+        verify(taskLogMapper, never()).insert(any());
+        verify(resultFileMapper, never()).insert(any());
+        verify(geoServerService, never()).publishTaskResult(any());
+        verify(geoServerService, never()).publishTaskResultAsync(any());
+        verify(imageMapper, never()).markReadyIfProcessing(any());
+    }
+
+    @Test
+    @DisplayName("重复 FAILED 回调应幂等返回且不刷新失败副作用")
+    void duplicateFailedCallbackShouldNotTriggerSideEffects() {
+        RsTask task = new RsTask();
+        task.setId(1L);
+        task.setImageId(10L);
+        task.setStatus(TaskStatus.FAILED.dbValue());
+
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus(TaskStatus.FAILED.dbValue());
+        dto.setErrorMessage("处理失败");
+
+        when(taskMapper.selectById(1L)).thenReturn(task);
+
+        service.updateStatus(1L, dto);
+
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+        verify(taskLogMapper, never()).insert(any());
+        verify(resultFileMapper, never()).insert(any());
+        verify(geoServerService, never()).publishTaskResult(any());
+        verify(geoServerService, never()).publishTaskResultAsync(any());
+        verify(imageMapper, never()).markReadyIfProcessing(any());
     }
 
     @Test

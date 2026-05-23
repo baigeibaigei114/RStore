@@ -8,6 +8,7 @@
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO rs_task (
             owner_id,
+            client_request_id,
             task_code,
             image_id,
             task_type,
@@ -20,6 +21,7 @@
             params
         ) VALUES (
             #{ownerId},
+            #{clientRequestId,jdbcType=VARCHAR},
             #{taskCode},
             #{imageId},
             #{taskType},
@@ -37,6 +39,7 @@
         SELECT
             id,
             owner_id,
+            client_request_id,
             task_code,
             image_id,
             task_type,
@@ -63,6 +66,7 @@
         SELECT
             id,
             owner_id,
+            client_request_id,
             task_code,
             image_id,
             task_type,
@@ -84,6 +88,34 @@
         FROM rs_task
         WHERE id = #{id}
           AND owner_id = #{ownerId}
+    </select>
+
+    <select id="selectByOwnerAndClientRequestId" resultType="com.remotesensing.platform.entity.RsTask">
+        SELECT
+            id,
+            owner_id,
+            client_request_id,
+            task_code,
+            image_id,
+            task_type,
+            task_name,
+            status,
+            priority,
+            progress,
+            retry_count,
+            max_retry_count,
+            output_bucket,
+            output_object_key,
+            params::text AS params,
+            error_message,
+            submitted_at,
+            started_at,
+            finished_at,
+            created_at,
+            updated_at
+        FROM rs_task
+        WHERE owner_id = #{ownerId}
+          AND client_request_id = #{clientRequestId}
     </select>
 
     <select id="selectDetailById" resultType="com.remotesensing.platform.vo.RsTaskVO">
