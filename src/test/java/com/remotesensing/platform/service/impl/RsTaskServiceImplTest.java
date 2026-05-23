@@ -390,6 +390,33 @@ class RsTaskServiceImplTest {
     }
 
     @Test
+    @DisplayName("SUCCESS 回调不能覆盖任务创建时的预期输出路径")
+    void successCallbackShouldRejectUnexpectedOutputObjectKey() {
+        RsTask task = new RsTask();
+        task.setId(1L);
+        task.setImageId(10L);
+        task.setStatus(TaskStatus.RUNNING.dbValue());
+        task.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
+
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus(TaskStatus.SUCCESS.dbValue());
+        dto.setProgress(100);
+        dto.setOutputObjectKey("result/NDVI/2026/05/task_1_other.tif");
+
+        when(taskMapper.selectById(1L)).thenReturn(task);
+
+        assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("outputObjectKey");
+
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+        verify(taskLogMapper, never()).insert(any());
+        verify(resultFileMapper, never()).insert(any());
+        verify(geoServerService, never()).publishTaskResultAsync(any());
+        verify(imageMapper, never()).markReadyIfProcessing(any());
+    }
+
+    @Test
     @DisplayName("重复 SUCCESS 回调应幂等返回且不触发副作用")
     void duplicateSuccessCallbackShouldNotTriggerSideEffects() {
         RsTask task = new RsTask();

@@ -469,6 +469,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (targetStatus == TaskStatus.SUCCESS && isBlank(updateDTO.getOutputObjectKey()) && isBlank(task.getOutputObjectKey())) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "SUCCESS 状态必须提供 outputObjectKey");
         }
+        validateSuccessOutputObjectKey(task, updateDTO, targetStatus);
         if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");
         }
@@ -500,6 +501,22 @@ public class RsTaskServiceImpl implements RsTaskService {
 
     private boolean isDuplicateTerminalCallback(TaskStatus currentStatus, TaskStatus targetStatus) {
         return currentStatus.isTerminal() && currentStatus == targetStatus;
+    }
+
+    private void validateSuccessOutputObjectKey(RsTask task,
+                                                RsTaskStatusUpdateDTO updateDTO,
+                                                TaskStatus targetStatus) {
+        if (targetStatus != TaskStatus.SUCCESS
+                || isBlank(task.getOutputObjectKey())
+                || isBlank(updateDTO.getOutputObjectKey())) {
+            return;
+        }
+        if (!task.getOutputObjectKey().equals(updateDTO.getOutputObjectKey())) {
+            throw new BusinessException(
+                    ResultCode.PARAM_ERROR.getCode(),
+                    "SUCCESS 回调的 outputObjectKey 与任务预期输出路径不一致"
+            );
+        }
     }
 
     private RsTask buildPendingTask(RsTaskSubmitDTO submitDTO, String ownerId) {
