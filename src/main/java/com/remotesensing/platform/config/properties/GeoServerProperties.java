@@ -45,4 +45,7 @@ public class GeoServerProperties {
 
     /** WMS 请求是否默认启用瓦片模式（tiled=true），默认启用。 */
     private boolean wmsDefaultTiled = true;
+
+    /** GeoServer 发布任务处于 PUBLISHING 状态的最长分钟数，超过后由补偿任务恢复为失败可重试。 */
+    private int publishTimeoutMinutes = 30;
 }

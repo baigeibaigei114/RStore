@@ -96,6 +96,8 @@ geoserver:
   wms-max-width: 2048
   wms-max-height: 2048
   wms-default-tiled: true
+  publish-timeout-minutes: 30
+  publish-recovery-fixed-delay-ms: 300000
 
 elasticsearch:
   uris: http://localhost:9200

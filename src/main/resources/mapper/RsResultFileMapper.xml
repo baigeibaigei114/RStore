@@ -215,4 +215,13 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
+
+    <update id="markStalePublishingFailed">
+        UPDATE rs_result_file
+        SET status = 'PUBLISH_FAILED',
+            publish_error_message = #{errorMessage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'PUBLISHING'
+          AND updated_at <![CDATA[<]]> #{deadline}
+    </update>
 </mapper>

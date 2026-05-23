@@ -235,6 +235,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_result_file_task_id ON rs_result_file (t
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_image_id ON rs_result_file (image_id);
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_object_location ON rs_result_file (minio_bucket, object_key);
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_status ON rs_result_file (status);
+CREATE INDEX IF NOT EXISTS idx_rs_result_file_status_updated_at ON rs_result_file (status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_rs_result_file_owner_visibility ON rs_result_file (owner_id, visibility);
 
 CREATE TABLE IF NOT EXISTS message_outbox (

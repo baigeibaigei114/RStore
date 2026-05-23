@@ -1,6 +1,7 @@
 package com.remotesensing.platform.mapper;
 
 import com.remotesensing.platform.entity.RsResultFile;
+import java.time.OffsetDateTime;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -80,4 +81,14 @@ public interface RsResultFileMapper {
      */
     int markPublishFailed(@Param("id") Long id,
                           @Param("errorMessage") String errorMessage);
+
+    /**
+     * 将长时间停留在 PUBLISHING 的结果文件标记为发布失败，释放发布锁供后续重试。
+     *
+     * @param deadline     超时判断时间点，updated_at 早于该时间即视为卡住
+     * @param errorMessage 写入数据库的恢复原因
+     * @return 被恢复的记录数
+     */
+    int markStalePublishingFailed(@Param("deadline") OffsetDateTime deadline,
+                                  @Param("errorMessage") String errorMessage);
 }
