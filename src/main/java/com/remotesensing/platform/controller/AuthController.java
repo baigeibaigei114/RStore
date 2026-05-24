@@ -1,11 +1,14 @@
 package com.remotesensing.platform.controller;
 
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.dto.LoginRequestDTO;
+import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.AuthService;
 import com.remotesensing.platform.vo.AuthLoginVO;
 import com.remotesensing.platform.vo.CurrentUserVO;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,6 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final AuthService authService;
 
@@ -50,5 +55,23 @@ public class AuthController {
     @GetMapping("/me")
     public Result<CurrentUserVO> me() {
         return Result.success(authService.me());
+    }
+
+    @PostMapping("/logout")
+    public Result<Void> logout(HttpServletRequest request) {
+        authService.logout(extractBearerToken(request));
+        return Result.success();
+    }
+
+    private String extractBearerToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), ResultCode.UNAUTHORIZED.getMessage());
+        }
+        String token = authorization.substring(BEARER_PREFIX.length()).trim();
+        if (token.isBlank()) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), ResultCode.UNAUTHORIZED.getMessage());
+        }
+        return token;
     }
 }

@@ -12,6 +12,7 @@ import com.remotesensing.platform.entity.SysUser;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.SysUserMapper;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.TokenBlacklistService;
 import com.remotesensing.platform.vo.AuthLoginVO;
 import com.remotesensing.platform.vo.CurrentUserVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,16 +33,20 @@ class AuthServiceImplTest {
     @Mock
     private CurrentUserContext currentUserContext;
 
+    @Mock
+    private TokenBlacklistService tokenBlacklistService;
+
     private PasswordEncoder passwordEncoder;
     private AuthServiceImpl authService;
+    private JwtTokenService jwtTokenService;
 
     @BeforeEach
     void setUp() {
         passwordEncoder = new BCryptPasswordEncoder();
         AuthProperties authProperties = new AuthProperties();
         authProperties.setJwtSecret("test-secret");
-        JwtTokenService jwtTokenService = new JwtTokenServiceImpl(authProperties, new ObjectMapper());
-        authService = new AuthServiceImpl(sysUserMapper, passwordEncoder, jwtTokenService, currentUserContext);
+        jwtTokenService = new JwtTokenServiceImpl(authProperties, new ObjectMapper());
+        authService = new AuthServiceImpl(sysUserMapper, passwordEncoder, jwtTokenService, currentUserContext, tokenBlacklistService);
     }
 
     @Test
@@ -53,6 +58,7 @@ class AuthServiceImplTest {
         AuthLoginVO result = authService.login(loginRequest("admin", "admin123"));
 
         assertThat(result.getAccessToken()).isNotBlank();
+        assertThat(jwtTokenService.parseToken(result.getAccessToken()).jti()).isNotBlank();
         assertThat(result.getTokenType()).isEqualTo("Bearer");
         assertThat(result.getUserId()).isEqualTo("1");
         assertThat(result.getUsername()).isEqualTo("admin");

@@ -8,6 +8,7 @@ import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.SysUserMapper;
 import com.remotesensing.platform.service.AuthService;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.TokenBlacklistService;
 import com.remotesensing.platform.vo.AuthLoginVO;
 import com.remotesensing.platform.vo.CurrentUserVO;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,15 +37,18 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
     private final CurrentUserContext currentUserContext;
+    private final TokenBlacklistService tokenBlacklistService;
 
     public AuthServiceImpl(SysUserMapper sysUserMapper,
                            PasswordEncoder passwordEncoder,
                            JwtTokenService jwtTokenService,
-                           CurrentUserContext currentUserContext) {
+                           CurrentUserContext currentUserContext,
+                           TokenBlacklistService tokenBlacklistService) {
         this.sysUserMapper = sysUserMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
         this.currentUserContext = currentUserContext;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     /**
@@ -106,6 +110,11 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "当前用户不存在");
         }
         return toCurrentUserVO(user);
+    }
+
+    @Override
+    public void logout(String token) {
+        tokenBlacklistService.blacklist(token);
     }
 
     private AuthLoginVO toLoginVO(SysUser user) {

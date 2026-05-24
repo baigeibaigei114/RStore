@@ -27,6 +27,7 @@ spring:
       host: localhost
       port: 6379
       database: 0
+      timeout: 2s
 
   rabbitmq:
     host: localhost

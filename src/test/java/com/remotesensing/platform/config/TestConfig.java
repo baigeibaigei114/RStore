@@ -5,6 +5,7 @@ import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.config.properties.AuthProperties;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.TokenBlacklistService;
 import com.remotesensing.platform.service.impl.JwtTokenServiceImpl;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
@@ -29,8 +30,16 @@ public class TestConfig {
 
     @Bean
     @Primary
-    public CurrentUserContext testCurrentUserContext(JwtTokenService jwtTokenService, AuthProperties authProperties) {
-        return new CurrentUserContext(jwtTokenService, authProperties);
+    public TokenBlacklistService mockTokenBlacklistService() {
+        return Mockito.mock(TokenBlacklistService.class);
+    }
+
+    @Bean
+    @Primary
+    public CurrentUserContext testCurrentUserContext(JwtTokenService jwtTokenService,
+                                                     AuthProperties authProperties,
+                                                     TokenBlacklistService tokenBlacklistService) {
+        return new CurrentUserContext(jwtTokenService, authProperties, tokenBlacklistService);
     }
 
     @Bean

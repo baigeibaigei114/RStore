@@ -27,4 +27,6 @@ public interface AuthService {
      * @return 当前用户信息
      */
     CurrentUserVO me();
+
+    void logout(String token);
 }

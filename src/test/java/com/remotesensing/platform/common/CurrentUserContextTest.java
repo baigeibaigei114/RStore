@@ -8,11 +8,13 @@ import com.remotesensing.platform.config.properties.AuthProperties;
 import com.remotesensing.platform.entity.SysUser;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.TokenBlacklistService;
 import com.remotesensing.platform.service.impl.JwtTokenServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -21,6 +23,7 @@ class CurrentUserContextTest {
 
     private AuthProperties authProperties;
     private JwtTokenService jwtTokenService;
+    private TokenBlacklistService tokenBlacklistService;
     private CurrentUserContext currentUserContext;
 
     @BeforeEach
@@ -29,7 +32,8 @@ class CurrentUserContextTest {
         authProperties.setJwtSecret("test-secret");
         authProperties.setDefaultUserId("dev-user");
         jwtTokenService = new JwtTokenServiceImpl(authProperties, new ObjectMapper());
-        currentUserContext = new CurrentUserContext(jwtTokenService, authProperties);
+        tokenBlacklistService = Mockito.mock(TokenBlacklistService.class);
+        currentUserContext = new CurrentUserContext(jwtTokenService, authProperties, tokenBlacklistService);
     }
 
     @AfterEach
@@ -45,6 +49,20 @@ class CurrentUserContextTest {
         bindRequest(request);
 
         assertThat(currentUserContext.getCurrentUserId()).isEqualTo("1");
+    }
+
+    @Test
+    @DisplayName("已加入黑名单的 Bearer token 会被拒绝")
+    void shouldRejectBlacklistedToken() {
+        String token = tokenFor(1L, "admin", "ADMIN");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer " + token);
+        bindRequest(request);
+        Mockito.when(tokenBlacklistService.isBlacklistedByJti(jwtTokenService.parseToken(token).jti())).thenReturn(true);
+
+        assertThatThrownBy(() -> currentUserContext.getCurrentUserId())
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Token 已失效");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.remotesensing.platform.controller;
 
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -16,7 +17,9 @@ import com.remotesensing.platform.entity.SysUser;
 import com.remotesensing.platform.service.AuthService;
 import com.remotesensing.platform.service.JwtTokenService;
 import com.remotesensing.platform.service.RsImageService;
+import com.remotesensing.platform.service.TokenBlacklistService;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,6 +48,14 @@ class AuthInterceptorTest {
 
     @MockBean
     private AuthService authService;
+
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
+
+    @AfterEach
+    void tearDown() {
+        reset(tokenBlacklistService);
+    }
 
     @Test
     @DisplayName("未携带 token 访问影像接口被拒绝")
@@ -85,6 +96,22 @@ class AuthInterceptorTest {
     }
 
     @Test
+    @DisplayName("携带已拉黑 token 访问受保护接口会被拒绝")
+    void requestWithBlacklistedTokenShouldBeRejected() throws Exception {
+        String token = tokenFor("1", "admin", "ADMIN");
+        when(tokenBlacklistService.isBlacklistedByJti(jwtTokenService.parseToken(token).jti())).thenReturn(true);
+
+        mockMvc.perform(get("/api/images")
+                        .contextPath("/api")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.UNAUTHORIZED.getCode()))
+                .andExpect(jsonPath("$.message").value("Token 已失效，请重新登录"));
+
+        verify(imageService, never()).page(null, null);
+    }
+
+    @Test
     @DisplayName("登录接口不需要 token")
     void loginShouldNotRequireToken() throws Exception {
         mockMvc.perform(post("/api/auth/login")
@@ -97,6 +124,35 @@ class AuthInterceptorTest {
                                 }
                                 """))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("退出登录接口需要 token 并调用 AuthService")
+    void logoutShouldCallAuthService() throws Exception {
+        String token = tokenFor("1", "admin", "ADMIN");
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .contextPath("/api")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()));
+
+        verify(authService).logout(token);
+    }
+
+    @Test
+    @DisplayName("已拉黑 token 重复调用退出登录仍进入 Controller")
+    void logoutWithBlacklistedTokenShouldStillCallAuthService() throws Exception {
+        String token = tokenFor("1", "admin", "ADMIN");
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .contextPath("/api")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()));
+
+        verify(tokenBlacklistService, never()).isBlacklistedByJti(jwtTokenService.parseToken(token).jti());
+        verify(authService).logout(token);
     }
 
     @Test
