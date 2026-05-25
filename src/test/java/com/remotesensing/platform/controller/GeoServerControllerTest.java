@@ -1,5 +1,10 @@
 package com.remotesensing.platform.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -8,8 +13,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
+import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.GeoServerService;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.vo.GeoServerPublishVO;
+import java.time.Duration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +38,14 @@ class GeoServerControllerTest {
 
     @MockBean
     private GeoServerService geoServerService;
+
+    @Autowired
+    private RateLimitService rateLimitService;
+
+    @AfterEach
+    void tearDown() {
+        reset(rateLimitService);
+    }
 
     @Test
     @DisplayName("发布任务结果为 GeoServer 图层成功")
@@ -50,5 +67,19 @@ class GeoServerControllerTest {
                 .andExpect(jsonPath("$.data.sourceObjectKey").value("result/NDVI/2026/05/task_1.tif"));
 
         verify(geoServerService).publishTaskResult(1L);
+    }
+
+    @Test
+    @DisplayName("手动发布超过限流时不调用 GeoServerService")
+    void publishTaskResultShouldRejectWhenRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("geoserver-publish:user:dev-user"), eq(3), eq(Duration.ofSeconds(300)));
+
+        mockMvc.perform(post("/api/geoserver/publish/{taskId}", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(geoServerService, never()).publishTaskResult(any());
     }
 }

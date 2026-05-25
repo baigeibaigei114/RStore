@@ -1,8 +1,12 @@
 package com.remotesensing.platform.controller;
 
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.service.GeoServerService;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.vo.GeoServerPublishVO;
+import java.time.Duration;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,9 +23,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class GeoServerController {
 
     private final GeoServerService geoServerService;
+    private final RateLimitService rateLimitService;
+    private final RateLimitProperties rateLimitProperties;
+    private final CurrentUserContext currentUserContext;
 
-    public GeoServerController(GeoServerService geoServerService) {
+    public GeoServerController(GeoServerService geoServerService,
+                               RateLimitService rateLimitService,
+                               RateLimitProperties rateLimitProperties,
+                               CurrentUserContext currentUserContext) {
         this.geoServerService = geoServerService;
+        this.rateLimitService = rateLimitService;
+        this.rateLimitProperties = rateLimitProperties;
+        this.currentUserContext = currentUserContext;
     }
 
     /**
@@ -36,6 +49,16 @@ public class GeoServerController {
      */
     @PostMapping("/publish/{taskId}")
     public Result<GeoServerPublishVO> publishTaskResult(@PathVariable Long taskId) {
+        checkPublishRateLimit();
         return Result.success(geoServerService.publishTaskResult(taskId));
+    }
+
+    private void checkPublishRateLimit() {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "geoserver-publish:user:" + userId,
+                rateLimitProperties.getGeoserverPublishLimit(),
+                Duration.ofSeconds(rateLimitProperties.getGeoserverPublishWindowSeconds())
+        );
     }
 }

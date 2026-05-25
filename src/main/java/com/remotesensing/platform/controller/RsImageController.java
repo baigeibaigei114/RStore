@@ -1,18 +1,22 @@
 package com.remotesensing.platform.controller;
 
 import com.remotesensing.platform.common.PageResult;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.common.ResultCode;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.dto.RsImageVisibilityUpdateDTO;
 import com.remotesensing.platform.exception.BusinessException;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
 import jakarta.validation.Valid;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -45,9 +49,18 @@ public class RsImageController {
     private static final BigDecimal MAX_LAT = BigDecimal.valueOf(90);
 
     private final RsImageService imageService;
+    private final RateLimitService rateLimitService;
+    private final RateLimitProperties rateLimitProperties;
+    private final CurrentUserContext currentUserContext;
 
-    public RsImageController(RsImageService imageService) {
+    public RsImageController(RsImageService imageService,
+                             RateLimitService rateLimitService,
+                             RateLimitProperties rateLimitProperties,
+                             CurrentUserContext currentUserContext) {
         this.imageService = imageService;
+        this.rateLimitService = rateLimitService;
+        this.rateLimitProperties = rateLimitProperties;
+        this.currentUserContext = currentUserContext;
     }
 
     /**
@@ -83,6 +96,7 @@ public class RsImageController {
                                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
                                     OffsetDateTime captureTime,
                                     @RequestParam(value = "cloudPercent", required = false) BigDecimal cloudPercent) {
+        checkUploadRateLimit();
         return Result.success(imageService.upload(file, name, sensor, captureTime, cloudPercent));
     }
 
@@ -107,6 +121,7 @@ public class RsImageController {
      */
     @GetMapping("/{id}/download-url")
     public Result<FilePresignedUrlVO> getDownloadUrl(@PathVariable Long id) {
+        checkPresignedUrlRateLimit();
         return Result.success(imageService.getDownloadUrl(id));
     }
 
@@ -120,6 +135,7 @@ public class RsImageController {
      */
     @GetMapping("/{id}/thumbnail-url")
     public Result<FilePresignedUrlVO> getThumbnailUrl(@PathVariable Long id) {
+        checkPresignedUrlRateLimit();
         return Result.success(imageService.getThumbnailUrl(id));
     }
 
@@ -281,5 +297,34 @@ public class RsImageController {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "bbox 经度范围应为 [-180,180]，纬度范围应为 [-90,90]");
         }
         query.setHasBbox(true);
+    }
+
+    /**
+     * 影像上传限流，按用户维度控制，防止大文件上传滥用磁盘和内存。
+     *
+     * <p>上传是重资源操作（磁盘 I/O + Python 进程计算），窗口时间设置较长（默认 5 分钟），
+     * 避免正常批量上传被误拦截。</p>
+     */
+    private void checkUploadRateLimit() {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "upload:user:" + userId,
+                rateLimitProperties.getUploadLimit(),
+                Duration.ofSeconds(rateLimitProperties.getUploadWindowSeconds())
+        );
+    }
+
+    /**
+     * 预签名 URL 获取限流，按用户维度控制。
+     *
+     * <p>耗时在高频请求下会耗尽 MinIO 连接池，因此限制单用户调用频率。</p>
+     */
+    private void checkPresignedUrlRateLimit() {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "presigned-url:user:" + userId,
+                rateLimitProperties.getPresignedUrlLimit(),
+                Duration.ofSeconds(rateLimitProperties.getPresignedUrlWindowSeconds())
+        );
     }
 }

@@ -2,7 +2,9 @@ package com.remotesensing.platform.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -14,14 +16,19 @@ import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
+import com.remotesensing.platform.exception.BusinessException;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsResultFileVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
 import com.remotesensing.platform.vo.RsTaskListVO;
 import com.remotesensing.platform.vo.RsTaskLogVO;
+import com.remotesensing.platform.vo.RsTaskSubmitVO;
 import com.remotesensing.platform.vo.RsTaskVO;
+import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +51,61 @@ class RsTaskControllerStatusTest {
 
     @MockBean
     private RsTaskService taskService;
+
+    @Autowired
+    private RateLimitService rateLimitService;
+
+    @AfterEach
+    void tearDown() {
+        reset(rateLimitService);
+    }
+
+    @Test
+    @DisplayName("提交任务成功")
+    void submitTaskShouldReturnSuccess() throws Exception {
+        when(taskService.submit(any())).thenReturn(new RsTaskSubmitVO(1L));
+
+        mockMvc.perform(post("/api/tasks")
+                        .contextPath("/api")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "imageId": 1,
+                                  "taskType": "NDVI",
+                                  "params": {
+                                    "redBand": 3,
+                                    "nirBand": 4
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.taskId").value(1L));
+
+        verify(rateLimitService).check("task-submit:user:dev-user", 10, Duration.ofSeconds(60));
+        verify(taskService).submit(any());
+    }
+
+    @Test
+    @DisplayName("提交任务超过限流时不调用 TaskService")
+    void submitTaskShouldRejectWhenRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("task-submit:user:dev-user"), eq(10), eq(Duration.ofSeconds(60)));
+
+        mockMvc.perform(post("/api/tasks")
+                        .contextPath("/api")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "imageId": 1,
+                                  "taskType": "NDVI"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(taskService, never()).submit(any());
+    }
 
     @Test
     @DisplayName("查询任务详情成功")
@@ -124,6 +186,20 @@ class RsTaskControllerStatusTest {
                 .andExpect(jsonPath("$.data.url").value("http://minio/result"));
 
         verify(taskService).getResultDownloadUrl(1L);
+    }
+
+    @Test
+    @DisplayName("任务结果下载 URL 超过限流时不调用 TaskService")
+    void getTaskResultDownloadUrlShouldRejectWhenRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("presigned-url:user:dev-user"), eq(60), eq(Duration.ofSeconds(60)));
+
+        mockMvc.perform(get("/api/tasks/{taskId}/result/download-url", 1L)
+                        .contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(taskService, never()).getResultDownloadUrl(any());
     }
 
     @Test

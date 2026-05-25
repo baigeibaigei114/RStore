@@ -1,5 +1,8 @@
 package com.remotesensing.platform.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -14,10 +17,13 @@ import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.entity.SysUser;
+import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.service.AuthService;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.TokenBlacklistService;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,9 +58,12 @@ class AuthInterceptorTest {
     @Autowired
     private TokenBlacklistService tokenBlacklistService;
 
+    @Autowired
+    private RateLimitService rateLimitService;
+
     @AfterEach
     void tearDown() {
-        reset(tokenBlacklistService);
+        reset(tokenBlacklistService, rateLimitService);
     }
 
     @Test
@@ -124,6 +133,76 @@ class AuthInterceptorTest {
                                 }
                                 """))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("登录 IP 超过限流时不调用 AuthService")
+    void loginShouldRejectWhenIpRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("login:ip:10.0.0.1"), eq(10), eq(Duration.ofSeconds(60)));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contextPath("/api")
+                        .with(request -> {
+                            request.setRemoteAddr("10.0.0.1");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "admin",
+                                  "password": "admin123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(authService, never()).login(any());
+    }
+
+    @Test
+    @DisplayName("登录限流不信任 X-Forwarded-For")
+    void loginRateLimitShouldIgnoreForwardedForHeader() throws Exception {
+        mockMvc.perform(post("/api/auth/login")
+                        .contextPath("/api")
+                        .with(request -> {
+                            request.setRemoteAddr("10.0.0.1");
+                            return request;
+                        })
+                        .header("X-Forwarded-For", "1.2.3.4")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "admin",
+                                  "password": "admin123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()));
+
+        verify(rateLimitService).check("login:ip:10.0.0.1", 10, Duration.ofSeconds(60));
+        verify(rateLimitService, never()).check("login:ip:1.2.3.4", 10, Duration.ofSeconds(60));
+    }
+
+    @Test
+    @DisplayName("登录用户名超过限流时不调用 AuthService")
+    void loginShouldRejectWhenUsernameRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("login:username:admin"), eq(5), eq(Duration.ofSeconds(60)));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contextPath("/api")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "ADMIN",
+                                  "password": "admin123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(authService, never()).login(any());
     }
 
     @Test

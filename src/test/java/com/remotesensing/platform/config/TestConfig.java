@@ -3,8 +3,10 @@ package com.remotesensing.platform.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.config.properties.AuthProperties;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.JwtTokenService;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.TokenBlacklistService;
 import com.remotesensing.platform.service.impl.JwtTokenServiceImpl;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
@@ -19,7 +21,7 @@ import org.springframework.context.annotation.Profile;
 
 @TestConfiguration
 @Profile("test")
-@EnableConfigurationProperties(AuthProperties.class)
+@EnableConfigurationProperties({AuthProperties.class, RateLimitProperties.class})
 public class TestConfig {
 
     @Bean
@@ -32,6 +34,12 @@ public class TestConfig {
     @Primary
     public TokenBlacklistService mockTokenBlacklistService() {
         return Mockito.mock(TokenBlacklistService.class);
+    }
+
+    @Bean
+    @Primary
+    public RateLimitService mockRateLimitService() {
+        return Mockito.mock(RateLimitService.class);
     }
 
     @Bean

@@ -49,6 +49,19 @@ app:
     dev-user-header-enabled: false
     default-user-id: dev-user
     worker-token: dev-worker-token-change-me
+  rate-limit:
+    login-ip-limit: 10
+    login-ip-window-seconds: 60
+    login-username-limit: 5
+    login-username-window-seconds: 60
+    task-submit-limit: 10
+    task-submit-window-seconds: 60
+    presigned-url-limit: 60
+    presigned-url-window-seconds: 60
+    upload-limit: 5
+    upload-window-seconds: 300
+    geoserver-publish-limit: 3
+    geoserver-publish-window-seconds: 300
 
 rabbitmq:
   remote-sensing-task:

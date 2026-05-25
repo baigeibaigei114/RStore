@@ -1,8 +1,12 @@
 package com.remotesensing.platform.controller;
 
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.service.MinioService;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
+import java.time.Duration;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,9 +22,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class FileController {
 
     private final MinioService minioService;
+    private final RateLimitService rateLimitService;
+    private final RateLimitProperties rateLimitProperties;
+    private final CurrentUserContext currentUserContext;
 
-    public FileController(MinioService minioService) {
+    public FileController(MinioService minioService,
+                          RateLimitService rateLimitService,
+                          RateLimitProperties rateLimitProperties,
+                          CurrentUserContext currentUserContext) {
         this.minioService = minioService;
+        this.rateLimitService = rateLimitService;
+        this.rateLimitProperties = rateLimitProperties;
+        this.currentUserContext = currentUserContext;
     }
 
     /**
@@ -34,6 +47,22 @@ public class FileController {
      */
     @GetMapping("/presigned-url")
     public Result<FilePresignedUrlVO> generatePresignedUrl(@RequestParam String objectKey) {
+        checkPresignedUrlRateLimit();
         return Result.success(minioService.generatePresignedUrl(objectKey));
+    }
+
+    /**
+     * 预签名 URL 获取限流，按用户维度控制。
+     *
+     * <p>预签名 URL 每次调用都会触发 MinIO API，高频请求会耗尽 MinIO 连接池，
+     * 因此限制单用户每 60 秒最多获取的次数。</p>
+     */
+    private void checkPresignedUrlRateLimit() {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "presigned-url:user:" + userId,
+                rateLimitProperties.getPresignedUrlLimit(),
+                Duration.ofSeconds(rateLimitProperties.getPresignedUrlWindowSeconds())
+        );
     }
 }

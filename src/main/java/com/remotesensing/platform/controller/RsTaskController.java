@@ -1,9 +1,12 @@
 package com.remotesensing.platform.controller;
 
 import com.remotesensing.platform.common.PageResult;
+import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.RsTaskClaimVO;
@@ -13,6 +16,7 @@ import com.remotesensing.platform.vo.RsTaskLogVO;
 import com.remotesensing.platform.vo.RsTaskSubmitVO;
 import com.remotesensing.platform.vo.RsTaskVO;
 import jakarta.validation.Valid;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,9 +36,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class RsTaskController {
 
     private final RsTaskService taskService;
+    private final RateLimitService rateLimitService;
+    private final RateLimitProperties rateLimitProperties;
+    private final CurrentUserContext currentUserContext;
 
-    public RsTaskController(RsTaskService taskService) {
+    public RsTaskController(RsTaskService taskService,
+                            RateLimitService rateLimitService,
+                            RateLimitProperties rateLimitProperties,
+                            CurrentUserContext currentUserContext) {
         this.taskService = taskService;
+        this.rateLimitService = rateLimitService;
+        this.rateLimitProperties = rateLimitProperties;
+        this.currentUserContext = currentUserContext;
     }
 
     /**
@@ -47,6 +60,12 @@ public class RsTaskController {
      */
     @PostMapping
     public Result<RsTaskSubmitVO> submit(@Valid @RequestBody RsTaskSubmitDTO submitDTO) {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "task-submit:user:" + userId,
+                rateLimitProperties.getTaskSubmitLimit(),
+                Duration.ofSeconds(rateLimitProperties.getTaskSubmitWindowSeconds())
+        );
         return Result.success(taskService.submit(submitDTO));
     }
 
@@ -84,6 +103,7 @@ public class RsTaskController {
      */
     @GetMapping("/{taskId}/result/download-url")
     public Result<FilePresignedUrlVO> getResultDownloadUrl(@PathVariable Long taskId) {
+        checkPresignedUrlRateLimit();
         return Result.success(taskService.getResultDownloadUrl(taskId));
     }
 
@@ -141,5 +161,17 @@ public class RsTaskController {
                                      @Valid @RequestBody RsTaskStatusUpdateDTO updateDTO) {
         taskService.updateStatus(taskId, updateDTO);
         return Result.success();
+    }
+
+    /**
+     * 预签名 URL 限流，按用户维度控制高频下载行为。
+     */
+    private void checkPresignedUrlRateLimit() {
+        String userId = currentUserContext.getCurrentUserId();
+        rateLimitService.check(
+                "presigned-url:user:" + userId,
+                rateLimitProperties.getPresignedUrlLimit(),
+                Duration.ofSeconds(rateLimitProperties.getPresignedUrlWindowSeconds())
+        );
     }
 }

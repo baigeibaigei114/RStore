@@ -1,6 +1,7 @@
 package com.remotesensing.platform.config;
 
 import com.remotesensing.platform.config.properties.AuthProperties;
+import com.remotesensing.platform.config.properties.RateLimitProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,7 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * - 提供 BCryptPasswordEncoder 作为全局密码加密器。
  */
 @Configuration
-@EnableConfigurationProperties(AuthProperties.class)
+@EnableConfigurationProperties({AuthProperties.class, RateLimitProperties.class})
 public class AuthConfig {
 
     /**
