@@ -5,6 +5,7 @@ import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.properties.RateLimitProperties;
+import com.remotesensing.platform.dto.RsImageBandMappingUpdateDTO;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.dto.RsImageVisibilityUpdateDTO;
@@ -254,6 +255,22 @@ public class RsImageController {
     public Result<RsImageVO> updateVisibility(@PathVariable Long id,
                                               @Valid @RequestBody RsImageVisibilityUpdateDTO updateDTO) {
         return Result.success(imageService.updateVisibility(id, updateDTO.getVisibility()));
+    }
+
+    /**
+     * 手动确认影像波段映射。
+     *
+     * <p>用于系统无法自动识别红光、绿光、蓝光、近红外波段时，由了解数据来源的用户手动填写。
+     * Service 层会校验当前用户是否为影像 owner，并将配置写入 metadataJson 供 NDVI/NDWI 任务复用。</p>
+     *
+     * @param id 影像主键 ID
+     * @param updateDTO 用户确认的波段编号
+     * @return 更新后的影像详情
+     */
+    @PatchMapping("/{id}/band-mapping")
+    public Result<RsImageVO> updateBandMapping(@PathVariable Long id,
+                                               @Valid @RequestBody RsImageBandMappingUpdateDTO updateDTO) {
+        return Result.success(imageService.updateBandMapping(id, updateDTO));
     }
 
     /**

@@ -167,6 +167,24 @@ def estimate_resolution_meter(dataset, wgs84_bounds):
     return None
 
 
+def safe_description(value):
+    """清洗单个波段描述，避免空字符串进入后端元数据。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def band_descriptions(dataset):
+    """读取 GeoTIFF 每个波段的描述信息，供后端推断 B02/B03/B04/B08 等波段角色。"""
+    return [safe_description(value) for value in dataset.descriptions]
+
+
+def color_interpretations(dataset):
+    """读取 GeoTIFF 波段颜色解释，供后端识别 RGB 可见光波段。"""
+    return [value.name.lower() for value in dataset.colorinterp]
+
+
 def parse_metadata(file_path):
     """解析 GeoTIFF 文件的完整元数据。
 
@@ -234,6 +252,8 @@ def parse_metadata(file_path):
             ),
             "resolutionMeter": resolution_meter,
             "nodata": dataset.nodata,
+            "bandDescriptions": band_descriptions(dataset),
+            "colorInterpretations": color_interpretations(dataset),
         }
 
 

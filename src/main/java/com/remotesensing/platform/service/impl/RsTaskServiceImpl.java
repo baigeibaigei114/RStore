@@ -25,6 +25,7 @@ import com.remotesensing.platform.mapper.RsResultFileMapper;
 import com.remotesensing.platform.mapper.RsTaskLogMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoServerService;
+import com.remotesensing.platform.service.ImageBandCapabilityService;
 import com.remotesensing.platform.service.MessageOutboxService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsTaskService;
@@ -94,6 +95,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private final RabbitTaskProperties rabbitTaskProperties;
     private final MinioProperties minioProperties;
     private final ObjectMapper objectMapper;
+    private final ImageBandCapabilityService imageBandCapabilityService;
     private final MessageOutboxService messageOutboxService;
     private final GeoServerService geoServerService;
     private final MinioService minioService;
@@ -107,6 +109,7 @@ public class RsTaskServiceImpl implements RsTaskService {
                              RabbitTaskProperties rabbitTaskProperties,
                              MinioProperties minioProperties,
                              ObjectMapper objectMapper,
+                             ImageBandCapabilityService imageBandCapabilityService,
                              MessageOutboxService messageOutboxService,
                              GeoServerService geoServerService,
                              MinioService minioService,
@@ -119,6 +122,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         this.rabbitTaskProperties = rabbitTaskProperties;
         this.minioProperties = minioProperties;
         this.objectMapper = objectMapper;
+        this.imageBandCapabilityService = imageBandCapabilityService;
         this.messageOutboxService = messageOutboxService;
         this.geoServerService = geoServerService;
         this.minioService = minioService;
@@ -338,6 +342,12 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (!ImageStatus.fromDb(image.getStatus()).canSubmitTask()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
         }
+        Map<String, Object> taskParams = ensureMutableParams(submitDTO);
+        if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION) {
+            validateAndFillChangeDetectionParams(image, currentUserId, taskParams);
+        } else {
+            imageBandCapabilityService.validateAndFillTaskParams(image, submitDTO.getTaskType(), taskParams);
+        }
 
         // 第三步：CAS 式状态变更（READY -> PROCESSING）。使用 UPDATE ... WHERE status='READY' 保证
         // 同一影像不会被并发创建多个任务。返回影响行数 <=0 说明状态已被其他线程抢先变更。
@@ -373,6 +383,135 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw exception;
         }
         return new RsTaskSubmitVO(existingTask.getId());
+    }
+
+    private Map<String, Object> ensureMutableParams(RsTaskSubmitDTO submitDTO) {
+        Map<String, Object> params = submitDTO.getParams();
+        if (params == null) {
+            params = new LinkedHashMap<>();
+        } else if (!(params instanceof LinkedHashMap)) {
+            params = new LinkedHashMap<>(params);
+        }
+        submitDTO.setParams(params);
+        return params;
+    }
+
+    /**
+     * 校验变化检测两期影像权限和基础兼容性，并由后端填充 MinIO 对象路径。
+     */
+    private void validateAndFillChangeDetectionParams(RsImage afterImage,
+                                                      String currentUserId,
+                                                      Map<String, Object> params) {
+        Long beforeImageId = requiredLongParam(params, "beforeImageId");
+        if (beforeImageId.equals(afterImage.getId())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化检测需要选择两期不同影像");
+        }
+
+        RsImage beforeImage = imageMapper.selectAccessibleById(beforeImageId, currentUserId);
+        if (beforeImage == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "对比前影像不存在或无权访问");
+        }
+        if (!ImageStatus.fromDb(beforeImage.getStatus()).canSubmitTask()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "对比前影像必须处于 READY 状态");
+        }
+
+        int band = optionalIntParam(params, "band", 1);
+        validateChangeDetectionBand(beforeImage, afterImage, band);
+        validateChangeDetectionCompatibility(beforeImage, afterImage);
+
+        params.remove("beforeObjectKey");
+        params.remove("afterObjectKey");
+        params.remove("beforeBucket");
+        params.remove("afterBucket");
+        params.put("beforeImageId", beforeImage.getId());
+        params.put("afterImageId", afterImage.getId());
+        params.put("beforeBucket", beforeImage.getMinioBucket());
+        params.put("afterBucket", afterImage.getMinioBucket());
+        params.put("beforeObjectKey", beforeImage.getObjectKey());
+        params.put("afterObjectKey", afterImage.getObjectKey());
+        params.put("band", band);
+    }
+
+    /**
+     * 校验变化检测波段编号是否同时存在于前后两期影像中。
+     */
+    private void validateChangeDetectionBand(RsImage beforeImage, RsImage afterImage, int band) {
+        if (band < 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化检测波段编号必须大于 0");
+        }
+        int beforeBandCount = requireBandCount(beforeImage, "对比前影像");
+        int afterBandCount = requireBandCount(afterImage, "检测后影像");
+        if (band > beforeBandCount) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(),
+                    "变化检测波段编号不能大于对比前影像波段数 " + beforeBandCount);
+        }
+        if (band > afterBandCount) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(),
+                    "变化检测波段编号不能大于检测后影像波段数 " + afterBandCount);
+        }
+    }
+
+    /**
+     * 校验变化检测两期影像的尺寸和 CRS，避免 Worker 下载后才发现无法配准。
+     */
+    private void validateChangeDetectionCompatibility(RsImage beforeImage, RsImage afterImage) {
+        if (!sameValue(beforeImage.getWidth(), afterImage.getWidth())
+                || !sameValue(beforeImage.getHeight(), afterImage.getHeight())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化检测两期影像尺寸不一致");
+        }
+        if (!sameValue(beforeImage.getProjection(), afterImage.getProjection())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化检测两期影像坐标系不一致");
+        }
+    }
+
+    private int requireBandCount(RsImage image, String label) {
+        if (image.getBandCount() == null || image.getBandCount() < 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), label + "缺少有效波段数");
+        }
+        return image.getBandCount();
+    }
+
+    private Long requiredLongParam(Map<String, Object> params, String paramName) {
+        Object value = params.get(paramName);
+        if (value == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "CHANGE_DETECTION 需要 params." + paramName);
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String string && !string.isBlank()) {
+            try {
+                return Long.parseLong(string.trim());
+            } catch (NumberFormatException exception) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 必须是整数");
+            }
+        }
+        throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 不能为空");
+    }
+
+    private int optionalIntParam(Map<String, Object> params, String paramName, int defaultValue) {
+        Object value = params.get(paramName);
+        if (value == null || (value instanceof String string && string.isBlank())) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String string) {
+            try {
+                return Integer.parseInt(string.trim());
+            } catch (NumberFormatException exception) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 必须是整数");
+            }
+        }
+        throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), paramName + " 必须是整数");
+    }
+
+    private boolean sameValue(Object left, Object right) {
+        if (left == null || right == null) {
+            return true;
+        }
+        return left.equals(right);
     }
 
     /**

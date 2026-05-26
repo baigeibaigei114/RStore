@@ -164,6 +164,18 @@ public interface RsImageMapper {
                          @Param("visibility") String visibility);
 
     /**
+     * 更新影像元数据 JSON。
+     *
+     * @param id 影像主键
+     * @param ownerId 影像所有者 ID，用于限制只有 owner 可修改
+     * @param metadataJson 新的 metadata_json 内容
+     * @return 受影响行数
+     */
+    int updateMetadataJson(@Param("id") Long id,
+                           @Param("ownerId") String ownerId,
+                           @Param("metadataJson") String metadataJson);
+
+    /**
      * 根据影像编码统计记录数，用于唯一性校验。
      *
      * @param imageCode 影像编码

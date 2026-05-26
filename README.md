@@ -452,6 +452,21 @@ NDWI
 CHANGE_DETECTION
 ```
 
+变化检测提交时前端只传两期影像 ID，后端会在校验权限、状态、波段数、尺寸和坐标系后填充 MinIO 对象路径：
+
+```json
+{
+  "imageId": 2,
+  "taskType": "CHANGE_DETECTION",
+  "params": {
+    "beforeImageId": 1,
+    "afterImageId": 2,
+    "band": 1,
+    "threshold": 0.2
+  }
+}
+```
+
 提交流程：
 
 1. 校验 `imageId` 对应影像是否存在。

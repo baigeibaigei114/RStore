@@ -4,6 +4,7 @@ import type { PageResult } from '@/types/api'
 import type { FilePresignedUrl } from '@/types/file'
 import type {
   ImageDetail,
+  ImageBandMappingUpdateParams,
   ImageListItem,
   ImageRegionSearchParams,
   ImageSearchParams,
@@ -100,6 +101,14 @@ export function uploadImageApi(
  */
 export function updateImageVisibilityApi(id: number | string, visibility: ImageVisibility) {
   return request.patch<unknown, ImageDetail>(`/images/${id}/visibility`, { visibility })
+}
+
+/**
+ * 手动确认影像波段映射。
+ * 用于系统无法自动识别 red/green/blue/nir 时，由用户保存自己确认的波段编号。
+ */
+export function updateImageBandMappingApi(id: number | string, params: ImageBandMappingUpdateParams) {
+  return request.patch<unknown, ImageDetail>(`/images/${id}/band-mapping`, params)
 }
 
 /**

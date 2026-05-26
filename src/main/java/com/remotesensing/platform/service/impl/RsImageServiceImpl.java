@@ -1,7 +1,10 @@
 package com.remotesensing.platform.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
@@ -9,6 +12,7 @@ import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.ThumbnailStatus;
 import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.properties.UploadProperties;
+import com.remotesensing.platform.dto.RsImageBandMappingUpdateDTO;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;
@@ -16,11 +20,13 @@ import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoTiffMetadataService;
+import com.remotesensing.platform.service.ImageBandCapabilityService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsImageService;
 import com.remotesensing.platform.service.ThumbnailAsyncService;
 import com.remotesensing.platform.vo.GeoTiffMetadataVO;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
+import com.remotesensing.platform.vo.ImageBandCapabilityVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
 import com.remotesensing.platform.vo.RsImageListVO;
 import com.remotesensing.platform.vo.RsImageVO;
@@ -31,8 +37,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Stream;
@@ -77,6 +85,7 @@ public class RsImageServiceImpl implements RsImageService {
     private final RsTaskMapper taskMapper;
     private final MinioService minioService;
     private final GeoTiffMetadataService geoTiffMetadataService;
+    private final ImageBandCapabilityService imageBandCapabilityService;
     private final ThumbnailAsyncService thumbnailAsyncService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -88,6 +97,7 @@ public class RsImageServiceImpl implements RsImageService {
                               RsTaskMapper taskMapper,
                               MinioService minioService,
                               GeoTiffMetadataService geoTiffMetadataService,
+                              ImageBandCapabilityService imageBandCapabilityService,
                               ThumbnailAsyncService thumbnailAsyncService,
                               ObjectMapper objectMapper,
                               UploadProperties uploadProperties,
@@ -97,6 +107,7 @@ public class RsImageServiceImpl implements RsImageService {
         this.taskMapper = taskMapper;
         this.minioService = minioService;
         this.geoTiffMetadataService = geoTiffMetadataService;
+        this.imageBandCapabilityService = imageBandCapabilityService;
         this.thumbnailAsyncService = thumbnailAsyncService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -176,7 +187,9 @@ public class RsImageServiceImpl implements RsImageService {
         try {
             localFile = saveToLocalTemp(file);
             // 上传主流程只复用这一份临时文件完成解析和原始影像上传，缩略图交给后台任务独立处理。
-            GeoTiffMetadataVO metadata = geoTiffMetadataService.parse(localFile.filePath());
+            GeoTiffMetadataVO metadata = imageBandCapabilityService.enrichMetadata(
+                    geoTiffMetadataService.parse(localFile.filePath())
+            );
             uploadVO = minioService.uploadGeoTiff(localFile.filePath(), localFile.originalFilename(), localFile.contentType());
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
             image.setOwnerId(currentUserContext.getCurrentUserId());
@@ -344,6 +357,36 @@ public class RsImageServiceImpl implements RsImageService {
         return getById(id);
     }
 
+    /**
+     * 保存用户手动确认的波段映射。
+     *
+     * <p>仅影像 owner 可以修改。保存时不新增数据库字段，而是将映射写入 metadataJson，
+     * 并标记为 USER_CONFIRMED，便于后续任务提交复用和审计。</p>
+     */
+    @Override
+    @Transactional
+    public RsImageVO updateBandMapping(Long id, RsImageBandMappingUpdateDTO updateDTO) {
+        String currentUserId = currentUserContext.getCurrentUserId();
+        RsImage image = imageMapper.selectAccessibleById(id, currentUserId);
+        if (image == null || !currentUserId.equals(image.getOwnerId())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权修改波段映射");
+        }
+        ImageStatus imageStatus = ImageStatus.fromDb(image.getStatus());
+        if (imageStatus != ImageStatus.READY && imageStatus != ImageStatus.FAILED) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 或 FAILED 状态的影像可以修改波段映射");
+        }
+
+        Map<String, Integer> mapping = buildUserBandMapping(updateDTO);
+        validateBandMapping(mapping, image.getBandCount());
+        String metadataJson = buildUserConfirmedMetadataJson(image.getMetadataJson(), mapping);
+
+        int updated = imageMapper.updateMetadataJson(id, currentUserId, metadataJson);
+        if (updated <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权修改波段映射");
+        }
+        return getById(id);
+    }
+
     @Override
     @Transactional
     public void deleteById(Long id) {
@@ -501,6 +544,11 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setFileSize(image.getFileSize());
         vo.setContentType(image.getContentType());
         vo.setMetadataJson(image.getMetadataJson());
+        ImageBandCapabilityVO capability = imageBandCapabilityService.resolve(image);
+        vo.setBandMapping(capability.bandMapping());
+        vo.setBandMappingSource(capability.source());
+        vo.setBandMappingConfidence(capability.confidence());
+        vo.setSupportedTaskTypes(capability.supportedTaskTypes());
         vo.setMinioBucket(image.getMinioBucket());
         vo.setObjectKey(image.getObjectKey());
         vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
@@ -535,6 +583,11 @@ public class RsImageServiceImpl implements RsImageService {
         vo.setObjectKey(image.getObjectKey());
         vo.setThumbnailObjectKey(image.getThumbnailObjectKey());
         vo.setThumbnailStatus(image.getThumbnailStatus());
+        ImageBandCapabilityVO capability = imageBandCapabilityService.resolve(image);
+        vo.setBandMapping(capability.bandMapping());
+        vo.setBandMappingSource(capability.source());
+        vo.setBandMappingConfidence(capability.confidence());
+        vo.setSupportedTaskTypes(capability.supportedTaskTypes());
         vo.setStatus(image.getStatus());
         vo.setCreatedAt(image.getCreatedAt());
         return vo;
@@ -565,6 +618,91 @@ public class RsImageServiceImpl implements RsImageService {
         } catch (IllegalArgumentException exception) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "非法可见性：" + visibility);
         }
+    }
+
+    /**
+     * 从请求体中提取用户填写的波段映射，并过滤未填写的波段角色。
+     */
+    private Map<String, Integer> buildUserBandMapping(RsImageBandMappingUpdateDTO updateDTO) {
+        Map<String, Integer> mapping = new LinkedHashMap<>();
+        putIfPresent(mapping, "red", updateDTO.getRedBand());
+        putIfPresent(mapping, "green", updateDTO.getGreenBand());
+        putIfPresent(mapping, "blue", updateDTO.getBlueBand());
+        putIfPresent(mapping, "nir", updateDTO.getNirBand());
+        if (mapping.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "至少需要填写一个波段映射");
+        }
+        return mapping;
+    }
+
+    /**
+     * 将非空波段编号写入映射，避免空字段覆盖已有有效配置。
+     */
+    private void putIfPresent(Map<String, Integer> mapping, String role, Integer band) {
+        if (band != null) {
+            mapping.put(role, band);
+        }
+    }
+
+    /**
+     * 校验用户填写的波段编号是否超过影像实际波段数。
+     */
+    private void validateBandMapping(Map<String, Integer> mapping, Integer bandCount) {
+        if (bandCount == null || bandCount <= 0) {
+            return;
+        }
+        for (Map.Entry<String, Integer> entry : mapping.entrySet()) {
+            if (entry.getValue() > bandCount) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(),
+                        entry.getKey() + " 波段编号不能大于影像波段数 " + bandCount);
+            }
+        }
+    }
+
+    /**
+     * 将用户确认的波段映射合并到 metadataJson，并同步刷新可执行任务类型。
+     */
+    private String buildUserConfirmedMetadataJson(String metadataJson, Map<String, Integer> mapping) {
+        ObjectNode root = parseMetadataObject(metadataJson);
+        ObjectNode mappingNode = objectMapper.createObjectNode();
+        mapping.forEach(mappingNode::put);
+        root.set("bandMapping", mappingNode);
+        root.put("bandMappingSource", "USER_CONFIRMED");
+        root.put("bandMappingConfidence", "MEDIUM");
+        root.set("supportedTaskTypes", buildSupportedTaskTypes(mapping));
+        return root.toString();
+    }
+
+    /**
+     * 解析影像元数据 JSON，保证后续可以安全写入 bandMapping 等扩展字段。
+     */
+    private ObjectNode parseMetadataObject(String metadataJson) {
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(metadataJson);
+            if (node != null && node.isObject()) {
+                return (ObjectNode) node;
+            }
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像元数据 JSON 格式异常，暂不能修改波段映射");
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    /**
+     * 根据用户确认的波段映射推导可开放的指数计算任务。
+     */
+    private ArrayNode buildSupportedTaskTypes(Map<String, Integer> mapping) {
+        ArrayNode arrayNode = objectMapper.createArrayNode();
+        if (mapping.containsKey("red") && mapping.containsKey("nir")) {
+            arrayNode.add("NDVI");
+        }
+        if (mapping.containsKey("green") && mapping.containsKey("nir")) {
+            arrayNode.add("NDWI");
+        }
+        return arrayNode;
     }
 
     private String generateImageCode() {

@@ -2,6 +2,8 @@ package com.remotesensing.platform.vo;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import lombok.Data;
 
 /**
@@ -52,6 +54,14 @@ public class RsImageListVO {
 
     /** 缩略图生成状态：PENDING / GENERATING / COMPLETED / FAILED，对应 rs_image.thumbnail_status。 */
     private String thumbnailStatus;
+
+    private Map<String, Integer> bandMapping;
+
+    private String bandMappingSource;
+
+    private String bandMappingConfidence;
+
+    private List<String> supportedTaskTypes;
 
     /** 影像处理状态：READY / PROCESSING，对应 rs_image.status。 */
     private String status;

@@ -14,6 +14,12 @@ export type ImageVisibility = 'PRIVATE' | 'PUBLIC'
 /** 缩略图生成状态：待处理 / 生成中 / 已生成 / 失败 / 已跳过 */
 export type ThumbnailStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED'
 
+/** 波段角色：红光、绿光、蓝光、近红外。 */
+export type BandRole = 'red' | 'green' | 'blue' | 'nir'
+
+/** 由可信波段映射支撑的影像处理任务类型。 */
+export type SupportedImageTaskType = 'NDVI' | 'NDWI'
+
 /** 影像分页搜索参数（按关键字/条件筛选） */
 export interface ImageSearchParams {
   /** 搜索关键字，匹配影像名称或编码 */
@@ -86,6 +92,14 @@ export interface ImageListItem {
   status: ImageStatus
   /** 创建时间 */
   createdAt?: string
+  /** 波段角色到实际波段编号的映射。 */
+  bandMapping?: Partial<Record<BandRole, number>>
+  /** 波段映射来源，如自动识别或用户确认。 */
+  bandMappingSource?: string
+  /** 波段映射置信度。 */
+  bandMappingConfidence?: string
+  /** 当前影像可直接提交的处理任务类型。 */
+  supportedTaskTypes?: SupportedImageTaskType[]
 }
 
 /** 影像完整详情（继承 ImageListItem，包含全部元数据） */
@@ -138,4 +152,15 @@ export interface ImageUploadParams {
   captureTime?: string
   /** 可选，云量百分比 */
   cloudPercent?: number
+}
+
+export interface ImageBandMappingUpdateParams {
+  /** 红光波段编号。 */
+  redBand?: number
+  /** 绿光波段编号。 */
+  greenBand?: number
+  /** 蓝光波段编号。 */
+  blueBand?: number
+  /** 近红外波段编号。 */
+  nirBand?: number
 }

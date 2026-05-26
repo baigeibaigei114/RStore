@@ -96,6 +96,7 @@ class RsTaskServiceImplTest {
                 rabbitTaskProperties,
                 minioProperties,
                 new ObjectMapper(),
+                new ImageBandCapabilityServiceImpl(new ObjectMapper()),
                 messageOutboxService,
                 geoServerService,
                 minioService,
@@ -114,6 +115,8 @@ class RsTaskServiceImplTest {
         image.setOwnerId("user-a");
         image.setMinioBucket("remote-sensing-images");
         image.setObjectKey("raw/2026/05/source.tif");
+        image.setBandCount(4);
+        image.setMetadataJson(trustedFourBandMetadata());
 
         RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
         dto.setImageId(10L);
@@ -173,6 +176,8 @@ class RsTaskServiceImplTest {
         image.setStatus(ImageStatus.READY.dbValue());
         image.setMinioBucket("remote-sensing-images");
         image.setObjectKey("raw/2026/05/source.tif");
+        image.setBandCount(4);
+        image.setMetadataJson(trustedFourBandMetadata());
 
         RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
         dto.setImageId(10L);
@@ -227,6 +232,8 @@ class RsTaskServiceImplTest {
         image.setOwnerId("user-a");
         image.setMinioBucket("remote-sensing-images");
         image.setObjectKey("raw/2026/05/public.tif");
+        image.setBandCount(4);
+        image.setMetadataJson(trustedFourBandMetadata());
 
         RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
         dto.setImageId(10L);
@@ -244,6 +251,90 @@ class RsTaskServiceImplTest {
         service.submit(dto);
 
         verify(taskMapper).insert(org.mockito.ArgumentMatchers.argThat(task -> "user-b".equals(task.getOwnerId())));
+    }
+
+    @Test
+    @DisplayName("变化检测由后端根据 beforeImageId 填充对象路径并覆盖前端传入路径")
+    void submitChangeDetectionShouldResolveObjectKeysByImageId() {
+        RsImage afterImage = readyImage(20L, "user-a", "raw/after.tif");
+        RsImage beforeImage = readyImage(10L, "user-a", "raw/before.tif");
+        Map<String, Object> params = new java.util.LinkedHashMap<>();
+        params.put("beforeImageId", 10L);
+        params.put("beforeObjectKey", "raw/evil.tif");
+        params.put("afterObjectKey", "raw/evil-after.tif");
+        params.put("band", 1);
+        params.put("threshold", 0.2);
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(20L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION);
+        dto.setParams(params);
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(20L, "user-a")).thenReturn(afterImage);
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(beforeImage);
+        when(imageMapper.markProcessingIfReady(20L)).thenReturn(1);
+        when(rabbitTaskProperties.getMaxRetryCount()).thenReturn(3);
+        when(minioProperties.getBucketName()).thenReturn("remote-sensing-images");
+        when(messageOutboxService.createTaskMessage(any(), any())).thenReturn(99L);
+        when(taskMapper.insert(any(RsTask.class))).thenAnswer(this::fillTaskId);
+
+        service.submit(dto);
+
+        ArgumentCaptor<RemoteSensingTaskMessage> messageCaptor =
+                ArgumentCaptor.forClass(RemoteSensingTaskMessage.class);
+        verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), messageCaptor.capture());
+        assertThat(messageCaptor.getValue().getParams())
+                .containsEntry("beforeImageId", 10L)
+                .containsEntry("afterImageId", 20L)
+                .containsEntry("beforeObjectKey", "raw/before.tif")
+                .containsEntry("afterObjectKey", "raw/after.tif")
+                .containsEntry("beforeBucket", "remote-sensing-images")
+                .containsEntry("afterBucket", "remote-sensing-images");
+    }
+
+    @Test
+    @DisplayName("变化检测不能使用无权访问的前一期影像")
+    void submitChangeDetectionShouldRejectInaccessibleBeforeImage() {
+        RsImage afterImage = readyImage(20L, "user-a", "raw/after.tif");
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(20L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION);
+        dto.setParams(Map.of("beforeImageId", 10L));
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(20L, "user-a")).thenReturn(afterImage);
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("对比前影像不存在或无权访问");
+
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("变化检测波段不能超过任一期影像波段数")
+    void submitChangeDetectionShouldRejectBandOutOfRange() {
+        RsImage afterImage = readyImage(20L, "user-a", "raw/after.tif");
+        afterImage.setBandCount(3);
+        RsImage beforeImage = readyImage(10L, "user-a", "raw/before.tif");
+        beforeImage.setBandCount(2);
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(20L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION);
+        dto.setParams(Map.of("beforeImageId", 10L, "band", 3));
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(20L, "user-a")).thenReturn(afterImage);
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(beforeImage);
+
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("对比前影像波段数 2");
+
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
     }
 
     @Test
@@ -512,5 +603,37 @@ class RsTaskServiceImplTest {
         task.setStatus(status);
         task.setOutputObjectKey(outputObjectKey);
         return task;
+    }
+
+    private RsImage readyImage(Long id, String ownerId, String objectKey) {
+        RsImage image = new RsImage();
+        image.setId(id);
+        image.setOwnerId(ownerId);
+        image.setVisibility(Visibility.PRIVATE.dbValue());
+        image.setStatus(ImageStatus.READY.dbValue());
+        image.setMinioBucket("remote-sensing-images");
+        image.setObjectKey(objectKey);
+        image.setBandCount(4);
+        image.setWidth(100);
+        image.setHeight(100);
+        image.setProjection("EPSG:4326");
+        return image;
+    }
+
+    private String trustedFourBandMetadata() {
+        return """
+                {
+                  "bandCount": 4,
+                  "bandMapping": {
+                    "blue": 1,
+                    "green": 2,
+                    "red": 3,
+                    "nir": 4
+                  },
+                  "bandMappingSource": "SYSTEM_STAC_SENTINEL2",
+                  "bandMappingConfidence": "HIGH",
+                  "supportedTaskTypes": ["NDVI", "NDWI"]
+                }
+                """;
     }
 }

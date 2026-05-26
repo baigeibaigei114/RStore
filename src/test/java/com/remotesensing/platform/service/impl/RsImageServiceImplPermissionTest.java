@@ -14,6 +14,7 @@ import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.ThumbnailStatus;
 import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.properties.UploadProperties;
+import com.remotesensing.platform.dto.RsImageBandMappingUpdateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.exception.BusinessException;
@@ -29,6 +30,7 @@ import com.remotesensing.platform.vo.RsImageListVO;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -79,6 +81,7 @@ class RsImageServiceImplPermissionTest {
                 taskMapper,
                 minioService,
                 geoTiffMetadataService,
+                new ImageBandCapabilityServiceImpl(new ObjectMapper()),
                 thumbnailAsyncService,
                 new ObjectMapper(),
                 uploadProperties,
@@ -240,6 +243,94 @@ class RsImageServiceImplPermissionTest {
         assertThatThrownBy(() -> service.getThumbnailUrl(1L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("缩略图尚未生成");
+    }
+
+    @Test
+    @DisplayName("owner 可以手动确认影像波段映射")
+    void updateBandMappingShouldWriteUserConfirmedMetadata() throws Exception {
+        RsImage image = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        image.setBandCount(4);
+        image.setMetadataJson("{\"width\":10}");
+        RsImage updatedImage = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        updatedImage.setBandCount(4);
+        updatedImage.setMetadataJson("""
+                {"bandMapping":{"red":1,"green":2,"blue":3,"nir":4},
+                 "bandMappingSource":"USER_CONFIRMED",
+                 "bandMappingConfidence":"MEDIUM",
+                 "supportedTaskTypes":["NDVI","NDWI"]}
+                """);
+        RsImageBandMappingUpdateDTO dto = new RsImageBandMappingUpdateDTO();
+        dto.setRedBand(1);
+        dto.setGreenBand(2);
+        dto.setBlueBand(3);
+        dto.setNirBand(4);
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(1L, "user-a")).thenReturn(image, updatedImage);
+        when(imageMapper.updateMetadataJson(org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("user-a"), org.mockito.ArgumentMatchers.anyString())).thenReturn(1);
+
+        var result = service.updateBandMapping(1L, dto);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(imageMapper).updateMetadataJson(org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("user-a"), captor.capture());
+        Map<?, ?> metadata = new ObjectMapper().readValue(captor.getValue(), Map.class);
+        assertThat(metadata.get("bandMappingSource")).isEqualTo("USER_CONFIRMED");
+        assertThat(metadata.get("bandMappingConfidence")).isEqualTo("MEDIUM");
+        assertThat(metadata.get("supportedTaskTypes")).asString().isEqualTo("[NDVI, NDWI]");
+        assertThat(result.getSupportedTaskTypes()).containsExactly("NDVI", "NDWI");
+    }
+
+    @Test
+    @DisplayName("非 owner 不能手动确认影像波段映射")
+    void updateBandMappingShouldRejectNonOwner() {
+        RsImage image = image(1L, "user-a", Visibility.PUBLIC.dbValue(), "raw/2026/05/a.tif", null);
+        RsImageBandMappingUpdateDTO dto = new RsImageBandMappingUpdateDTO();
+        dto.setRedBand(1);
+        dto.setNirBand(4);
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(imageMapper.selectAccessibleById(1L, "user-b")).thenReturn(image);
+
+        assertThatThrownBy(() -> service.updateBandMapping(1L, dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权修改波段映射");
+    }
+
+    @Test
+    @DisplayName("手动确认波段不能超过影像波段数")
+    void updateBandMappingShouldRejectBandOutOfRange() {
+        RsImage image = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        image.setBandCount(3);
+        RsImageBandMappingUpdateDTO dto = new RsImageBandMappingUpdateDTO();
+        dto.setRedBand(1);
+        dto.setNirBand(4);
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(1L, "user-a")).thenReturn(image);
+
+        assertThatThrownBy(() -> service.updateBandMapping(1L, dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不能大于影像波段数");
+    }
+
+    @Test
+    @DisplayName("影像处理中不能手动修改波段映射")
+    void updateBandMappingShouldRejectProcessingImage() {
+        RsImage image = image(1L, "user-a", Visibility.PRIVATE.dbValue(), "raw/2026/05/a.tif", null);
+        image.setStatus(ImageStatus.PROCESSING.dbValue());
+        image.setBandCount(4);
+        RsImageBandMappingUpdateDTO dto = new RsImageBandMappingUpdateDTO();
+        dto.setRedBand(1);
+        dto.setNirBand(4);
+
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(1L, "user-a")).thenReturn(image);
+
+        assertThatThrownBy(() -> service.updateBandMapping(1L, dto))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("READY 或 FAILED");
     }
 
     private RsImage image(Long id, String ownerId, String visibility, String objectKey, String thumbnailObjectKey) {

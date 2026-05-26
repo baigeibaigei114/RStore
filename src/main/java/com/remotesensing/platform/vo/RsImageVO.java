@@ -2,6 +2,8 @@ package com.remotesensing.platform.vo;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import lombok.Data;
 
 /**
@@ -65,6 +67,14 @@ public class RsImageVO {
 
     /** 影像元数据 JSON 字符串，对应 rs_image.metadata_json。 */
     private String metadataJson;
+
+    private Map<String, Integer> bandMapping;
+
+    private String bandMappingSource;
+
+    private String bandMappingConfidence;
+
+    private List<String> supportedTaskTypes;
 
     /** 原始文件所在 MinIO 存储桶，对应 rs_image.minio_bucket。 */
     private String minioBucket;

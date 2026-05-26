@@ -229,13 +229,15 @@ NDWI 参数：
   "imageId": 2,
   "taskType": "CHANGE_DETECTION",
   "params": {
-    "beforeObjectKey": "raw/2026/05/before.tif",
-    "afterObjectKey": "raw/2026/05/after.tif",
+    "beforeImageId": 1,
+    "afterImageId": 2,
     "band": 1,
     "threshold": 0.2
   }
 }
 ```
+
+前端只提交影像 ID，`beforeObjectKey` / `afterObjectKey` 由后端在权限校验通过后填充。
 
 ## 推荐开发顺序
 

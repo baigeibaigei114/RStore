@@ -123,6 +123,8 @@ NDVI 处理流程：
 
 CHANGE_DETECTION 参数示例：
 
+> 该消息由 Spring Boot 后端构造，前端只提交 `beforeImageId` / `imageId`，不要直接传 MinIO 对象路径。
+
 ```json
 {
   "taskId": 1002,

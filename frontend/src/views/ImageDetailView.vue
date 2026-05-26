@@ -70,9 +70,40 @@
                 active-text="公开"
                 inactive-text="私有"
                 :loading="visibilitySaving"
-                :before-change="beforeVisibilityChange"
+                @change="handleVisibilityChange"
               />
             </div>
+          </el-card>
+
+          <el-card class="detail-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span>波段配置</span>
+                <el-tag effect="plain">{{ image.bandMappingSource || 'UNKNOWN' }}</el-tag>
+              </div>
+            </template>
+
+            <el-form label-position="top">
+              <el-form-item label="红光波段">
+                <el-input-number v-model="bandMappingForm.redBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="绿光波段">
+                <el-input-number v-model="bandMappingForm.greenBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="蓝光波段">
+                <el-input-number v-model="bandMappingForm.blueBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="近红外波段">
+                <el-input-number v-model="bandMappingForm.nirBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+            </el-form>
+
+            <div class="visibility-row">
+              <span>可用任务：{{ supportedTaskText }}</span>
+            </div>
+            <el-button type="primary" :loading="bandMappingSaving" @click="saveBandMapping">
+              保存为用户确认配置
+            </el-button>
           </el-card>
         </el-col>
 
@@ -142,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -151,9 +182,10 @@ import {
   getImageDetailApi,
   getImageDownloadUrlApi,
   getImageThumbnailUrlApi,
+  updateImageBandMappingApi,
   updateImageVisibilityApi,
 } from '@/api/image'
-import type { ImageDetail, ImageStatus, ImageVisibility, ThumbnailStatus } from '@/types/image'
+import type { ImageBandMappingUpdateParams, ImageDetail, ImageStatus, ImageVisibility, ThumbnailStatus } from '@/types/image'
 
 const route = useRoute()
 const router = useRouter()
@@ -162,9 +194,11 @@ const loading = ref(false)
 const downloadLoading = ref(false)
 const deleteLoading = ref(false)
 const visibilitySaving = ref(false)
+const bandMappingSaving = ref(false)
 const image = ref<ImageDetail | null>(null)
 const thumbnailUrl = ref('')
 const visibilityValue = ref<ImageVisibility>('PRIVATE')
+const bandMappingForm = reactive<ImageBandMappingUpdateParams>({})
 
 const imageId = computed(() => String(route.params.id))
 
@@ -181,6 +215,12 @@ const formattedMetadata = computed(() => {
 })
 
 const canDeleteImage = computed(() => image.value?.status === 'READY' || image.value?.status === 'FAILED')
+const supportedTaskText = computed(() => {
+  if (!image.value?.supportedTaskTypes?.length) {
+    return '暂无 NDVI/NDWI'
+  }
+  return image.value.supportedTaskTypes.join('、')
+})
 
 onMounted(() => {
   fetchDetail()
@@ -194,6 +234,7 @@ async function fetchDetail() {
     const detail = await getImageDetailApi(imageId.value)
     image.value = detail
     visibilityValue.value = detail.visibility
+    syncBandMapping(detail)
 
     if (detail.thumbnailObjectKey) {
       const presigned = await getImageThumbnailUrlApi(detail.id)
@@ -202,6 +243,14 @@ async function fetchDetail() {
   } finally {
     loading.value = false
   }
+}
+
+/** 将后端返回的波段映射同步到详情页表单。 */
+function syncBandMapping(detail: ImageDetail) {
+  bandMappingForm.redBand = detail.bandMapping?.red
+  bandMappingForm.greenBand = detail.bandMapping?.green
+  bandMappingForm.blueBand = detail.bandMapping?.blue
+  bandMappingForm.nirBand = detail.bandMapping?.nir
 }
 
 async function downloadOriginalImage() {
@@ -252,24 +301,60 @@ async function confirmDelete() {
   }
 }
 
-async function beforeVisibilityChange() {
+/** 提交公开/私有状态修改，失败时回滚页面开关状态。 */
+async function handleVisibilityChange(value: string | number | boolean) {
   if (!image.value) {
-    return false
+    return
   }
 
-  const target: ImageVisibility = visibilityValue.value === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC'
+  const previous = image.value.visibility
+  const target = value as ImageVisibility
   visibilitySaving.value = true
 
   try {
     const updated = await updateImageVisibilityApi(image.value.id, target)
-    image.value = updated
+    image.value = {
+      ...image.value,
+      ...updated,
+      visibility: updated.visibility,
+    }
     visibilityValue.value = updated.visibility
     ElMessage.success(`已切换为${visibilityText(updated.visibility)}`)
-    return true
   } catch {
-    return false
+    image.value.visibility = previous
+    visibilityValue.value = previous
   } finally {
     visibilitySaving.value = false
+  }
+}
+
+/** 保存用户手动确认的波段映射，成功后刷新当前详情状态。 */
+async function saveBandMapping() {
+  if (!image.value) {
+    return
+  }
+  const payload: ImageBandMappingUpdateParams = {
+    redBand: bandMappingForm.redBand,
+    greenBand: bandMappingForm.greenBand,
+    blueBand: bandMappingForm.blueBand,
+    nirBand: bandMappingForm.nirBand,
+  }
+  if (!Object.values(payload).some((value) => value !== undefined && value !== null)) {
+    ElMessage.warning('请至少填写一个波段')
+    return
+  }
+
+  bandMappingSaving.value = true
+  try {
+    const updated = await updateImageBandMappingApi(image.value.id, payload)
+    image.value = {
+      ...image.value,
+      ...updated,
+    }
+    syncBandMapping(updated)
+    ElMessage.success('波段映射已保存')
+  } finally {
+    bandMappingSaving.value = false
   }
 }
 

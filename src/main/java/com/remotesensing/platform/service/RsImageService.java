@@ -1,6 +1,7 @@
 package com.remotesensing.platform.service;
 
 import com.remotesensing.platform.common.PageResult;
+import com.remotesensing.platform.dto.RsImageBandMappingUpdateDTO;
 import com.remotesensing.platform.dto.RsImageCreateDTO;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
 import java.math.BigDecimal;
@@ -100,6 +101,15 @@ public interface RsImageService {
      * @return 更新后的影像详情
      */
     RsImageVO updateVisibility(Long id, String visibility);
+
+    /**
+     * 手动确认影像波段映射。
+     *
+     * @param id 影像 ID
+     * @param updateDTO 用户确认的 red/green/blue/nir 波段编号
+     * @return 更新后的影像详情
+     */
+    RsImageVO updateBandMapping(Long id, RsImageBandMappingUpdateDTO updateDTO);
 
     /**
      * 软删除影像（标记为 DELETED 状态）。

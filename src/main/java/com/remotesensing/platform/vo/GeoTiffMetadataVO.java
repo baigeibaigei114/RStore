@@ -2,6 +2,7 @@ package com.remotesensing.platform.vo;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import lombok.Data;
 
 /**
@@ -46,6 +47,18 @@ public class GeoTiffMetadataVO {
 
     /** NoData 值，栅格中该值的像素将被视为无效数据。 */
     private BigDecimal nodata;
+
+    private List<String> bandDescriptions;
+
+    private List<String> colorInterpretations;
+
+    private Map<String, Integer> bandMapping;
+
+    private String bandMappingSource;
+
+    private String bandMappingConfidence;
+
+    private List<String> supportedTaskTypes;
 
     /**
      * 空间范围内部类，表示矩形边界框。

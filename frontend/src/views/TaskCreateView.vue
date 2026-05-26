@@ -49,7 +49,18 @@
                 已选择：{{ selectedImage.imageName }}
               </template>
               <div>对象路径：{{ selectedImage.objectKey }}</div>
+              <div>波段映射：{{ selectedBandMappingText }}</div>
+              <div>可用任务：{{ selectedSupportedTaskText }}</div>
             </el-alert>
+
+            <el-alert
+              v-if="selectedImage && !selectedTaskSupported"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="当前影像缺少该任务所需的可信波段映射，不能提交。"
+              class="selected-image-alert"
+            />
           </el-col>
 
           <el-col :xs="24" :lg="12">
@@ -107,7 +118,7 @@
 
         <div class="form-actions">
           <el-button @click="router.push('/tasks')">返回任务列表</el-button>
-          <el-button type="primary" :loading="submitting" @click="submitTask">提交任务</el-button>
+          <el-button type="primary" :loading="submitting" :disabled="!!selectedImage && !selectedTaskSupported" @click="submitTask">提交任务</el-button>
         </div>
       </el-form>
     </el-card>
@@ -152,11 +163,11 @@ const form = reactive<TaskCreateForm>({
   threshold: 0.2,
 })
 
-const taskTypeOptions = [
-  { label: 'NDVI', value: 'NDVI' },
-  { label: 'NDWI', value: 'NDWI' },
+const taskTypeOptions = computed(() => [
+  { label: 'NDVI', value: 'NDVI', disabled: !canRunTaskType('NDVI') },
+  { label: 'NDWI', value: 'NDWI', disabled: !canRunTaskType('NDWI') },
   { label: '变化检测', value: 'CHANGE_DETECTION' },
-]
+])
 
 const rules: FormRules<TaskCreateForm> = {
   imageId: [{ required: true, message: '请选择处理影像', trigger: 'change' }],
@@ -177,8 +188,14 @@ const rules: FormRules<TaskCreateForm> = {
 
 const selectedImage = computed(() => readyImages.value.find((item) => item.id === form.imageId))
 const beforeImage = computed(() => readyImages.value.find((item) => item.id === form.beforeImageId))
+const selectedTaskSupported = computed(() => canRunTaskType(form.taskType))
+const selectedBandMappingText = computed(() => formatBandMapping(selectedImage.value))
+const selectedSupportedTaskText = computed(() => formatSupportedTasks(selectedImage.value))
 
 const paramsPreview = computed(() => {
+  if (selectedImage.value && !selectedTaskSupported.value) {
+    return '当前影像缺少该任务所需的可信波段映射，不能提交。'
+  }
   const payload = buildPayload(false)
   return JSON.stringify(payload || {}, null, 2)
 })
@@ -187,8 +204,14 @@ watch(
   () => form.taskType,
   () => {
     formRef.value?.clearValidate()
+    applyBandMapping()
   },
 )
+
+watch(selectedImage, () => {
+  formRef.value?.clearValidate()
+  applyBandMapping()
+})
 
 onMounted(() => {
   loadReadyImages()
@@ -211,6 +234,58 @@ function handleImageChange() {
   if (form.taskType === 'CHANGE_DETECTION' && form.beforeImageId === form.imageId) {
     form.beforeImageId = undefined
   }
+  applyBandMapping()
+}
+
+/** 判断当前选中影像是否支持指定处理任务。 */
+function canRunTaskType(taskType: TaskType) {
+  if (taskType === 'CHANGE_DETECTION') {
+    return true
+  }
+  if (!selectedImage.value) {
+    return true
+  }
+  return selectedImage.value.supportedTaskTypes?.includes(taskType) ?? false
+}
+
+/** 将可信波段映射自动填入任务参数表单。 */
+function applyBandMapping() {
+  const mapping = selectedImage.value?.bandMapping
+  if (!mapping) {
+    return
+  }
+  if (form.taskType === 'NDVI') {
+    form.redBand = mapping.red ?? form.redBand
+    form.nirBand = mapping.nir ?? form.nirBand
+  } else if (form.taskType === 'NDWI') {
+    form.greenBand = mapping.green ?? form.greenBand
+    form.nirBand = mapping.nir ?? form.nirBand
+  }
+}
+
+/** 将波段映射格式化为适合页面展示的文本。 */
+function formatBandMapping(image?: ImageListItem) {
+  const mapping = image?.bandMapping
+  if (!mapping || Object.keys(mapping).length === 0) {
+    return '暂无可信波段映射'
+  }
+  return [
+    mapping.red ? `红光 B${mapping.red}` : '',
+    mapping.green ? `绿光 B${mapping.green}` : '',
+    mapping.blue ? `蓝光 B${mapping.blue}` : '',
+    mapping.nir ? `近红外 B${mapping.nir}` : '',
+  ].filter(Boolean).join('，')
+}
+
+/** 将可执行任务类型格式化为适合页面展示的文本。 */
+function formatSupportedTasks(image?: ImageListItem) {
+  if (!image) {
+    return '请选择影像'
+  }
+  if (!image.supportedTaskTypes?.length) {
+    return '暂无 NDVI/NDWI'
+  }
+  return image.supportedTaskTypes.join('、')
 }
 
 async function submitTask() {
@@ -237,6 +312,11 @@ async function submitTask() {
 
 function buildPayload(strict: boolean): TaskSubmitParams | null {
   if (!form.imageId) {
+    return null
+  }
+
+  if (strict && !selectedTaskSupported.value) {
+    ElMessage.warning('当前影像缺少可信波段映射，不能提交该类型任务')
     return null
   }
 
@@ -275,8 +355,8 @@ function buildPayload(strict: boolean): TaskSubmitParams | null {
     imageId: selectedImage.value.id,
     taskType: form.taskType,
     params: {
-      beforeObjectKey: beforeImage.value.objectKey,
-      afterObjectKey: selectedImage.value.objectKey,
+      beforeImageId: beforeImage.value.id,
+      afterImageId: selectedImage.value.id,
       band: form.band,
       threshold: form.threshold,
     },

@@ -306,6 +306,15 @@
           AND deleted_at IS NULL
     </update>
 
+    <update id="updateMetadataJson">
+        UPDATE rs_image
+        SET metadata_json = CAST(NULLIF(#{metadataJson}, '') AS jsonb),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND owner_id = #{ownerId}
+          AND deleted_at IS NULL
+    </update>
+
     <select id="countByImageCode" resultType="long">
         SELECT COUNT(1)
         FROM rs_image
