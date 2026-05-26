@@ -43,6 +43,14 @@ app:
     dev-user-header-enabled: true
     default-user-id: dev-user
     worker-token: test-worker-token
+  ai:
+    enabled: true
+    provider: openai-compatible
+    base-url: http://127.0.0.1:19999/v1
+    api-key:
+    model: test-model
+    timeout-seconds: 1
+    temperature: 0.1
 
 rabbitmq:
   remote-sensing-task:

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remotesensing.platform.mapper.RsAnalysisReportMapper">
+
+    <insert id="insert" parameterType="com.remotesensing.platform.entity.RsAnalysisReport"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rs_analysis_report (
+            task_id,
+            image_id,
+            owner_id,
+            report_type,
+            summary,
+            report_json
+        ) VALUES (
+            #{taskId},
+            #{imageId},
+            #{ownerId},
+            #{reportType},
+            #{summary},
+            CAST(NULLIF(#{reportJson}, '') AS jsonb)
+        )
+    </insert>
+</mapper>

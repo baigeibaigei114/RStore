@@ -69,7 +69,7 @@ public class GeoServerServiceImpl implements GeoServerService {
     private final Executor geoServerPublishExecutor;
     private final CurrentUserContext currentUserContext;
 
-    public GeoServerServiceImpl(RestClient geoServerRestClient,
+    public GeoServerServiceImpl(@Qualifier("geoServerRestClient") RestClient geoServerRestClient,
                                 GeoServerProperties geoServerProperties,
                                 RsTaskMapper taskMapper,
                                 RsResultFileMapper resultFileMapper,

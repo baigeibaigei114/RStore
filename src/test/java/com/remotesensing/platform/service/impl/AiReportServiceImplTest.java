@@ -1,0 +1,155 @@
+package com.remotesensing.platform.service.impl;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.enums.TaskStatus;
+import com.remotesensing.platform.entity.RsAnalysisReport;
+import com.remotesensing.platform.entity.RsImage;
+import com.remotesensing.platform.entity.RsResultFile;
+import com.remotesensing.platform.entity.RsTask;
+import com.remotesensing.platform.exception.BusinessException;
+import com.remotesensing.platform.mapper.RsAnalysisReportMapper;
+import com.remotesensing.platform.mapper.RsImageMapper;
+import com.remotesensing.platform.mapper.RsResultFileMapper;
+import com.remotesensing.platform.mapper.RsTaskMapper;
+import com.remotesensing.platform.service.LlmClient;
+import java.time.OffsetDateTime;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+
+class AiReportServiceImplTest {
+
+    private final CurrentUserContext currentUserContext = Mockito.mock(CurrentUserContext.class);
+    private final RsTaskMapper taskMapper = Mockito.mock(RsTaskMapper.class);
+    private final RsImageMapper imageMapper = Mockito.mock(RsImageMapper.class);
+    private final RsResultFileMapper resultFileMapper = Mockito.mock(RsResultFileMapper.class);
+    private final RsAnalysisReportMapper reportMapper = Mockito.mock(RsAnalysisReportMapper.class);
+    private final LlmClient llmClient = Mockito.mock(LlmClient.class);
+    private final AiReportServiceImpl service = new AiReportServiceImpl(
+            currentUserContext,
+            taskMapper,
+            imageMapper,
+            resultFileMapper,
+            reportMapper,
+            llmClient,
+            new ObjectMapper()
+    );
+
+    @Test
+    void generateFromTaskShouldInsertReport() {
+        RsTask task = task();
+        RsResultFile resultFile = resultFile();
+        RsImage image = image();
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(10L, "user-a")).thenReturn(task);
+        when(resultFileMapper.selectByTaskId(10L)).thenReturn(resultFile);
+        when(imageMapper.selectById(3L)).thenReturn(image);
+        when(llmClient.chatJson(any())).thenReturn("""
+                {
+                  "summary": "该区域 NDVI 均值为 0.65，整体植被状况可能较好。",
+                  "keyFindings": ["NDVI 均值为 0.65"],
+                  "riskLevel": "LOW",
+                  "suggestions": ["建议结合历史同期影像进一步核验"]
+                }
+                """);
+        when(reportMapper.insert(any())).thenAnswer(invocation -> {
+            RsAnalysisReport report = invocation.getArgument(0);
+            report.setId(1L);
+            return 1;
+        });
+
+        var result = service.generateFromTask(10L);
+
+        assertThat(result.getId()).isEqualTo(1L);
+        assertThat(result.getTaskId()).isEqualTo(10L);
+        assertThat(result.getReportType()).isEqualTo("NDVI");
+        assertThat(result.getSummary()).contains("NDVI");
+        assertThat(result.getReportJson()).containsEntry("riskLevel", "LOW");
+
+        ArgumentCaptor<RsAnalysisReport> reportCaptor = ArgumentCaptor.forClass(RsAnalysisReport.class);
+        verify(reportMapper).insert(reportCaptor.capture());
+        assertThat(reportCaptor.getValue().getOwnerId()).isEqualTo("user-a");
+        assertThat(reportCaptor.getValue().getReportJson()).contains("keyFindings");
+    }
+
+    @Test
+    void generateFromTaskShouldRejectOtherUsersTask() {
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
+        when(taskMapper.selectByIdForOwner(10L, "user-b")).thenReturn(null);
+
+        assertThatThrownBy(() -> service.generateFromTask(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务不存在");
+
+        verify(llmClient, never()).chatJson(any());
+    }
+
+    @Test
+    void generateFromTaskShouldRejectNonSuccessTask() {
+        RsTask task = task();
+        task.setStatus(TaskStatus.RUNNING.dbValue());
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(10L, "user-a")).thenReturn(task);
+
+        assertThatThrownBy(() -> service.generateFromTask(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务尚未成功");
+
+        verify(llmClient, never()).chatJson(any());
+    }
+
+    @Test
+    void generateFromTaskShouldRejectMissingResultMetadata() {
+        RsResultFile resultFile = resultFile();
+        resultFile.setResultMetadata(null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByIdForOwner(10L, "user-a")).thenReturn(task());
+        when(resultFileMapper.selectByTaskId(10L)).thenReturn(resultFile);
+
+        assertThatThrownBy(() -> service.generateFromTask(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("缺少统计元数据");
+
+        verify(llmClient, never()).chatJson(any());
+    }
+
+    private RsTask task() {
+        RsTask task = new RsTask();
+        task.setId(10L);
+        task.setImageId(3L);
+        task.setOwnerId("user-a");
+        task.setTaskType("NDVI");
+        task.setTaskName("NDVI 处理任务");
+        task.setStatus(TaskStatus.SUCCESS.dbValue());
+        return task;
+    }
+
+    private RsResultFile resultFile() {
+        RsResultFile resultFile = new RsResultFile();
+        resultFile.setId(100L);
+        resultFile.setTaskId(10L);
+        resultFile.setImageId(3L);
+        resultFile.setFileName("task_10.tif");
+        resultFile.setResultMetadata("""
+                {"mean":0.65,"lowValuePercent":18}
+                """);
+        return resultFile;
+    }
+
+    private RsImage image() {
+        RsImage image = new RsImage();
+        image.setId(3L);
+        image.setImageName("上海市黄浦区影像");
+        image.setSensorType("Sentinel-2");
+        image.setAcquisitionTime(OffsetDateTime.parse("2024-05-01T10:00:00+08:00"));
+        return image;
+    }
+}
