@@ -27,4 +27,10 @@ public class RateLimitProperties {
 
     private int geoserverPublishLimit = 3;
     private long geoserverPublishWindowSeconds = 300;
+
+    private int aiQueryLimit = 20;
+    private long aiQueryWindowSeconds = 60;
+
+    private int aiReportLimit = 3;
+    private long aiReportWindowSeconds = 300;
 }

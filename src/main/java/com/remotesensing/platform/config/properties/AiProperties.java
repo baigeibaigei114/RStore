@@ -31,4 +31,7 @@ public class AiProperties {
 
     /** 模型采样温度，解析类任务默认保持较低随机性。 */
     private BigDecimal temperature = new BigDecimal("0.1");
+
+    /** 模型最大输出 token 数，避免异常长响应拖垮接口和数据库。 */
+    private int maxTokens = 1200;
 }

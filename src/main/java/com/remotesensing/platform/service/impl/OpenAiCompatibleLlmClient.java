@@ -41,6 +41,7 @@ public class OpenAiCompatibleLlmClient implements LlmClient {
                 "model", aiProperties.getModel(),
                 "messages", messages,
                 "temperature", aiProperties.getTemperature(),
+                "max_tokens", aiProperties.getMaxTokens(),
                 "response_format", Map.of("type", "json_object")
         );
 

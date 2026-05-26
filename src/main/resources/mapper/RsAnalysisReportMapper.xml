@@ -22,4 +22,23 @@
             CAST(NULLIF(#{reportJson}, '') AS jsonb)
         )
     </insert>
+
+    <select id="selectByTaskOwnerAndType" resultType="com.remotesensing.platform.entity.RsAnalysisReport">
+        SELECT
+            id,
+            task_id,
+            image_id,
+            owner_id,
+            report_type,
+            summary,
+            report_json::text AS report_json,
+            created_at,
+            updated_at
+        FROM rs_analysis_report
+        WHERE task_id = #{taskId}
+          AND owner_id = #{ownerId}
+          AND report_type = #{reportType}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
 </mapper>

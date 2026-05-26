@@ -62,14 +62,19 @@ app:
     upload-window-seconds: 300
     geoserver-publish-limit: 3
     geoserver-publish-window-seconds: 300
+    ai-query-limit: 20
+    ai-query-window-seconds: 60
+    ai-report-limit: 3
+    ai-report-window-seconds: 300
   ai:
-    enabled: true
+    enabled: false
     provider: openai-compatible
     base-url: https://api.deepseek.com/v1
     api-key: ${DEEPSEEK_API_KEY:}
     model: deepseek-v4-flash
     timeout-seconds: 30
     temperature: 0.1
+    max-tokens: 1200
 
 rabbitmq:
   remote-sensing-task:

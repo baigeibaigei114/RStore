@@ -43,6 +43,11 @@ app:
     dev-user-header-enabled: true
     default-user-id: dev-user
     worker-token: test-worker-token
+  rate-limit:
+    ai-query-limit: 20
+    ai-query-window-seconds: 60
+    ai-report-limit: 3
+    ai-report-window-seconds: 300
   ai:
     enabled: true
     provider: openai-compatible
@@ -51,6 +56,7 @@ app:
     model: test-model
     timeout-seconds: 1
     temperature: 0.1
+    max-tokens: 1200
 
 rabbitmq:
   remote-sensing-task:

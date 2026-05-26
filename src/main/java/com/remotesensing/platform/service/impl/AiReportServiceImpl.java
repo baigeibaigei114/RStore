@@ -24,13 +24,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * AI 任务结果报告服务实现。
  */
 @Service
 public class AiReportServiceImpl implements AiReportService {
+
+    private static final int SUMMARY_MAX_LENGTH = 1000;
+    private static final int ARRAY_MAX_SIZE = 10;
+    private static final int ARRAY_ITEM_MAX_LENGTH = 500;
 
     private static final String SYSTEM_PROMPT = """
             你是遥感任务结果分析助手。请严格基于输入的 result_metadata 生成中文分析报告。
@@ -49,6 +54,7 @@ public class AiReportServiceImpl implements AiReportService {
     private final RsAnalysisReportMapper analysisReportMapper;
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
     public AiReportServiceImpl(CurrentUserContext currentUserContext,
                                RsTaskMapper taskMapper,
@@ -56,7 +62,8 @@ public class AiReportServiceImpl implements AiReportService {
                                RsResultFileMapper resultFileMapper,
                                RsAnalysisReportMapper analysisReportMapper,
                                LlmClient llmClient,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               PlatformTransactionManager transactionManager) {
         this.currentUserContext = currentUserContext;
         this.taskMapper = taskMapper;
         this.imageMapper = imageMapper;
@@ -64,12 +71,24 @@ public class AiReportServiceImpl implements AiReportService {
         this.analysisReportMapper = analysisReportMapper;
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Override
-    @Transactional
     public AiReportVO generateFromTask(Long taskId) {
         String currentUserId = currentUserContext.getCurrentUserId();
+        ReportContext context = transactionTemplate.execute(status -> loadReportContext(taskId, currentUserId));
+        if (context == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
+        }
+        if (context.existingReport() != null) {
+            return toVO(context.existingReport(), parseReportJson(context.existingReport().getReportJson()));
+        }
+        Map<String, Object> reportJson = generateReportJson(context.task(), context.resultFile(), context.image());
+        return transactionTemplate.execute(status -> saveReport(context, reportJson));
+    }
+
+    private ReportContext loadReportContext(Long taskId, String currentUserId) {
         RsTask task = taskMapper.selectByIdForOwner(taskId, currentUserId);
         if (task == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
@@ -83,18 +102,39 @@ public class AiReportServiceImpl implements AiReportService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务结果缺少统计元数据，暂无法生成报告");
         }
 
+        String reportType = resolveReportType(task.getTaskType());
+        RsAnalysisReport query = new RsAnalysisReport();
+        query.setTaskId(task.getId());
+        query.setOwnerId(task.getOwnerId());
+        query.setReportType(reportType);
+        RsAnalysisReport existingReport = analysisReportMapper.selectByTaskOwnerAndType(query);
         RsImage image = task.getImageId() == null ? null : imageMapper.selectById(task.getImageId());
-        Map<String, Object> reportJson = generateReportJson(task, resultFile, image);
+        return new ReportContext(task, resultFile, image, reportType, existingReport);
+    }
+
+    private AiReportVO saveReport(ReportContext context, Map<String, Object> reportJson) {
+        RsAnalysisReport latestReport = analysisReportMapper.selectByTaskOwnerAndType(reportQuery(context));
+        if (latestReport != null) {
+            return toVO(latestReport, parseReportJson(latestReport.getReportJson()));
+        }
 
         RsAnalysisReport report = new RsAnalysisReport();
-        report.setTaskId(task.getId());
-        report.setImageId(task.getImageId());
-        report.setOwnerId(task.getOwnerId());
-        report.setReportType(resolveReportType(task.getTaskType()));
+        report.setTaskId(context.task().getId());
+        report.setImageId(context.task().getImageId());
+        report.setOwnerId(context.task().getOwnerId());
+        report.setReportType(context.reportType());
         report.setSummary(asString(reportJson.get("summary")));
         report.setReportJson(writeJson(reportJson));
         analysisReportMapper.insert(report);
         return toVO(report, reportJson);
+    }
+
+    private RsAnalysisReport reportQuery(ReportContext context) {
+        RsAnalysisReport query = new RsAnalysisReport();
+        query.setTaskId(context.task().getId());
+        query.setOwnerId(context.task().getOwnerId());
+        query.setReportType(context.reportType());
+        return query;
     }
 
     private Map<String, Object> generateReportJson(RsTask task, RsResultFile resultFile, RsImage image) {
@@ -109,11 +149,8 @@ public class AiReportServiceImpl implements AiReportService {
     private String buildUserPrompt(RsTask task, RsResultFile resultFile, RsImage image) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("taskType", task.getTaskType());
-        input.put("taskName", task.getTaskName());
-        input.put("resultFileName", resultFile.getFileName());
         input.put("resultMetadata", parseMetadata(resultFile.getResultMetadata()));
         if (image != null) {
-            input.put("imageName", image.getImageName());
             input.put("sensorType", image.getSensorType());
             input.put("acquisitionTime", image.getAcquisitionTime() == null ? null : image.getAcquisitionTime().toString());
         }
@@ -134,7 +171,7 @@ public class AiReportServiceImpl implements AiReportService {
             if (root == null || !root.isObject()) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "AI 报告生成失败，请稍后重试");
             }
-            String summary = textOrNull(root.get("summary"));
+            String summary = truncate(textOrNull(root.get("summary")), SUMMARY_MAX_LENGTH);
             if (summary == null) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "AI 报告生成失败，请稍后重试");
             }
@@ -151,6 +188,17 @@ public class AiReportServiceImpl implements AiReportService {
         }
     }
 
+    private Map<String, Object> parseReportJson(String reportJson) {
+        if (isBlank(reportJson)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(reportJson, Map.class);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "AI 报告 JSON 格式异常");
+        }
+    }
+
     private List<String> stringArray(JsonNode node) {
         if (node == null || node.isNull()) {
             return List.of();
@@ -160,9 +208,12 @@ public class AiReportServiceImpl implements AiReportService {
         }
         List<String> values = new ArrayList<>();
         for (JsonNode item : node) {
+            if (values.size() >= ARRAY_MAX_SIZE) {
+                break;
+            }
             String value = textOrNull(item);
             if (value != null) {
-                values.add(value);
+                values.add(truncate(value, ARRAY_ITEM_MAX_LENGTH));
             }
         }
         return values;
@@ -221,7 +272,21 @@ public class AiReportServiceImpl implements AiReportService {
         return value == null ? null : value.toString();
     }
 
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private record ReportContext(RsTask task,
+                                 RsResultFile resultFile,
+                                 RsImage image,
+                                 String reportType,
+                                 RsAnalysisReport existingReport) {
     }
 }

@@ -19,7 +19,6 @@
 | 缓存 | Redis | 缓存热点数据、任务状态、临时结果 |
 | 对象存储 | MinIO | 存储原始遥感影像、切片、模型输出文件 |
 | 地图服务 | GeoServer | 发布 WMS/WFS/WMTS 等地理空间服务 |
-| 检索引擎 | Elasticsearch | 影像资产、标签、解译结果的全文检索 |
 | 影像处理 | Python GDAL/Rasterio | 影像格式转换、裁剪、重投影、栅格分析 |
 | 容器化 | Docker Compose | 本地开发环境一键启动 |
 
@@ -55,6 +54,22 @@ src/main/java/com/remotesensing/platform
 | 系统监控模块 | 查看服务健康状态、任务执行状态和关键运行指标 |
 
 ## 本地开发环境启动
+
+## AI 智能解译能力
+
+当前 AI 能力只负责“解析”和“解释”，不会直接查询数据库、拼接 SQL 或自动执行任务。生产环境建议默认保持 `app.ai.enabled=false`，需要演示或联调时再通过环境变量显式开启，并配置 OpenAI-compatible 模型参数。
+
+```yaml
+app:
+  ai:
+    enabled: false
+    provider: openai-compatible
+    base-url: https://api.deepseek.com/v1
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: deepseek-v4-flash
+```
+
+注意：任务报告生成会把任务类型、结果统计元数据、传感器和采集时间发送给第三方模型服务。第一版已避免发送 MinIO objectKey、bucket、用户 ID 和内部路径；公开部署前仍建议补充用户告知、脱敏策略和审计记录。
 
 ### 1. 使用 Docker Compose 启动完整环境
 

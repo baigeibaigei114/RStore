@@ -1,6 +1,9 @@
 package com.remotesensing.platform.controller;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -10,14 +13,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
+import com.remotesensing.platform.exception.BusinessException;
+import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.AiQueryParseService;
 import com.remotesensing.platform.service.AiReportService;
 import com.remotesensing.platform.vo.AiQueryIntentVO;
 import com.remotesensing.platform.vo.AiReportVO;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +48,14 @@ class AiControllerTest {
 
     @MockBean
     private AiReportService aiReportService;
+
+    @Autowired
+    private RateLimitService rateLimitService;
+
+    @AfterEach
+    void tearDown() {
+        reset(rateLimitService);
+    }
 
     @Test
     @DisplayName("自然语言查询解析接口返回结构化条件")
@@ -69,6 +84,7 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.data.taskTypes[0]").value("NDVI"));
 
         verify(aiQueryParseService).parse(eq("找上海黄浦区2024年云量小于20%的Sentinel-2影像，并计算NDVI"));
+        verify(rateLimitService).check("ai-query:user:dev-user", 20, Duration.ofSeconds(60));
     }
 
     @Test
@@ -90,5 +106,22 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.data.reportJson.riskLevel").value("LOW"));
 
         verify(aiReportService).generateFromTask(10L);
+        verify(rateLimitService).check("ai-report:user:dev-user", 3, Duration.ofSeconds(300));
+    }
+
+    @Test
+    @DisplayName("AI 查询解析超过限流时不调用模型服务")
+    void parseQueryShouldRejectWhenRateLimited() throws Exception {
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check("ai-query:user:dev-user", 20, Duration.ofSeconds(60));
+
+        mockMvc.perform(post("/api/ai/query/parse")
+                        .contextPath("/api")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"找上海影像\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.TOO_MANY_REQUESTS.getCode()));
+
+        verify(aiQueryParseService, never()).parse(org.mockito.ArgumentMatchers.anyString());
     }
 }

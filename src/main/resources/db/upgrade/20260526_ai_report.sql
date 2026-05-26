@@ -25,6 +25,9 @@ CREATE INDEX IF NOT EXISTS idx_rs_analysis_report_owner_id
 CREATE INDEX IF NOT EXISTS idx_rs_analysis_report_created_at
     ON rs_analysis_report(created_at);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uk_rs_analysis_report_task_owner_type
+    ON rs_analysis_report(task_id, owner_id, report_type);
+
 COMMENT ON TABLE rs_analysis_report IS 'AI 生成的遥感任务分析报告表';
 COMMENT ON COLUMN rs_analysis_report.task_id IS '关联处理任务 ID';
 COMMENT ON COLUMN rs_analysis_report.image_id IS '关联影像 ID，可为空';
