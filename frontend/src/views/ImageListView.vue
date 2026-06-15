@@ -6,6 +6,66 @@
       <p>按名称、传感器、云量和采集时间筛选影像，可进入详情查看元数据和访问控制状态。</p>
     </div>
 
+    <el-card class="ai-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>AI 智能检索</span>
+          <el-tag size="small" effect="plain">只解析，不自动执行</el-tag>
+        </div>
+      </template>
+
+      <el-input
+        v-model="aiInput"
+        type="textarea"
+        :rows="3"
+        maxlength="1000"
+        show-word-limit
+        placeholder="例如：找上海黄浦区2024年云量小于20%的Sentinel-2影像，并计算NDVI"
+      />
+
+      <div class="ai-actions">
+        <el-button :loading="aiParseLoading" :icon="Search" @click="handleAiParse">解析条件</el-button>
+        <el-button type="primary" :loading="aiPlanLoading" @click="handleCreateAiPlan">生成计划</el-button>
+      </div>
+
+      <el-alert
+        v-if="aiParsed"
+        type="success"
+        show-icon
+        :closable="false"
+        title="AI 已解析条件，请确认后点击下方查询按钮"
+        class="ai-result-alert"
+      />
+
+      <div v-if="aiParsed" class="ai-result-grid">
+        <div>
+          <span>区域提示</span>
+          <strong>{{ aiParsed.regionName || '未识别' }}</strong>
+        </div>
+        <div>
+          <span>时间范围</span>
+          <strong>{{ formatAiRange(aiParsed.startTime, aiParsed.endTime) }}</strong>
+        </div>
+        <div>
+          <span>传感器</span>
+          <strong>{{ aiParsed.sensor || '未识别' }}</strong>
+        </div>
+        <div>
+          <span>最大云量</span>
+          <strong>{{ aiParsed.maxCloudPercent ?? '未识别' }}</strong>
+        </div>
+      </div>
+
+      <div v-if="aiParsed?.regionName" class="ai-region-note">
+        行政区“{{ aiParsed.regionName }}”已作为提示展示。当前影像列表仍走普通检索接口；如需严格行政区空间检索，请进入空间查询页选择行政区后检索。
+      </div>
+
+      <div v-if="aiParsed?.taskTypes?.length" class="ai-task-tags">
+        <span>AI 建议后续任务</span>
+        <el-tag v-for="type in aiParsed.taskTypes" :key="type" effect="plain">{{ taskTypeText(type) }}</el-tag>
+      </div>
+    </el-card>
+
     <el-card class="filter-card" shadow="never">
       <el-form :model="queryForm" label-position="top">
         <el-row :gutter="16">
@@ -129,6 +189,15 @@
         />
       </div>
     </el-card>
+
+    <AiPlanDrawer
+      v-model:visible="aiPlanDrawerVisible"
+      :plan="aiPlan"
+      :confirm-loading="aiPlanConfirmLoading"
+      :cancel-loading="aiPlanCancelLoading"
+      @confirm="handleConfirmAiPlan"
+      @cancel="handleCancelAiPlan"
+    />
   </section>
 </template>
 
@@ -137,13 +206,22 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
+import {
+  cancelAiPlanApi,
+  confirmAiPlanApi,
+  createAiPlanApi,
+  parseAiQueryApi,
+} from '@/api/ai'
 import { deleteImageApi, searchImagesApi } from '@/api/image'
+import AiPlanDrawer from '@/components/ai/AiPlanDrawer.vue'
+import type { AiPlan, AiQueryParseResult } from '@/types/ai'
 import type {
   ImageListItem,
   ImageSearchParams,
   ImageStatus,
   ThumbnailStatus,
 } from '@/types/image'
+import type { TaskType } from '@/types/task'
 
 interface QueryForm {
   keyword: string
@@ -155,6 +233,14 @@ interface QueryForm {
 const router = useRouter()
 const loading = ref(false)
 const deletingId = ref<number>()
+const aiInput = ref('')
+const aiParseLoading = ref(false)
+const aiPlanLoading = ref(false)
+const aiPlanConfirmLoading = ref(false)
+const aiPlanCancelLoading = ref(false)
+const aiParsed = ref<AiQueryParseResult | null>(null)
+const aiPlan = ref<AiPlan | null>(null)
+const aiPlanDrawerVisible = ref(false)
 const imageList = ref<ImageListItem[]>([])
 
 const queryForm = reactive<QueryForm>({
@@ -214,6 +300,73 @@ function resetSearch() {
   fetchImages()
 }
 
+async function handleAiParse() {
+  if (!aiInput.value.trim()) {
+    ElMessage.warning('请先输入自然语言检索需求')
+    return
+  }
+
+  aiParseLoading.value = true
+  try {
+    const result = await parseAiQueryApi(aiInput.value.trim())
+    aiParsed.value = result
+    applyAiParsedResult(result)
+    ElMessage.success('AI 已解析条件，请确认后手动查询')
+  } finally {
+    aiParseLoading.value = false
+  }
+}
+
+async function handleCreateAiPlan() {
+  if (!aiInput.value.trim()) {
+    ElMessage.warning('请先输入自然语言需求')
+    return
+  }
+
+  aiPlanLoading.value = true
+  try {
+    aiPlan.value = await createAiPlanApi(aiInput.value.trim())
+    aiPlanDrawerVisible.value = true
+  } finally {
+    aiPlanLoading.value = false
+  }
+}
+
+async function handleConfirmAiPlan() {
+  if (!aiPlan.value) {
+    return
+  }
+
+  aiPlanConfirmLoading.value = true
+  try {
+    aiPlan.value = await confirmAiPlanApi(aiPlan.value.id)
+    ElMessage.success('计划已确认。请继续手动检索影像或提交任务。')
+  } finally {
+    aiPlanConfirmLoading.value = false
+  }
+}
+
+async function handleCancelAiPlan() {
+  if (!aiPlan.value) {
+    return
+  }
+
+  aiPlanCancelLoading.value = true
+  try {
+    aiPlan.value = await cancelAiPlanApi(aiPlan.value.id)
+    ElMessage.success('计划已取消')
+  } finally {
+    aiPlanCancelLoading.value = false
+  }
+}
+
+function applyAiParsedResult(result: AiQueryParseResult) {
+  queryForm.sensor = result.sensor || ''
+  queryForm.maxCloudPercent = result.maxCloudPercent
+  queryForm.timeRange = result.startTime && result.endTime ? [result.startTime, result.endTime] : []
+  pagination.pageNum = 1
+}
+
 function openDetail(row: ImageListItem) {
   router.push(`/images/${row.id}`)
 }
@@ -271,6 +424,22 @@ function formatDateTime(value?: string) {
     return '未填写'
   }
   return new Date(value).toLocaleString()
+}
+
+function formatAiRange(startTime?: string, endTime?: string) {
+  if (!startTime && !endTime) {
+    return '未识别'
+  }
+  return `${startTime || '未识别'} 至 ${endTime || '未识别'}`
+}
+
+function taskTypeText(type: TaskType) {
+  const map: Record<TaskType, string> = {
+    NDVI: '植被指数',
+    NDWI: '水体指数',
+    CHANGE_DETECTION: '变化检测',
+  }
+  return map[type] || type
 }
 
 function imageStatusText(status: ImageStatus) {

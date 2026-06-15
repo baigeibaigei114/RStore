@@ -39,6 +39,7 @@ logs/
 !.env.example
 application-local.yml
 application-*.local.yml
+src/main/resources/application-dev.yaml
 
 # OS files
 .DS_Store

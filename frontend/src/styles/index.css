@@ -212,6 +212,167 @@ body {
   margin-bottom: 16px;
 }
 
+.ai-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
+.ai-actions,
+.ai-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ai-report-actions span,
+.drawer-hint,
+.ai-region-note {
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-result-alert {
+  margin-top: 12px;
+}
+
+.ai-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ai-result-grid > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.ai-result-grid span,
+.ai-task-tags span {
+  display: block;
+  margin-bottom: 4px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.ai-result-grid strong {
+  display: block;
+  overflow: hidden;
+  color: #101828;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-region-note {
+  margin-top: 10px;
+}
+
+.ai-task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-task-tags span {
+  margin-bottom: 0;
+}
+
+.ai-plan-head {
+  margin-bottom: 16px;
+}
+
+.ai-plan-head h3 {
+  margin: 10px 0 6px;
+  color: #101828;
+  font-size: 18px;
+}
+
+.ai-plan-head p {
+  margin: 0;
+  color: #667085;
+  line-height: 1.7;
+}
+
+.ai-plan-alert {
+  margin-bottom: 12px;
+}
+
+.ai-error-list {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  color: #d92d20;
+  line-height: 1.7;
+}
+
+.ai-plan-steps {
+  padding-top: 4px;
+}
+
+.ai-plan-step {
+  padding: 10px 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.ai-plan-step-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-plan-step p {
+  margin: 8px 0;
+  color: #344054;
+  line-height: 1.6;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.drawer-hint {
+  margin: 8px 0 0;
+  text-align: right;
+}
+
+.ai-report-summary {
+  margin-top: 14px;
+}
+
+.ai-report-block {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.ai-report-block h4 {
+  margin: 0 0 8px;
+  color: #101828;
+  font-size: 14px;
+}
+
+.ai-report-block ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #344054;
+  line-height: 1.7;
+}
+
 .upload-form {
   max-width: 1040px;
 }
@@ -693,6 +854,10 @@ body {
     position: static;
     width: auto;
     margin: 12px;
+  }
+
+  .ai-result-grid {
+    grid-template-columns: 1fr;
   }
 
   .spatial-query-layout {

@@ -66,6 +66,8 @@ app:
     ai-query-window-seconds: 60
     ai-report-limit: 3
     ai-report-window-seconds: 300
+    ai-plan-limit: 10
+    ai-plan-window-seconds: 60
   ai:
     enabled: false
     provider: openai-compatible

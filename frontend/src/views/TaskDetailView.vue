@@ -65,6 +65,62 @@
         </el-card>
 
         <el-card class="detail-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>AI 分析报告</span>
+              <el-tag :type="task?.status === 'SUCCESS' ? 'success' : 'info'" effect="plain">
+                {{ task?.status === 'SUCCESS' ? '可生成' : '等待任务成功' }}
+              </el-tag>
+            </div>
+          </template>
+
+          <div class="ai-report-actions">
+            <el-button
+              type="primary"
+              :loading="aiReportLoading"
+              :disabled="task?.status !== 'SUCCESS'"
+              @click="handleGenerateAiReport"
+            >
+              生成 AI 报告
+            </el-button>
+            <span>AI 只生成报告，不会修改任务或结果文件。</span>
+          </div>
+
+          <template v-if="aiReport">
+            <el-descriptions :column="2" border class="ai-report-summary">
+              <el-descriptions-item label="报告类型">{{ aiReport.reportType || '未知' }}</el-descriptions-item>
+              <el-descriptions-item label="风险等级">
+                <el-tag :type="riskLevelType(aiRiskLevel)" effect="plain">{{ riskLevelText(aiRiskLevel) }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="生成时间" :span="2">
+                {{ formatDateTime(aiReport.createdAt) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="摘要" :span="2">
+                {{ aiReport.summary || '暂无摘要' }}
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <div class="ai-report-block">
+              <h4>关键发现</h4>
+              <ul v-if="aiKeyFindings.length">
+                <li v-for="finding in aiKeyFindings" :key="finding">{{ finding }}</li>
+              </ul>
+              <p v-else class="muted-text">暂无关键发现</p>
+            </div>
+
+            <div class="ai-report-block">
+              <h4>建议</h4>
+              <ul v-if="aiSuggestions.length">
+                <li v-for="suggestion in aiSuggestions" :key="suggestion">{{ suggestion }}</li>
+              </ul>
+              <p v-else class="muted-text">暂无建议</p>
+            </div>
+          </template>
+
+          <el-empty v-else description="暂无 AI 报告，成功任务可手动生成" />
+        </el-card>
+
+        <el-card class="detail-card" shadow="never">
           <template #header>任务日志</template>
 
           <el-empty v-if="!logLoading && logs.length === 0" description="暂无日志" />
@@ -167,14 +223,17 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
+import { generateTaskReportApi } from '@/api/ai'
 import {
   getTaskDetailApi,
   getTaskResultDownloadUrlApi,
   getTaskResultFileApi,
   listTaskLogsApi,
 } from '@/api/task'
+import type { AiRiskLevel, AiTaskReport } from '@/types/ai'
 import type { TaskDetail, TaskLog, TaskResultFile, TaskStatus, TaskType } from '@/types/task'
 
 const route = useRoute()
@@ -183,9 +242,11 @@ const loading = ref(false)
 const logLoading = ref(false)
 const resultDownloadLoading = ref(false)
 const resultLoading = ref(false)
+const aiReportLoading = ref(false)
 const polling = ref(false)
 const task = ref<TaskDetail | null>(null)
 const resultFile = ref<TaskResultFile | null>(null)
+const aiReport = ref<AiTaskReport | null>(null)
 const logs = ref<TaskLog[]>([])
 const pollingTimer = ref<number>()
 
@@ -209,6 +270,12 @@ const qualifiedResultLayerName = computed(() => {
   }
   return `${resultFile.value.workspace}:${resultFile.value.layerName}`
 })
+
+const aiRiskLevel = computed(() => String(aiReport.value?.reportJson?.riskLevel || 'UNKNOWN'))
+
+const aiKeyFindings = computed(() => normalizeTextList(aiReport.value?.reportJson?.keyFindings))
+
+const aiSuggestions = computed(() => normalizeTextList(aiReport.value?.reportJson?.suggestions))
 
 onMounted(() => {
   refreshAll()
@@ -278,6 +345,28 @@ async function downloadTaskResult() {
     window.open(presigned.url, '_blank', 'noopener,noreferrer')
   } finally {
     resultDownloadLoading.value = false
+  }
+}
+
+async function handleGenerateAiReport() {
+  if (task.value?.status !== 'SUCCESS') {
+    ElMessage.warning('任务成功后才能生成 AI 报告')
+    return
+  }
+
+  aiReportLoading.value = true
+  try {
+    aiReport.value = await generateTaskReportApi(taskId.value, true)
+    ElMessage.success('AI 报告已生成')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI 服务暂不可用，请稍后重试'
+    if (message.includes('统计元数据')) {
+      ElMessage.warning('该任务缺少统计元数据，暂无法生成报告')
+    } else {
+      ElMessage.error(message || 'AI 服务暂不可用，请稍后重试')
+    }
+  } finally {
+    aiReportLoading.value = false
   }
 }
 
@@ -370,6 +459,32 @@ function resultStatusType(status: string) {
   if (status === 'PUBLISHED') return 'success'
   if (status === 'FAILED') return 'danger'
   if (status === 'PUBLISHING' || status === 'PENDING') return 'warning'
+  return 'info'
+}
+
+function normalizeTextList(value?: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((item) => String(item)).filter(Boolean)
+}
+
+function riskLevelText(level: string) {
+  const map: Record<string, string> = {
+    LOW: '低',
+    MEDIUM: '中',
+    HIGH: '高',
+    UNKNOWN: '未知',
+  }
+  return map[level] || level
+}
+
+function riskLevelType(level: string) {
+  const normalized = level as AiRiskLevel
+  if (normalized === 'LOW') return 'success'
+  if (normalized === 'MEDIUM') return 'warning'
+  if (normalized === 'HIGH') return 'danger'
   return 'info'
 }
 
