@@ -1,16 +1,61 @@
-# 遥感影像智能解译与时空资产管理平台
+# 面向区域植被监测的遥感分析与报告平台
 
 ## 项目背景
 
-遥感影像在自然资源调查、城市规划、生态监测、灾害评估、农业生产和基础设施巡检等场景中具有重要价值。随着卫星、无人机和航空遥感数据持续增长，传统依赖人工下载、整理、查看和判读影像的方式，已经难以满足高频、多源、大规模的业务需求。
+本项目面向区域植被监测场景，将遥感影像整理、异步计算、统计追溯和地图展示串成可复现的业务流程。当前先完成单期 NDVI 基线，再逐步建设区域统计、多期对比以及受控 Agent 分析与报告。
 
-本项目面向“遥感影像管理与智能解译”场景，计划建设一个集影像资产管理、空间检索、时序管理、智能解译任务调度、解译结果发布与可视化服务于一体的后端平台。平台重点关注遥感影像从入库、存储、处理、检索到服务发布的完整流程，为后续接入深度学习模型、GIS 可视化前端和业务分析应用提供稳定基础。
+项目名称描述产品方向，不代表所有目标均已完成。目前验收范围是标准化反射率影像的整个裁剪矩形（`cropped_raster`），不是任意行政区或多边形统计；NDVI 均值不直接等于植被覆盖率，也不能独立判断农田健康程度。
+
+### 当前能力与边界
+
+| 能力 | 当前状态 |
+| --- | --- |
+| 影像资产、空间检索、异步任务、结果下载与地图发布 | 已有实现 |
+| 单期 NDVI 掩膜处理、统计契约、结果恢复 | 已完成基线与真实服务联调 |
+| Sentinel-2 标准化与公开样本准备 | 已有离线脚本，尚未接入上传自动处理 |
+| NDWI、简化变化检测 | 保留已有实现，本次未重新验收 |
+| 旧 AI 规划与解释 | 保留代码，暂不作为验收能力，后续替换 |
+| 受控 Agent、RAG、可追溯报告、多期植被监测 | 后续目标，尚未完成 |
+
+阅读入口：[基线运行指南](shared/baseline/README.md)、[NDVI 统计契约](shared/baseline/ndvi-contract.md)、[实际验证与交接](shared/baseline/handoff.md)、[前端运行](frontend/README.md)。
+
+### 当前业务流程
+
+```text
+公开或本地原始波段
+  → 离线校准反射率、裁剪、质量掩膜、合并波段
+  → 上传标准化 GeoTIFF → Java 校验并登记影像
+  → 提交 NDVI 任务 → Outbox / RabbitMQ → Python Worker
+  → 输出 GeoTIFF 与版本化统计 → Java 校验、保存结果
+  → 异步发布 GeoServer → 前端查看统计、下载、地图
+```
+
+Java 负责身份、权限、任务状态和业务操作；Worker 负责确定性栅格计算，不调用大模型。任务计算成功（`SUCCESS`）与图层发布完成（`PUBLISHED`）是两个独立状态。
+
+### NDVI 输入与统计口径
+
+- 准备脚本：`python-worker/scripts/prepare_ndvi_baseline.py`；公开固定样本脚本：`shared/baseline/fetch_public_sample.py`。命令与数据来源见基线运行指南。
+- 基线样本波段顺序为 B02/B03/B04/B08，默认 `redBand=3`、`nirBand=4`，序号从 1 开始。
+- 原始 DN 须按实际产品的 scale/offset 转为反射率，不能重复校准。Worker 不自动校准，也尚未强制验证输入的反射率单位标签。
+- NoData、掩膜排除值、非有限数值及 `abs(NIR + RED) <= 1e-6` 的像素不参与统计；无有效像素时明确失败，不返回伪造的零值统计。
+- 输出为 Float32 GeoTIFF，NaN 表示 NoData；统计包含总数、有效数、无效数、有效比例、最小值、最大值及均值。
+- 统计通过 `resultMetadata` 保存到既有 JSONB 字段；旧结果缺少统计时页面明确提示缺失，不自动补造数据。
+- 本地来源 JSON 保留校准与 SHA256 信息，目前未完整自动入库。详细约束以统计契约为准。
+
+### 已执行的基线验证
+
+2026-09-17：Java 定向测试 83 项、Worker 测试 13 项、公开样本校准回归测试及前端构建通过；真实服务完成合成样本、全 NoData 失败样本和公开 Sentinel-2 样本的端到端检查，包括幂等提交、统计回查、下载与 WMS 图像。
+
+公开验收样本为 `poyang-20241129-baseline.tif`：500×500 像素，有效像素 248174，NDVI 均值约 0.214874。早期重复应用偏移的样本已废弃，不能用于业务解释。验证记录见基线交接文档。
+
+以上是该次基线记录，不代表每次 CI 都执行这些检查；未完成 ArcGIS 对照、浏览器交互验收和压力测试。
 
 ## 技术栈
 
 | 类型 | 技术 | 用途 |
 | --- | --- | --- |
 | 后端框架 | Spring Boot 3 | 构建 REST API 和后端业务服务 |
+| 前端 | Vue 3 + TypeScript + Element Plus + OpenLayers | 影像、任务、统计和地图展示 |
 | 持久层框架 | MyBatis | 编写可控 SQL，便于扩展 PostGIS 空间查询 |
 | 构建工具 | Maven | 项目依赖管理与构建 |
 | 开发语言 | Java 17 | 后端主语言 |
@@ -40,7 +85,7 @@ src/main/java/com/remotesensing/platform
 └── exception       # 全局异常处理和业务异常
 ```
 
-计划中的核心业务模块：
+已有业务模块与保留扩展方向（不等于全部通过本次验收）：
 
 | 模块 | 说明 |
 | --- | --- |
@@ -53,9 +98,9 @@ src/main/java/com/remotesensing/platform
 | 文件与对象存储模块 | 对接 MinIO，统一管理影像、切片和结果文件 |
 | 系统监控模块 | 查看服务健康状态、任务执行状态和关键运行指标 |
 
-## 本地开发环境启动
+## 旧 AI 功能说明
 
-## AI 智能解译能力
+旧 AI 规划/解释暂不测试、不作为当前基线的演示入口；计划后续以受控 Agent 替换。以下配置仅供维护既有代码参考，不表示新的 Agent/报告闭环已经实现。
 
 当前 AI 能力只负责“解析”和“解释”，不会直接查询数据库、拼接 SQL 或自动执行任务。生产环境建议默认保持 `app.ai.enabled=false`，需要演示或联调时再通过环境变量显式开启，并配置 OpenAI-compatible 模型参数。
 
@@ -70,6 +115,8 @@ app:
 ```
 
 注意：任务报告生成会把任务类型、结果统计元数据、传感器和采集时间发送给第三方模型服务。第一版已避免发送 MinIO objectKey、bucket、用户 ID 和内部路径；公开部署前仍建议补充用户告知、脱敏策略和审计记录。
+
+## 本地开发环境启动
 
 ### 1. 使用 Docker Compose 启动完整环境
 
@@ -87,11 +134,7 @@ docker compose up -d --build
 docker compose down
 ```
 
-如需删除本地持久化数据卷：
-
-```powershell
-docker compose down -v
-```
+停止时不要附加 `-v`，以免删除数据库等持久化数据。Compose 不包含前端开发服务器，前端启动见 [前端 README](frontend/README.md)。
 
 ### 2. 本地方式启动 Spring Boot 后端
 
@@ -149,17 +192,17 @@ mvn test
 
 ## Docker Compose 服务地址
 
-| 服务 | 地址/端口 | 默认账号 | 默认密码 | 说明 |
-| --- | --- | --- | --- | --- |
-| Spring Boot 后端 | `http://localhost:8080/api` | `admin` | `admin123` | 后端 REST API |
-| Python Worker | 容器内部运行 | 无 | 无 | 消费 RabbitMQ 遥感任务并回调后端 |
-| PostgreSQL/PostGIS | `localhost:5433` | `postgres` | `1234` | 数据库名：`rs_image_asset` |
-| RabbitMQ | `localhost:5672` | `guest` | `guest` | AMQP 连接端口 |
-| RabbitMQ 管理控制台 | `http://localhost:15672` | `guest` | `guest` | 队列、交换机和连接管理 |
-| MinIO API | `http://localhost:9000` | `minioadmin` | `minioadmin` | 对象存储 API |
-| MinIO 控制台 | `http://localhost:9001` | `minioadmin` | `minioadmin` | 对象存储管理页面 |
-| Redis | `localhost:6379` | 无 | 无 | 本地缓存服务 |
-| GeoServer | `http://localhost:8081/geoserver` | `admin` | `geoserver` | 地理空间服务发布平台 |
+| 服务 | 地址/端口 |
+| --- | --- |
+| Spring Boot | `http://localhost:8080/api` |
+| Python Worker | 容器内部消费任务 |
+| PostgreSQL/PostGIS | `localhost:5433` |
+| RabbitMQ / 管理界面 | `localhost:5672` / `http://localhost:15672` |
+| MinIO API / 控制台 | `http://localhost:9000` / `http://localhost:9001` |
+| Redis | `localhost:6379` |
+| GeoServer | `http://localhost:8081/geoserver` |
+
+账号与凭据按本地配置管理，不在此重复列出。示例环境不应直接暴露到公网，公开部署前必须替换默认凭据并检查权限。端口冲突与本次联调备选启动方式见基线运行指南。
 
 ### GeoServer 结果影像发布目录
 
@@ -453,8 +496,7 @@ POST http://localhost:8080/api/tasks
   "taskType": "NDVI",
   "params": {
     "redBand": 3,
-    "nirBand": 4,
-    "threshold": 0.3
+    "nirBand": 4
   }
 }
 ```
@@ -492,7 +534,7 @@ CHANGE_DETECTION
 result/{taskType}/{yyyy}/{MM}/task_{taskId}.tif
 ```
 
-4. 发送 RabbitMQ 消息。
+4. 同事务写入 Outbox；提交后尝试投递 RabbitMQ，失败由补偿任务继续投递。可传入 `clientRequestId` 防止重复提交。
 5. 返回 `taskId`。
 
 RabbitMQ 配置：
@@ -528,13 +570,12 @@ rabbitmq:
   "outputObjectKey": "result/NDVI/2026/05/task_1001.tif",
   "params": {
     "redBand": 3,
-    "nirBand": 4,
-    "threshold": 0.3
+    "nirBand": 4
   }
 }
 ```
 
-如果 RabbitMQ 本地发送异常、broker 返回 `nack`，或消息因 `mandatory` 未路由到队列，任务状态会更新为 `FAILED`，并写入 `rs_task_log`。当前阶段采用 publisher confirm/return 做最小可靠性增强，后续更稳妥的方案是增加 `rs_task_outbox` 和补偿投递线程。
+当前已实现 Outbox 及补偿投递，并结合 publisher confirm/return 跟踪消息发送。立即投递异常不等同于任务立即失败；后续行为由 Outbox 状态与补偿策略控制。
 
 任务队列失败重试和死信流转：
 
@@ -558,6 +599,8 @@ Python Worker 消费约定：
 7. 超过 RabbitMQ `x-delivery-limit` 后进入 DLQ，由 Java 侧 DLQ 监听器标记最终 `FAILED`。
 8. Python 回调必须解析统一响应 JSON，只有 `code = 200` 才算成功，不能只看 HTTP 200。
 9. Worker 不应在关键回调失败时直接 `ack`，否则会出现结果已上传但任务状态仍卡住的问题。
+
+业务校验失败（`ValueError`，例如 NDVI 无有效像素）走不可重试分支：尝试回调 `FAILED` 并拒绝消息，不按普通计算错误循环重试；回调失败处理遵循现有消费者逻辑。
 
 Worker 抢占接口：
 
@@ -592,7 +635,7 @@ POST http://localhost:8080/api/tasks/{taskId}/claim
 
 Worker 结果文件幂等：
 
-结果路径基于 `taskId` 固定生成。Worker 抢占成功后，如果发现 `outputObjectKey` 已经存在于 MinIO，说明可能是上次计算已上传结果但 `SUCCESS` 回调前崩溃，此时会跳过重复计算，直接回调 `SUCCESS` 并 `ack`。
+结果路径基于 `taskId` 固定生成。Worker 抢占成功后会检查已存在的结果；NDVI 必须下载并验证基线版本、波段标签，再从实际输出重建统计后回调 `SUCCESS`。无版本标记的旧 NDVI 输出拒绝复用，应新建任务。此机制不等于已解决卡在 `RUNNING` 状态的崩溃恢复。
 
 Worker 状态回调接口：
 
@@ -656,19 +699,18 @@ psql -U postgres -d rs_image_asset -f src/main/resources/db/upgrade/20260509_tas
 
 ## 后续计划
 
-- 接入真正的认证体系，将当前 `CurrentUserContext` 从请求头方案替换为 Spring Security + JWT 或统一网关认证。
-- 扩展权限模型，支持组织、项目空间、共享授权、角色权限和 GeoServer 图层访问控制。
-- 增加结果文件管理接口，支持结果文件列表、详情、发布状态查询、人工重试发布和可见性调整。
-- 增加任务取消、人工重试、死信任务查询、死信重投和任务超时补偿机制。
-- 将缩略图生成、元数据解析和 GeoServer 发布进一步任务化，逐步迁移到 Worker，最终让 Spring Boot 镜像回归纯 Java 运行环境。
-- 完善 Python Worker 多实例部署、日志采集、资源限制和运行监控。
-- 优化大文件处理能力，支持分片上传、断点续传、上传进度、文件校验和异步入库流程。
-- 接入 Elasticsearch，实现影像资产、任务和结果文件的全文检索与标签检索。
-- 增强 Redis，用于热点查询缓存、任务状态缓存或轻量分布式锁。
-- 增强遥感算法能力，扩展裁剪、重投影、波段合成、栅格统计和更复杂的变化检测/智能解译模型。
-- 增加 OpenAPI/Swagger 接口文档，补充端到端集成测试和接口示例集合。
-- 完善生产化部署方案，补充镜像推送、服务器部署、环境变量密钥管理和 CI/CD 发布流程。
+按“业务闭环优先、能力可验收”的顺序推进：
 
-## 项目定位
+1. **输入与质量控制**：把离线标准化接入可追溯的导入流程，保存产品来源、校准参数与质量掩膜；增加明确的输入准入校验。
+2. **区域与多期监测**：先实现一个指定区域的多边形掩膜和分区统计，再统一网格、时间、质量口径，做多期 NDVI 对比。
+3. **受控 Agent 与报告**：以现有确定性计算为工具，逐步支持影像检索、参数确认、任务提交、结果查询和带来源的报告；权限和业务操作仍由 Java 控制。
+4. **验证与工程可靠性**：补充浏览器验收、专业软件对照、任务崩溃恢复、超时处理和必要的性能测试。
+5. **部署与安全**：按实际需求完善认证授权、密钥管理、图层访问控制、日志审计和 CI/CD。
 
-该项目适合作为遥感、GIS、空间数据管理、智能解译和后端工程能力的综合实践项目。它不仅关注普通 CRUD 接口开发，也覆盖空间数据库、对象存储、异步任务、地图服务发布和遥感影像处理等更贴近真实业务的工程场景。
+[原 Agent/RAG 规格](shared/specs/agent-rag-spec.md) 保留为设计参考；实施前需要按当前业务范围重新拆分任务，不把其中所有组件视为近期必做。
+
+## 项目定位与命名范围
+
+本项目以植被监测为业务场景，重点展示 Java 业务后端、Python 栅格处理、异步任务可靠性、空间数据管理，以及后续 AI 应用的受控集成能力。不是通用遥感软件，也不宣称具备未经验证的植被诊断能力。
+
+展示名称统一为“面向区域植被监测的遥感分析与报告平台”。为保持部署兼容，仓库目录、Java 包名、Maven artifactId、数据库名、容器名与对象存储路径暂不更改。

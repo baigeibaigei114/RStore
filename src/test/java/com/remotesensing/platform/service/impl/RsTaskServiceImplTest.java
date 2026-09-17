@@ -49,6 +49,66 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 @ExtendWith(MockitoExtension.class)
 class RsTaskServiceImplTest {
 
+    private com.fasterxml.jackson.databind.node.ObjectNode baselineMetadata() throws Exception {
+        return (com.fasterxml.jackson.databind.node.ObjectNode) new ObjectMapper().readTree("""
+                {"schemaVersion":1,"algorithm":"NDVI","scope":"cropped_raster",
+                 "bandMapping":{"redBand":3,"nirBand":4},
+                 "statistics":{"totalPixelCount":4,"validPixelCount":3,"invalidPixelCount":1,
+                 "validPixelRatio":0.75,"min":0,"max":0.5,"mean":0.3333333333333333}}
+                """);
+    }
+
+    @Test
+    void successCallbackShouldPersistStatistics() throws Exception {
+        RsTask task = task(1L, "user-a", TaskStatus.RUNNING.dbValue(), "result/ndvi.tif");
+        task.setTaskType("NDVI");
+        task.setImageId(10L);
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        dto.setProgress(100);
+        dto.setOutputObjectKey("result/ndvi.tif");
+        dto.setResultMetadata(baselineMetadata());
+        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.updateStatusFromWorker(1L, "RUNNING", "SUCCESS", 100, "result/ndvi.tif", null))
+                .thenReturn(1);
+        service.updateStatus(1L, dto);
+        ArgumentCaptor<RsResultFile> captor = ArgumentCaptor.forClass(RsResultFile.class);
+        verify(resultFileMapper).insert(captor.capture());
+        assertThat(new ObjectMapper().readTree(captor.getValue().getResultMetadata()))
+                .isEqualTo(dto.getResultMetadata());
+    }
+
+    @Test
+    void invalidStatisticsShouldNotUpdateTask() throws Exception {
+        RsTask task = task(1L, "user-a", "RUNNING", "result/ndvi.tif");
+        task.setTaskType("NDVI");
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        var metadata = baselineMetadata();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) metadata.get("statistics"))
+                .put("validPixelCount", 5);
+        dto.setResultMetadata(metadata);
+        when(taskMapper.selectById(1L)).thenReturn(task);
+        assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("像素数量");
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+        verify(resultFileMapper, never()).insert(any());
+    }
+
+    @Test
+    void metadataValidatorRejectsMalformedValues() throws Exception {
+        for (String field : new String[]{"min", "max", "mean", "validPixelRatio"}) {
+            var metadata = baselineMetadata();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) metadata.get("statistics")).put(field, "NaN");
+            assertThatThrownBy(() -> com.remotesensing.platform.common.NdviMetadataValidator.validate(metadata, "NDVI"))
+                    .isInstanceOf(BusinessException.class);
+        }
+        var metadata = baselineMetadata();
+        metadata.put("schemaVersion", 2);
+        assertThatThrownBy(() -> com.remotesensing.platform.common.NdviMetadataValidator.validate(metadata, "NDVI"))
+                .isInstanceOf(BusinessException.class);
+    }
+
     @Mock
     private RsImageMapper imageMapper;
 

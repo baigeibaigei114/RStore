@@ -3,6 +3,7 @@ package com.remotesensing.platform.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.NdviMetadataValidator;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
@@ -609,6 +610,10 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "SUCCESS 状态必须提供 outputObjectKey");
         }
         validateSuccessOutputObjectKey(task, updateDTO, targetStatus);
+        if (targetStatus == TaskStatus.SUCCESS) {
+            NdviMetadataValidator.validate(
+                    updateDTO.getResultMetadata(), task.getTaskType());
+        }
         if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");
         }
@@ -776,6 +781,9 @@ public class RsTaskServiceImpl implements RsTaskService {
                 : task.getOutputBucket();
 
         RsResultFile resultFile = buildResultFile(task, outputBucket, outputObjectKey);
+        if (updateDTO.getResultMetadata() != null && !updateDTO.getResultMetadata().isNull()) {
+            resultFile.setResultMetadata(toJson(updateDTO.getResultMetadata()));
+        }
         RsResultFile existing = resultFileMapper.selectByTaskId(task.getId());
         if (existing == null) {
             resultFileMapper.insert(resultFile);

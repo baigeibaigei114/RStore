@@ -1,0 +1,206 @@
+version: 1
+project: intelligent-remote-sensing-platform
+source_spec: shared/specs/agent-rag-spec.md
+updated_at: '2026-09-17'
+
+workflow:
+  statuses:
+    - backlog
+    - ready
+    - in_progress
+    - review
+    - blocked
+    - done
+  rules:
+    - Only ready items with completed dependencies may be claimed.
+    - One work item has exactly one owner while in progress.
+    - Claimed paths may not overlap another in-progress item.
+    - Milestones must be split into small work items before implementation.
+    - Done requires recorded validation and a self-contained handoff.
+
+milestones:
+  - id: M1
+    title: 数据库与容器基础
+    implementation_step: 1
+    depends_on: []
+  - id: M2
+    title: Agent Service 骨架
+    implementation_step: 2
+    depends_on: [M1]
+  - id: M3
+    title: 知识入库
+    implementation_step: 3
+    depends_on: [M1, M2]
+  - id: M4
+    title: RAG 与评测
+    implementation_step: 4
+    depends_on: [M3]
+  - id: M5
+    title: 计划生成与后端校验
+    implementation_step: 5
+    depends_on: [M4]
+  - id: M6
+    title: 受控执行器
+    implementation_step: 6
+    depends_on: [M5]
+  - id: M7
+    title: 报告与前端
+    implementation_step: 7
+    depends_on: [M4, M6]
+  - id: M8
+    title: 联调、验收与文档
+    implementation_step: 8
+    depends_on: [M1, M2, M3, M4, M5, M6, M7]
+
+work_items:
+  - id: DOCS-002
+    milestone: null
+    title: 同步植被监测项目名称与 NDVI 基线文档
+    status: done
+    owner: codex-docs
+    started_at: '2026-09-17'
+    completed_at: '2026-09-17'
+    validation:
+      status: passed
+      commands:
+        - npm run build
+        - PowerShell Markdown relative link check and XML parse
+        - git diff --check
+      notes: 前端构建、链接和 XML 检查通过；未重跑业务测试，历史基线记录另见 BASELINE-001。
+    handoff:
+      document: shared/readme-handoff.md
+      summary: 统一产品展示名称与当前基线说明，不改部署标识，不执行 Git 提交。
+    claimed_paths:
+      - README.md
+      - frontend/README.md
+      - frontend/index.html
+      - frontend/src/components/layout/AppHeader.vue
+      - frontend/src/router/index.ts
+      - pom.xml
+      - shared/README.md
+      - shared/baseline/README.md
+      - shared/baseline/ndvi-contract.md
+      - shared/readme-handoff.md
+      - shared/work-items.yaml
+    depends_on: [BASELINE-001]
+    scope:
+      - README.md
+      - frontend/README.md
+      - frontend/index.html
+      - frontend/src/components/layout/AppHeader.vue
+      - frontend/src/router/index.ts
+      - pom.xml
+      - shared/README.md
+      - shared/baseline/README.md
+      - shared/baseline/ndvi-contract.md
+      - shared/readme-handoff.md
+      - shared/work-items.yaml
+    acceptance:
+      - 展示名称统一且不改变部署标识
+      - README 区分已验收基线和待开发能力
+      - 链接检查与前端构建通过，提供提交说明
+  - id: BASELINE-001
+    milestone: null
+    title: 单期 NDVI 计算与统计基线
+    status: done
+    owner: codex-ndvi-baseline
+    started_at: '2026-09-17'
+    completed_at: '2026-09-17'
+    claimed_paths:
+      - python-worker/processors/ndvi_processor.py
+      - python-worker/utils/ndvi_baseline.py
+      - python-worker/scripts/prepare_ndvi_baseline.py
+      - python-worker/tests/test_ndvi_baseline.py
+      - src/main/java/com/remotesensing/platform/dto/RsTaskStatusUpdateDTO.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsTaskServiceImpl.java
+      - src/main/java/com/remotesensing/platform/common/NdviMetadataValidator.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsTaskServiceImplTest.java
+      - frontend/src/views/TaskDetailView.vue
+      - shared/baseline/**
+      - shared/decision-log.md
+      - shared/work-items.yaml
+    depends_on: []
+    scope:
+      - python-worker/processors/ndvi_processor.py
+      - python-worker/utils/ndvi_baseline.py
+      - python-worker/scripts/prepare_ndvi_baseline.py
+      - python-worker/tests/test_ndvi_baseline.py
+      - src/main/java/com/remotesensing/platform/dto/RsTaskStatusUpdateDTO.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsTaskServiceImpl.java
+      - src/main/java/com/remotesensing/platform/common/NdviMetadataValidator.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsTaskServiceImplTest.java
+      - frontend/src/views/TaskDetailView.vue
+      - shared/baseline/**
+      - shared/decision-log.md
+      - shared/work-items.yaml
+    acceptance:
+      - 人工栅格及统计通过确定性测试
+      - NDVI 新结果携带版本化统计，重试可恢复
+      - Java 校验保存统计，页面展示缺失与有效数值
+      - 真实数据与端到端验证分别记录，不以模拟测试代替
+    validation:
+      status: passed
+      commands:
+        - "mvn -o '-Dtest=RsTask*,RsImage*,ImageBand*,MessageOutbox*,GeoServer*,AuthInterceptorTest,TaskStatusTest' test"
+        - "python -m unittest discover -s tests -v"
+        - "docker exec rs-python-worker python -m unittest discover -s tests -v"
+        - "python -m unittest discover -s shared/baseline -p 'test_*.py' -v"
+        - "npm run build"
+        - "docker compose config --quiet"
+        - "python shared/baseline/verify_e2e.py (synthetic, all-nodata, public-final)"
+      completed_at: '2026-09-17'
+      notes: Java83通过，Worker13通过，校准测试通过，前端构建通过；真实E2E任务14/15/18通过，细节见交接。
+    blocked_by: []
+    handoff:
+      summary: 单期 NDVI 基线已实现和真实联调，使用固定裁剪矩形，不新增 Agent。
+      document: shared/baseline/handoff.md
+      remaining: 浏览器交互验收、专业软件对照和后续恢复机制另行安排。
+      risks: 旧错误校准任务16已废弃但保留追溯；IPv4端口冲突；本次容器使用本地运行时备选镜像。
+  - id: COLLAB-001
+    milestone: null
+    title: 建立第一阶段多 Agent 协作基础
+    status: done
+    owner: codex-root
+    started_at: '2026-07-21T14:59:00+08:00'
+    completed_at: '2026-07-21T15:27:55+08:00'
+    depends_on: []
+    scope:
+      - AGENTS.md
+      - shared/README.md
+      - shared/work-items.yaml
+      - shared/decision-log.md
+      - shared/templates/**
+    claimed_paths:
+      - AGENTS.md
+      - shared/README.md
+      - shared/work-items.yaml
+      - shared/decision-log.md
+      - shared/templates/**
+    deliverables:
+      - 仓库级开发 Agent 协作规则
+      - 高层实施里程碑和轻量任务台账
+      - 通用任务、交接与决策模板
+    acceptance:
+      - 协作规则不预先设计产品接口和业务 Schema
+      - 里程碑与已批准规格第 11 节实施顺序一致
+      - 新 Agent 可以不依赖聊天记录完成任务领取和交接
+    validation:
+      status: passed
+      commands:
+        - Python yaml.safe_load shared/work-items.yaml shared/templates/work-item-template.yaml
+        - rg --files shared
+        - rg -n contracts AGENTS.md shared
+      completed_at: '2026-07-21T15:27:55+08:00'
+      notes: 两个 YAML 文件解析成功；共享目录只保留协作文件和原规格；无产品契约引用。
+    blocked_by: []
+    handoff:
+      summary: 第一阶段协作文件已经收缩为开发流程管理，不包含产品 OpenAPI、AsyncAPI 或业务 JSON Schema。
+      changed_files:
+        - AGENTS.md
+        - shared/README.md
+        - shared/work-items.yaml
+        - shared/decision-log.md
+        - shared/templates/work-item-template.yaml
+        - shared/templates/handoff-template.md
+      remaining: 后续由协调 Agent 从里程碑拆出首批可独立领取的 work item。
+      risks: 台账是仓库内共享记录，不提供自动锁；并发 Agent仍需遵守领取规则。

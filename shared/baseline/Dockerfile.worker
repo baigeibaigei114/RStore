@@ -1,0 +1,4 @@
+# 构建上下文必须是 python-worker。
+ARG RUNTIME_IMAGE
+FROM ${RUNTIME_IMAGE}
+COPY . /app

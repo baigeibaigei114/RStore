@@ -1,0 +1,4 @@
+# 本地联调备选：复用已安装依赖的项目运行镜像，不替代根 Dockerfile。
+ARG RUNTIME_IMAGE
+FROM ${RUNTIME_IMAGE}
+COPY rs-image-asset-platform-0.0.1-SNAPSHOT.jar /app/app.jar

@@ -1,0 +1,6 @@
+# 与根 docker-compose.yml 合并使用，不修改既有卷。
+services:
+  backend:
+    image: rs-ndvi-baseline-backend:local
+  python-worker:
+    image: rs-ndvi-baseline-worker:local

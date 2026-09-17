@@ -12,7 +12,7 @@
       <el-button
         type="primary"
         :loading="resultDownloadLoading"
-        :disabled="!task?.outputObjectKey"
+        :disabled="task?.status !== 'SUCCESS' || !task?.outputObjectKey"
         @click="downloadTaskResult"
       >
         下载结果影像
@@ -120,6 +120,30 @@
           <el-empty v-else description="暂无 AI 报告，成功任务可手动生成" />
         </el-card>
 
+        <el-card v-if="task?.taskType === 'NDVI'" class="detail-card" shadow="never">
+          <template #header>NDVI 计算统计</template>
+          <template v-if="ndviStatistics">
+            <p>范围：输入影像的裁剪矩形；无效像素不参与最小值、最大值和均值统计。</p>
+            <el-alert
+              v-if="ndviStatistics.min < -1 || ndviStatistics.max > 1"
+              title="数值超出常见 NDVI 范围，请核对输入反射率、偏移和质量掩膜；不要直接据此判断植被情况。"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="总像素">{{ ndviStatistics.totalPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="有效像素">{{ ndviStatistics.validPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="无效像素">{{ ndviStatistics.invalidPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="有效比例">{{ (ndviStatistics.validPixelRatio * 100).toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="最小值">{{ ndviStatistics.min.toFixed(6) }}</el-descriptions-item>
+              <el-descriptions-item label="最大值">{{ ndviStatistics.max.toFixed(6) }}</el-descriptions-item>
+              <el-descriptions-item label="平均值">{{ ndviStatistics.mean.toFixed(6) }}</el-descriptions-item>
+            </el-descriptions>
+          </template>
+          <el-empty v-else description="尚无可用的 v1 统计；旧任务可能未生成统计，不能将缺失值视为 0" />
+        </el-card>
+
         <el-card class="detail-card" shadow="never">
           <template #header>任务日志</template>
 
@@ -188,7 +212,7 @@
 
             <div class="map-panel-actions">
               <el-button
-                :disabled="!resultFile.imageId || !task?.taskType"
+                :disabled="resultFile.status !== 'PUBLISHED' || !resultFile.imageId || !task?.taskType"
                 @click="openResultLayerInMap"
               >
                 地图查看
@@ -208,7 +232,7 @@
             </div>
           </template>
           <p class="muted-text">
-            任务处于等待、运行或重试状态时，页面每 3 秒自动刷新任务详情和日志。
+            任务处理或结果发布期间，页面每 3 秒自动刷新。计算成功不代表地图已经发布成功。
           </p>
         </el-card>
 
@@ -252,6 +276,34 @@ const pollingTimer = ref<number>()
 
 const taskId = computed(() => String(route.params.id))
 
+interface NdviStatistics {
+  totalPixelCount: number
+  validPixelCount: number
+  invalidPixelCount: number
+  validPixelRatio: number
+  min: number
+  max: number
+  mean: number
+}
+
+const ndviStatistics = computed<NdviStatistics | null>(() => {
+  if (!resultFile.value?.resultMetadata) return null
+  try {
+    const metadata = JSON.parse(resultFile.value.resultMetadata)
+    if (metadata.schemaVersion !== 1 || metadata.algorithm !== 'NDVI'
+        || metadata.scope !== 'cropped_raster') return null
+    const stats = metadata.statistics
+    const keys = ['totalPixelCount', 'validPixelCount', 'invalidPixelCount',
+      'validPixelRatio', 'min', 'max', 'mean']
+    if (!stats || !keys.every((key) => typeof stats[key] === 'number' && Number.isFinite(stats[key]))) {
+      return null
+    }
+    return stats as NdviStatistics
+  } catch {
+    return null
+  }
+})
+
 const formattedParams = computed(() => {
   if (!task.value?.params) {
     return '暂无任务参数'
@@ -286,7 +338,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => task.value?.status,
+  () => [task.value?.status, resultFile.value?.status],
   () => {
     syncPolling()
   },
@@ -303,6 +355,7 @@ async function refreshAll() {
   }
 
   await Promise.all(jobs)
+  syncPolling()
 }
 
 async function fetchTask() {
@@ -371,7 +424,9 @@ async function handleGenerateAiReport() {
 }
 
 function syncPolling() {
-  if (task.value && isActiveStatus(task.value.status)) {
+  const publishing = task.value?.status === 'SUCCESS'
+    && (!resultFile.value || ['PENDING_PUBLISH', 'PUBLISHING', 'PENDING'].includes(resultFile.value.status || ''))
+  if (task.value && (isActiveStatus(task.value.status) || publishing)) {
     startPolling()
     return
   }
@@ -400,7 +455,9 @@ function startPolling() {
   }
 
   pollingTimer.value = window.setInterval(() => {
-    refreshAll()
+    if (!loading.value && !resultLoading.value && !logLoading.value) {
+      refreshAll().catch(() => stopPolling())
+    }
   }, 3000)
 }
 
@@ -448,17 +505,19 @@ function taskStatusType(status: TaskStatus) {
 function resultStatusText(status: string) {
   const map: Record<string, string> = {
     PENDING: '待发布',
+    PENDING_PUBLISH: '待发布',
     PUBLISHING: '发布中',
     PUBLISHED: '已发布',
     FAILED: '发布失败',
+    PUBLISH_FAILED: '发布失败',
   }
   return map[status] || status
 }
 
 function resultStatusType(status: string) {
   if (status === 'PUBLISHED') return 'success'
-  if (status === 'FAILED') return 'danger'
-  if (status === 'PUBLISHING' || status === 'PENDING') return 'warning'
+  if (status === 'FAILED' || status === 'PUBLISH_FAILED') return 'danger'
+  if (['PUBLISHING', 'PENDING', 'PENDING_PUBLISH'].includes(status)) return 'warning'
   return 'info'
 }
 

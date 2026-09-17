@@ -4,7 +4,7 @@
       <el-button text :icon="appStore.sidebarCollapsed ? Expand : Fold" @click="appStore.toggleSidebar" />
       <div>
         <h1>{{ pageTitle }}</h1>
-        <p>遥感影像智能解译与时空资产管理平台</p>
+        <p>面向区域植被监测的遥感分析与报告平台</p>
       </div>
     </div>
 
