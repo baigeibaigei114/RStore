@@ -12,6 +12,13 @@ import lombok.Data;
 @Data
 public class GeoTiffMetadataVO {
 
+    private String inputUnits;
+    private List<String> dtypes;
+    private List<BigDecimal> scales;
+    private List<BigDecimal> offsets;
+    /** 服务器生成的版本化输入检查记录；普通及历史影像为空。 */
+    private com.fasterxml.jackson.databind.JsonNode admission;
+
     /** 栅格像素宽度。 */
     private Integer width;
 

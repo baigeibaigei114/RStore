@@ -58,13 +58,22 @@
               type="warning"
               :closable="false"
               show-icon
-              title="当前影像缺少该任务所需的可信波段映射，不能提交。"
+              :title="admissionLoading ? '正在检查分析准入…' : '影像缺少可信波段映射或 NDVI 标准化准入，请查看影像详情。'"
               class="selected-image-alert"
             />
           </el-col>
 
           <el-col :xs="24" :lg="12">
             <template v-if="form.taskType === 'NDVI'">
+              <el-form-item label="统计范围">
+                <el-select v-model="monitoringRegionId" clearable class="full-width" :loading="regionLoading"
+                  placeholder="整幅裁剪矩形（不选择区域）" @change="regionSelectionError = ''">
+                  <el-option v-for="region in monitoringRegions" :key="region.id" :value="region.id"
+                    :label="`${region.name} · v${region.version}`" />
+                </el-select>
+                <p>区域必须完整落在影像内；<router-link to="/map">去地图绘制并保存区域</router-link>。</p>
+                <el-alert v-if="regionSelectionError" type="error" :closable="false" :title="regionSelectionError" />
+              </el-form-item>
               <el-form-item label="红光波段">
                 <el-input-number v-model="form.redBand" :min="1" :step="1" controls-position="right" class="full-width" />
               </el-form-item>
@@ -118,7 +127,9 @@
 
         <div class="form-actions">
           <el-button @click="router.push('/tasks')">返回任务列表</el-button>
-          <el-button type="primary" :loading="submitting" :disabled="!!selectedImage && !selectedTaskSupported" @click="submitTask">提交任务</el-button>
+          <el-button type="primary" :loading="submitting"
+            :disabled="(!!selectedImage && !selectedTaskSupported) || (form.taskType === 'NDVI' && (regionLoading || !!regionSelectionError))"
+            @click="submitTask">提交任务</el-button>
         </div>
       </el-form>
     </el-card>
@@ -129,8 +140,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
-import { searchImagesApi } from '@/api/image'
+import { useRoute, useRouter } from 'vue-router'
+import { getMonitoringRegionApi, listMonitoringRegionsApi, type MonitoringRegion } from '@/api/monitoringRegion'
+import { searchImagesApi, getImageDetailApi } from '@/api/image'
 import { createTaskApi } from '@/api/task'
 import type { ImageListItem } from '@/types/image'
 import type { TaskSubmitParams, TaskType } from '@/types/task'
@@ -147,6 +159,11 @@ interface TaskCreateForm {
 }
 
 const router = useRouter()
+const route = useRoute()
+const monitoringRegionId = ref<number>()
+const monitoringRegions = ref<MonitoringRegion[]>([])
+const regionLoading = ref(true)
+const regionSelectionError = ref('')
 const formRef = ref<FormInstance>()
 const imageLoading = ref(false)
 const submitting = ref(false)
@@ -187,6 +204,24 @@ const rules: FormRules<TaskCreateForm> = {
 }
 
 const selectedImage = computed(() => readyImages.value.find((item) => item.id === form.imageId))
+const ndviAdmitted = ref(false)
+const admissionLoading = ref(false)
+watch(() => form.imageId, async (id, _, onCleanup) => {
+  let stale = false
+  onCleanup(() => { stale = true })
+  ndviAdmitted.value = false
+  admissionLoading.value = !!id
+  if (!id) return
+  try {
+    const detail = await getImageDetailApi(id)
+    const admission = JSON.parse(detail.metadataJson || '{}').admission
+    if (!stale) ndviAdmitted.value = admission?.status === 'PASSED' && admission?.validatorVersion === 'input-v1'
+  } catch {
+    if (!stale) ndviAdmitted.value = false
+  } finally {
+    if (!stale) admissionLoading.value = false
+  }
+})
 const beforeImage = computed(() => readyImages.value.find((item) => item.id === form.beforeImageId))
 const selectedTaskSupported = computed(() => canRunTaskType(form.taskType))
 const selectedBandMappingText = computed(() => formatBandMapping(selectedImage.value))
@@ -194,7 +229,7 @@ const selectedSupportedTaskText = computed(() => formatSupportedTasks(selectedIm
 
 const paramsPreview = computed(() => {
   if (selectedImage.value && !selectedTaskSupported.value) {
-    return '当前影像缺少该任务所需的可信波段映射，不能提交。'
+    return '影像缺少可信波段映射或 NDVI 标准化准入，请查看影像详情。'
   }
   const payload = buildPayload(false)
   return JSON.stringify(payload || {}, null, 2)
@@ -215,7 +250,26 @@ watch(selectedImage, () => {
 
 onMounted(() => {
   loadReadyImages()
+  loadRegions()
 })
+
+async function loadRegions() {
+  try {
+    monitoringRegions.value = await listMonitoringRegionsApi()
+    if (route.query.monitoringRegionId === undefined) return
+    const id = Number(route.query.monitoringRegionId)
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid region ID')
+    // 从旧区域链接进入时，不因它落在最近 100 条之外而静默改成整幅统计。
+    if (!monitoringRegions.value.some(region => region.id === id)) {
+      monitoringRegions.value.unshift(await getMonitoringRegionApi(id))
+    }
+    monitoringRegionId.value = id
+  } catch {
+    regionSelectionError.value = '区域加载失败，已阻止提交。请重新选择已保存区域或刷新页面。'
+  } finally {
+    regionLoading.value = false
+  }
+}
 
 async function loadReadyImages() {
   imageLoading.value = true
@@ -239,6 +293,7 @@ function handleImageChange() {
 
 /** 判断当前选中影像是否支持指定处理任务。 */
 function canRunTaskType(taskType: TaskType) {
+  if (taskType === 'NDVI' && selectedImage.value && !ndviAdmitted.value) return false
   if (taskType === 'CHANGE_DETECTION') {
     return true
   }
@@ -315,6 +370,11 @@ function buildPayload(strict: boolean): TaskSubmitParams | null {
     return null
   }
 
+  if (strict && form.taskType === 'NDVI' && (regionLoading.value || regionSelectionError.value)) {
+    ElMessage.warning('请等待区域加载完成并确认统计范围')
+    return null
+  }
+
   if (strict && !selectedTaskSupported.value) {
     ElMessage.warning('当前影像缺少可信波段映射，不能提交该类型任务')
     return null
@@ -323,6 +383,7 @@ function buildPayload(strict: boolean): TaskSubmitParams | null {
   if (form.taskType === 'NDVI') {
     return {
       imageId: form.imageId,
+      monitoringRegionId: monitoringRegionId.value,
       taskType: form.taskType,
       params: {
         redBand: form.redBand,

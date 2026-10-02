@@ -49,6 +49,22 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 @ExtendWith(MockitoExtension.class)
 class RsTaskServiceImplTest {
 
+    @Test
+    void unverifiedImageCannotSubmitEvenWithForgedSnapshot() {
+        RsImage image = readyImage(10L, "user-a", "raw/test.tif");
+        image.setMetadataJson(trustedFourBandMetadata().replace("\"PASSED\"", "\"UNVERIFIED\""));
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setParams(Map.of("redBand", 3, "nirBand", 4, "inputSnapshot", Map.of("status", "PASSED")));
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(image);
+        assertThatThrownBy(() -> service.submit(dto)).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("标准化");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
     private com.fasterxml.jackson.databind.node.ObjectNode baselineMetadata() throws Exception {
         return (com.fasterxml.jackson.databind.node.ObjectNode) new ObjectMapper().readTree("""
                 {"schemaVersion":1,"algorithm":"NDVI","scope":"cropped_raster",
@@ -143,6 +159,8 @@ class RsTaskServiceImplTest {
     private PlatformTransactionManager transactionManager;
 
     private RsTaskServiceImpl service;
+    @Mock
+    private com.remotesensing.platform.service.MonitoringRegionService monitoringRegions;
 
     @BeforeEach
     void setUp() {
@@ -161,7 +179,8 @@ class RsTaskServiceImplTest {
                 geoServerService,
                 minioService,
                 transactionManager,
-                currentUserContext
+                currentUserContext,
+                monitoringRegions
         );
     }
 
@@ -197,6 +216,7 @@ class RsTaskServiceImplTest {
         ArgumentCaptor<RsTask> taskCaptor = ArgumentCaptor.forClass(RsTask.class);
         verify(taskMapper).insert(taskCaptor.capture());
         assertThat(taskCaptor.getValue().getClientRequestId()).isEqualTo("submit-001");
+        assertThat(taskCaptor.getValue().getParams()).contains("inputSnapshot", "ndvi-v1", "unit-test-only");
         verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), any(RemoteSensingTaskMessage.class));
         verify(messageOutboxService).publishById(99L);
     }
@@ -656,6 +676,47 @@ class RsTaskServiceImplTest {
         return 1;
     }
 
+    @Test
+    void regionalSubmitUsesServerSnapshotForTaskAndMessage() throws Exception {
+        RsImage image = readyImage(10L, "owner", "raw/input.tif");
+        image.setMetadataJson(trustedFourBandMetadata());
+        when(currentUserContext.getCurrentUserId()).thenReturn("owner");
+        when(imageMapper.selectAccessibleById(10L, "owner")).thenReturn(image);
+        var snapshot = new ObjectMapper().readTree("{\"regionId\":7,\"version\":2,\"name\":\"server\"}");
+        when(monitoringRegions.snapshot(7L)).thenReturn((com.fasterxml.jackson.databind.node.ObjectNode) snapshot);
+        when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
+        when(taskMapper.insert(any())).thenAnswer(this::fillTaskId);
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setMonitoringRegionId(7L);
+        dto.setParams(Map.of("regionSnapshot", Map.of("name", "forged")));
+        service.submit(dto);
+        var captor = ArgumentCaptor.forClass(RsTask.class);
+        verify(taskMapper).insert(captor.capture());
+        assertThat(new ObjectMapper().readTree(captor.getValue().getParams()).get("regionSnapshot"))
+                .isEqualTo(snapshot);
+        var message = ArgumentCaptor.forClass(RemoteSensingTaskMessage.class);
+        verify(messageOutboxService).createTaskMessage(any(), message.capture());
+        assertThat(message.getValue().getParams().get("regionSnapshot")).isEqualTo(snapshot);
+    }
+
+    @Test
+    void unauthorizedRegionCannotCreateTaskOrLockImage() {
+        RsImage image = readyImage(10L, "owner", "raw/input.tif");
+        image.setMetadataJson(trustedFourBandMetadata());
+        when(currentUserContext.getCurrentUserId()).thenReturn("owner");
+        when(imageMapper.selectAccessibleById(10L, "owner")).thenReturn(image);
+        when(monitoringRegions.snapshot(7L)).thenThrow(new BusinessException(400, "区域不存在或无权访问"));
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L); dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setMonitoringRegionId(7L);
+        assertThatThrownBy(() -> service.submit(dto)).hasMessageContaining("无权访问");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+        verify(messageOutboxService, never()).createTaskMessage(any(), any());
+    }
+
     private RsTask task(Long id, String ownerId, String status, String outputObjectKey) {
         RsTask task = new RsTask();
         task.setId(id);
@@ -684,6 +745,8 @@ class RsTaskServiceImplTest {
         return """
                 {
                   "bandCount": 4,
+                  "admission": {"status":"PASSED","validatorVersion":"input-v1",
+                    "manifest":{"sourceId":"unit-test-only","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
                   "bandMapping": {
                     "blue": 1,
                     "green": 2,

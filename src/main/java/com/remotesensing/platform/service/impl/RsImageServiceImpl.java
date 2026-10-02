@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.InputAdmission;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
@@ -132,6 +133,10 @@ public class RsImageServiceImpl implements RsImageService {
         }
 
         RsImage image = toEntity(createDTO);
+        // 客户端元数据不能声明服务器准入；保留其它用户字段。
+        ObjectNode suppliedMetadata = parseMetadataObject(image.getMetadataJson());
+        suppliedMetadata.remove("admission");
+        image.setMetadataJson(suppliedMetadata.toString());
         image.setOwnerId(currentUserContext.getCurrentUserId());
         image.setVisibility(Visibility.PRIVATE.dbValue());
         try {
@@ -174,6 +179,24 @@ public class RsImageServiceImpl implements RsImageService {
                             String sensor,
                             OffsetDateTime captureTime,
                             BigDecimal cloudPercent) {
+        return uploadInternal(file, name, sensor, captureTime, cloudPercent, null);
+    }
+
+    @Override
+    public RsImageVO uploadStandardized(MultipartFile file, MultipartFile manifest, String name) {
+        if (manifest == null || manifest.isEmpty() || manifest.getSize() > InputAdmission.MAX_MANIFEST_BYTES) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "来源 JSON 必须为 1~65536 字节");
+        }
+        try (var stream = manifest.getInputStream()) {
+            byte[] bytes = stream.readNBytes(InputAdmission.MAX_MANIFEST_BYTES + 1);
+            return uploadInternal(file, name, "Sentinel-2", null, null, bytes);
+        } catch (IOException e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "无法读取来源 JSON");
+        }
+    }
+
+    private RsImageVO uploadInternal(MultipartFile file, String name, String sensor,
+                                    OffsetDateTime captureTime, BigDecimal cloudPercent, byte[] manifest) {
         if (name == null || name.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像名称不能为空");
         }
@@ -190,6 +213,11 @@ public class RsImageServiceImpl implements RsImageService {
             GeoTiffMetadataVO metadata = imageBandCapabilityService.enrichMetadata(
                     geoTiffMetadataService.parse(localFile.filePath())
             );
+            metadata.setAdmission(null);
+            if (manifest != null) {
+                metadata.setAdmission(InputAdmission.validate(manifest, localFile.filePath(), metadata));
+                captureTime = OffsetDateTime.parse(metadata.getAdmission().path("manifest").path("captureTime").asText());
+            }
             uploadVO = minioService.uploadGeoTiff(localFile.filePath(), localFile.originalFilename(), localFile.contentType());
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
             image.setOwnerId(currentUserContext.getCurrentUserId());
@@ -379,6 +407,11 @@ public class RsImageServiceImpl implements RsImageService {
         Map<String, Integer> mapping = buildUserBandMapping(updateDTO);
         validateBandMapping(mapping, image.getBandCount());
         String metadataJson = buildUserConfirmedMetadataJson(image.getMetadataJson(), mapping);
+        ObjectNode updatedMetadata = parseMetadataObject(metadataJson);
+        ObjectNode admission = updatedMetadata.putObject("admission");
+        admission.put("status", "UNVERIFIED");
+        admission.put("reason", "波段配置已修改，请重新上传标准化影像包");
+        metadataJson = updatedMetadata.toString();
 
         int updated = imageMapper.updateMetadataJson(id, currentUserId, metadataJson);
         if (updated <= 0) {

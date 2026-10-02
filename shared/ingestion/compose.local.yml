@@ -1,0 +1,5 @@
+services:
+  backend:
+    image: rs-ingestion-backend:local
+  python-worker:
+    image: rs-ingestion-worker:local

@@ -1,0 +1,4 @@
+# 联调备选：先用 baseline/Dockerfile.backend 复制新 jar，再更新后端解析脚本。
+ARG RUNTIME_IMAGE=rs-ingestion-jar:local
+FROM ${RUNTIME_IMAGE}
+COPY . /app/python-worker/scripts

@@ -229,6 +229,10 @@ def parse_metadata(file_path):
             "width": dataset.width,
             "height": dataset.height,
             "bandCount": dataset.count,
+            "inputUnits": dataset.tags().get("input_units"),
+            "dtypes": list(dataset.dtypes),
+            "scales": list(dataset.scales),
+            "offsets": list(dataset.offsets),
             "crs": dataset.crs.to_string() if dataset.crs else None,
             "originalBounds": bounds_to_dict(raw_bounds) if dataset.crs else None,
             # 后端 footprint 字段固定为 geometry(Polygon, 4326)，这里统一输出 WGS84 范围。

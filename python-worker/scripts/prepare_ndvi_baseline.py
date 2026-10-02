@@ -7,6 +7,7 @@ SCL 使用最近邻对齐，保留类别 4/5/6/7；不把质量掩膜当植被�
 import argparse
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -35,11 +36,20 @@ def write_stack(path, data, crs, transform, provenance):
         output.descriptions = BAND_NAMES
         output.update_tags(input_units="surface_reflectance", baseline_scope="cropped_raster")
     provenance.update({
+        "schemaVersion": 1,
+        "productType": "SYNTHETIC" if provenance.get("case") else "SENTINEL2_L2A",
+        "preprocessingVersion": "s2-reflectance-v1",
+        "inputUnits": "surface_reflectance",
         "bandOrder": list(BAND_NAMES), "scope": "cropped_raster",
-        "crs": str(crs), "transform": list(transform),
+        "crs": str(crs), "transform": list(transform)[:6],
         "width": data.shape[2], "height": data.shape[1],
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     })
+    if "calibration" not in provenance and "scale" in provenance and "offset" in provenance:
+        provenance["calibration"] = {
+            band: {"scale": provenance["scale"], "offset": provenance["offset"]}
+            for band in ("blue", "green", "red", "nir")
+        }
     manifest.write_text(json.dumps(provenance, indent=2, allow_nan=False), encoding="utf-8")
 
 
@@ -64,6 +74,8 @@ def prepare_real(args):
     paths = [args.blue, args.green, args.red, args.nir]
     if not all(paths) or not args.scl or args.scale is None or args.offset is None or not args.source_id:
         raise ValueError("Real mode requires four bands, SCL, scale, offset and source-id")
+    if not args.capture_time or datetime.fromisoformat(args.capture_time.replace("Z", "+00:00")).tzinfo is None:
+        raise ValueError("capture-time with timezone is required")
     if not np.isfinite([args.scale, args.offset]).all() or args.scale <= 0:
         raise ValueError("scale must be positive and scale/offset must be finite")
     col, row, width, height = args.window

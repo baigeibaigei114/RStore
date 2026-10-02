@@ -142,6 +142,7 @@ export interface ImageDetail extends ImageListItem {
 
 /** 影像上传参数 */
 export interface ImageUploadParams {
+  manifest?: File
   /** 上传的文件对象 */
   file: File
   /** 影像名称 */

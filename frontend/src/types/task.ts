@@ -8,6 +8,7 @@ export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'RETRYIN
 export interface TaskSubmitParams {
   /** 待处理的影像 ID */
   imageId: number
+  monitoringRegionId?: number
   /** 解译任务类型 */
   taskType: TaskType
   /** 可选的自定义参数，不同类型任务可能有额外配置 */

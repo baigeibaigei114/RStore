@@ -3,8 +3,8 @@
     <div class="brand">
       <div class="brand-mark">遥感</div>
       <div v-if="!appStore.sidebarCollapsed" class="brand-text">
-        <strong>遥感影像平台</strong>
-        <span>资产管理与智能解译</span>
+        <strong>区域植被监测平台</strong>
+        <span>遥感分析与报告</span>
       </div>
     </div>
 

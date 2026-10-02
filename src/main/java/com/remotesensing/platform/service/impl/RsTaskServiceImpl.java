@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.NdviMetadataValidator;
+import com.remotesensing.platform.common.InputAdmission;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
@@ -28,6 +29,7 @@ import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.ImageBandCapabilityService;
 import com.remotesensing.platform.service.MessageOutboxService;
+import com.remotesensing.platform.service.MonitoringRegionService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
@@ -102,6 +104,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private final MinioService minioService;
     private final TransactionTemplate transactionTemplate;
     private final CurrentUserContext currentUserContext;
+    private final MonitoringRegionService monitoringRegions;
 
     public RsTaskServiceImpl(RsImageMapper imageMapper,
                              RsTaskMapper taskMapper,
@@ -115,7 +118,8 @@ public class RsTaskServiceImpl implements RsTaskService {
                              GeoServerService geoServerService,
                              MinioService minioService,
                              PlatformTransactionManager transactionManager,
-                             CurrentUserContext currentUserContext) {
+                             CurrentUserContext currentUserContext,
+                             MonitoringRegionService monitoringRegions) {
         this.imageMapper = imageMapper;
         this.taskMapper = taskMapper;
         this.taskLogMapper = taskLogMapper;
@@ -129,6 +133,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         this.minioService = minioService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.currentUserContext = currentUserContext;
+        this.monitoringRegions = monitoringRegions;
     }
 
     /**
@@ -344,10 +349,25 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
         }
         Map<String, Object> taskParams = ensureMutableParams(submitDTO);
+        // 该字段只能由服务器生成，防止客户端伪造追溯信息。
+        taskParams.remove("inputSnapshot");
+        taskParams.remove("regionSnapshot");
+        if (submitDTO.getMonitoringRegionId() != null
+                && (submitDTO.getTaskType() != RemoteSensingTaskMessage.TaskType.NDVI
+                    || submitDTO.getMonitoringRegionId() <= 0)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "监测区域仅支持 NDVI，区域 ID 必须为正整数");
+        }
         if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION) {
             validateAndFillChangeDetectionParams(image, currentUserId, taskParams);
         } else {
             imageBandCapabilityService.validateAndFillTaskParams(image, submitDTO.getTaskType(), taskParams);
+        }
+
+        if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.NDVI) {
+            taskParams.put("inputSnapshot", InputAdmission.snapshot(image.getMetadataJson(), image.getId(), taskParams));
+            if (submitDTO.getMonitoringRegionId() != null) {
+                taskParams.put("regionSnapshot", monitoringRegions.snapshot(submitDTO.getMonitoringRegionId()));
+            }
         }
 
         // 第三步：CAS 式状态变更（READY -> PROCESSING）。使用 UPDATE ... WHERE status='READY' 保证
@@ -613,6 +633,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (targetStatus == TaskStatus.SUCCESS) {
             NdviMetadataValidator.validate(
                     updateDTO.getResultMetadata(), task.getTaskType());
+            NdviMetadataValidator.validateTaskRegion(updateDTO.getResultMetadata(), task.getParams());
         }
         if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");

@@ -99,7 +99,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
           loadAuthorizedImageTile(tile, src, options.authToken)
         },
       }),
-      opacity: options.opacity ?? 0.75,
+      opacity: options.opacity ?? 1,
       zIndex: 10,
     })
 
@@ -115,6 +115,10 @@ export function useOlMap(options: UseOlMapOptions = {}) {
 
   function updateWmsOpacity(opacity: number) {
     wmsLayer.value?.setOpacity(opacity)
+  }
+
+  function setBaseLayerVisible(visible: boolean) {
+    baseLayer.value?.setVisible(visible)
   }
 
   function resetView() {
@@ -177,6 +181,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     addWmsLayer,
     removeWmsLayer,
     updateWmsOpacity,
+    setBaseLayerVisible,
     resetView,
     destroyMap,
   }

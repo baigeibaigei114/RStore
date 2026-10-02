@@ -1,0 +1,5 @@
+services:
+  backend:
+    image: rs-regions-backend:local
+  python-worker:
+    image: rs-regions-worker:local

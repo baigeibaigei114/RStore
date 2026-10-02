@@ -14,6 +14,42 @@ from utils.ndvi_baseline import calculate_ndvi, process_ndvi, summarize_ndvi
 
 
 class NdviBaselineTest(unittest.TestCase):
+    def test_fixture_manifest_is_explicitly_synthetic(self):
+        manifest = json.loads(self.input.with_suffix(".json").read_text())
+        self.assertEqual(manifest["schemaVersion"], 1)
+        self.assertEqual(manifest["productType"], "SYNTHETIC")
+        self.assertEqual(len(manifest["transform"]), 6)
+
+    def test_new_snapshot_rejects_changed_input_before_output(self):
+        storage = Mock()
+        storage.object_exists.return_value = False
+        storage.download_file.side_effect = lambda bucket, key, target: shutil.copyfile(self.input, target)
+        snapshot = {"status": "PASSED", "validatorVersion": "input-v1", "algorithmVersion": "ndvi-v1",
+                    "denominatorTolerance": 1e-6, "manifest": {"sha256": "0" * 64}}
+        with self.assertRaisesRegex(ValueError, "SHA256"):
+            process_ndvi(storage, self.root / "work", {
+                "inputBucket": "b", "inputObjectKey": "in", "outputBucket": "b", "outputObjectKey": "out",
+                "params": {"inputSnapshot": snapshot}}, 3, 4)
+        storage.upload_file.assert_not_called()
+
+    def test_snapshot_bound_output_reuses_only_same_snapshot(self):
+        saved = self.root / "saved.tif"
+        manifest = json.loads(self.input.with_suffix(".json").read_text())
+        snapshot = {"status": "PASSED", "validatorVersion": "input-v1", "algorithmVersion": "ndvi-v1",
+                    "denominatorTolerance": 1e-6, "manifest": manifest}
+        storage = Mock()
+        storage.object_exists.side_effect = [False, True, True]
+        storage.download_file.side_effect = lambda bucket, key, target: shutil.copyfile(
+            self.input if key == "input" else saved, target)
+        storage.upload_file.side_effect = lambda bucket, key, source: shutil.copyfile(source, saved)
+        message = {"inputBucket": "b", "inputObjectKey": "input", "outputBucket": "b",
+                   "outputObjectKey": "output", "params": {"inputSnapshot": snapshot}}
+        first = process_ndvi(storage, self.root / "work", message, 3, 4)
+        self.assertEqual(first, process_ndvi(storage, self.root / "work", message, 3, 4))
+        snapshot["manifest"]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "snapshot"):
+            process_ndvi(storage, self.root / "work", message, 3, 4)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

@@ -120,10 +120,13 @@
           <el-empty v-else description="暂无 AI 报告，成功任务可手动生成" />
         </el-card>
 
+        <InputProvenance v-if="task?.taskType === 'NDVI'" :raw="task.params" snapshot />
         <el-card v-if="task?.taskType === 'NDVI'" class="detail-card" shadow="never">
           <template #header>NDVI 计算统计</template>
           <template v-if="ndviStatistics">
-            <p>范围：输入影像的裁剪矩形；无效像素不参与最小值、最大值和均值统计。</p>
+            <p>范围：{{ regionSnapshot ? '监测区域内像素（像素中心归属）' : '输入影像的裁剪矩形' }}；无效像素不参与最小值、最大值和均值统计。</p>
+            <el-alert v-if="regionSnapshot" type="info" :closable="false"
+              :title="`${regionSnapshot.name} · v${regionSnapshot.version} · 整区覆盖；有效比例不是植被覆盖率`" />
             <el-alert
               v-if="ndviStatistics.min < -1 || ndviStatistics.max > 1"
               title="数值超出常见 NDVI 范围，请核对输入反射率、偏移和质量掩膜；不要直接据此判断植被情况。"
@@ -141,7 +144,12 @@
               <el-descriptions-item label="平均值">{{ ndviStatistics.mean.toFixed(6) }}</el-descriptions-item>
             </el-descriptions>
           </template>
-          <el-empty v-else description="尚无可用的 v1 统计；旧任务可能未生成统计，不能将缺失值视为 0" />
+          <el-empty v-else description="尚无可用统计；旧任务可能未生成统计，不能将缺失值视为 0" />
+          <el-collapse v-if="regionSnapshot">
+            <el-collapse-item title="提交时的区域快照（不随区域编辑改变）">
+              <pre class="code-block">{{ JSON.stringify(regionSnapshot, null, 2) }}</pre>
+            </el-collapse-item>
+          </el-collapse>
         </el-card>
 
         <el-card class="detail-card" shadow="never">
@@ -246,6 +254,7 @@
 </template>
 
 <script setup lang="ts">
+import InputProvenance from '@/components/InputProvenance.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -286,12 +295,17 @@ interface NdviStatistics {
   mean: number
 }
 
+const regionSnapshot = computed(() => {
+  try { return JSON.parse(task.value?.params || '{}').regionSnapshot || null }
+  catch { return null }
+})
+
 const ndviStatistics = computed<NdviStatistics | null>(() => {
   if (!resultFile.value?.resultMetadata) return null
   try {
     const metadata = JSON.parse(resultFile.value.resultMetadata)
-    if (metadata.schemaVersion !== 1 || metadata.algorithm !== 'NDVI'
-        || metadata.scope !== 'cropped_raster') return null
+    if (![1, 2].includes(metadata.schemaVersion) || metadata.algorithm !== 'NDVI'
+        || !['cropped_raster', 'monitoring_region'].includes(metadata.scope)) return null
     const stats = metadata.statistics
     const keys = ['totalPixelCount', 'validPixelCount', 'invalidPixelCount',
       'validPixelRatio', 'min', 'max', 'mean']

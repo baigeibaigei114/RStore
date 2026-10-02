@@ -19,6 +19,8 @@ import org.springframework.web.multipart.MultipartFile;
  */
 public interface RsImageService {
 
+    RsImageVO uploadStandardized(MultipartFile file, MultipartFile manifest, String name);
+
     /**
      * 创建影像记录（不包含文件上传）。
      * 用于已通过其他方式完成文件上传后，仅入库元数据。

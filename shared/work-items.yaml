@@ -1,7 +1,7 @@
 version: 1
 project: intelligent-remote-sensing-platform
 source_spec: shared/specs/agent-rag-spec.md
-updated_at: '2026-09-17'
+updated_at: '2026-10-02'
 
 workflow:
   statuses:
@@ -53,6 +53,162 @@ milestones:
     depends_on: [M1, M2, M3, M4, M5, M6, M7]
 
 work_items:
+  - id: REGION-005
+    title: 监测区域与单期区域 NDVI 闭环
+    status: done
+    owner: codex-region
+    started_at: '2026-10-02'
+    completed_at: '2026-10-02'
+    depends_on: [INGEST-004, UI-003]
+    scope: &region_paths
+      - src/main/java/com/remotesensing/platform/controller/MonitoringRegionController.java
+      - src/main/java/com/remotesensing/platform/service/MonitoringRegionService.java
+      - src/main/java/com/remotesensing/platform/mapper/MonitoringRegionMapper.java
+      - src/main/java/com/remotesensing/platform/dto/MonitoringRegionDTO.java
+      - src/main/java/com/remotesensing/platform/vo/MonitoringRegionVO.java
+      - src/main/java/com/remotesensing/platform/dto/RsTaskSubmitDTO.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsTaskServiceImpl.java
+      - src/main/java/com/remotesensing/platform/common/NdviMetadataValidator.java
+      - src/main/resources/db/upgrade/20261002_monitoring_region.sql
+      - src/test/java/com/remotesensing/platform/service/MonitoringRegionServiceTest.java
+      - src/test/java/com/remotesensing/platform/common/NdviMetadataValidatorTest.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsTaskServiceImplTest.java
+      - python-worker/utils/region_mask.py
+      - python-worker/utils/ndvi_baseline.py
+      - python-worker/tests/test_region_ndvi.py
+      - frontend/src/api/monitoringRegion.ts
+      - frontend/src/components/MonitoringRegionPanel.vue
+      - frontend/src/views/MapViewerView.vue
+      - frontend/src/views/TaskCreateView.vue
+      - frontend/src/views/TaskDetailView.vue
+      - frontend/src/types/task.ts
+      - shared/regions/**
+      - output/playwright/**
+      - shared/work-items.yaml
+      - shared/decision-log.md
+      - README.md
+    claimed_paths: *region_paths
+    acceptance:
+      - 私有区域保存、查看、更新均有权限约束
+      - 任务使用服务器区域快照，拒绝非完整覆盖，区域外不计入统计
+      - 确定性测试与真实服务端到端验证，记录未执行验证
+    validation:
+      status: passed
+      completed_at: '2026-10-02'
+      commands:
+        - Maven 9 类定向测试与 package
+        - python -m unittest discover -s tests -v
+        - docker exec rs-python-worker python -m unittest discover -s tests -v
+        - npm run build
+        - docker compose -f docker-compose.yml -f shared/regions/compose.local.yml config --quiet
+        - python shared/regions/verify_e2e.py
+        - python shared/regions/verify_readonly.py --task-id 24
+        - Playwright 桌面浏览器绘制保存与提交验证
+        - YAML、Markdown 链接与 git diff --check
+      notes: Java77、Worker本机与容器各22通过；API任务22成功/23部分覆盖失败，浏览器任务24成功；迁移与重复执行通过。
+    handoff:
+      document: shared/regions/handoff.md
+      remaining: 专业软件对照、完整移动端与触屏、双账号浏览器验收、租约恢复、多期分析。
+  - id: INGEST-004
+    title: 标准化影像入库、NDVI 准入与快照
+    status: done
+    owner: codex-ingestion
+    started_at: '2026-09-17'
+    completed_at: '2026-09-17'
+    acceptance:
+      - 错误包拒绝且普通输入不可绕过 NDVI 准入
+      - 来源与任务快照可追溯，波段修改不改变历史依据
+      - 真实公开样本通过上传、计算及独立数值比对
+    validation:
+      status: passed
+      commands:
+        - Maven InputAdmission / RsImage / RsTask / ImageBand 定向测试
+        - python -m unittest discover -s tests -v
+        - docker exec rs-python-worker python -m unittest discover -s tests -v
+        - npm run build
+        - python shared/ingestion/verify_e2e.py
+        - git diff --check
+      notes: Java57、Worker16、本地公开校准1通过；最终E2E影像30任务21通过。浏览器未实测。
+    handoff:
+      document: shared/ingestion/handoff.md
+      remaining: 浏览器交互验收；旧资产在线认证、区域统计和租约恢复不在本轮范围。
+    claimed_paths:
+      - python-worker/scripts/**
+      - python-worker/utils/ndvi_baseline.py
+      - python-worker/tests/**
+      - src/main/java/com/remotesensing/platform/common/InputAdmission.java
+      - src/main/java/com/remotesensing/platform/vo/GeoTiffMetadataVO.java
+      - src/main/java/com/remotesensing/platform/controller/RsImageController.java
+      - src/main/java/com/remotesensing/platform/service/RsImageService.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsImageServiceImpl.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsTaskServiceImpl.java
+      - src/test/java/com/remotesensing/platform/common/InputAdmissionTest.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsImageServiceImplTest.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsTaskServiceImplTest.java
+      - frontend/src/api/image.ts
+      - frontend/src/types/image.ts
+      - frontend/src/views/ImageUploadView.vue
+      - frontend/src/views/ImageDetailView.vue
+      - frontend/src/views/TaskDetailView.vue
+      - frontend/src/views/TaskCreateView.vue
+      - frontend/src/components/InputProvenance.vue
+      - shared/ingestion/**
+      - shared/decision-log.md
+      - shared/work-items.yaml
+      - README.md
+    depends_on: [BASELINE-001]
+    scope:
+      - python-worker/scripts/**
+      - python-worker/utils/ndvi_baseline.py
+      - python-worker/tests/**
+      - src/main/java/com/remotesensing/platform/common/InputAdmission.java
+      - src/main/java/com/remotesensing/platform/vo/GeoTiffMetadataVO.java
+      - src/main/java/com/remotesensing/platform/controller/RsImageController.java
+      - src/main/java/com/remotesensing/platform/service/RsImageService.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsImageServiceImpl.java
+      - src/main/java/com/remotesensing/platform/service/impl/RsTaskServiceImpl.java
+      - src/test/java/com/remotesensing/platform/common/InputAdmissionTest.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsImageServiceImplTest.java
+      - src/test/java/com/remotesensing/platform/service/impl/RsTaskServiceImplTest.java
+      - frontend/src/api/image.ts
+      - frontend/src/types/image.ts
+      - frontend/src/views/ImageUploadView.vue
+      - frontend/src/views/ImageDetailView.vue
+      - frontend/src/views/TaskDetailView.vue
+      - frontend/src/views/TaskCreateView.vue
+      - frontend/src/components/InputProvenance.vue
+      - shared/ingestion/**
+      - shared/decision-log.md
+      - shared/work-items.yaml
+      - README.md
+  - id: UI-003
+    title: 地图定位、面板开关与影像查看模式
+    status: done
+    owner: codex-map-ui
+    started_at: '2026-09-17'
+    completed_at: '2026-09-17'
+    validation:
+      status: passed
+      commands: [npm run build, git diff --check]
+      notes: 类型检查与构建通过；未运行浏览器交互及真实 WMS 回归。
+    handoff:
+      document: shared/map-viewer-handoff.md
+      remaining: 按交接清单执行浏览器验收，手动外部 WMS 不支持定位。
+    claimed_paths:
+      - frontend/src/components/layout/AppSidebar.vue
+      - frontend/src/views/LoginView.vue
+      - frontend/src/views/MapViewerView.vue
+      - frontend/src/composables/map/useOlMap.ts
+      - shared/work-items.yaml
+      - shared/map-viewer-handoff.md
+    depends_on: [DOCS-002]
+    scope:
+      - frontend/src/components/layout/AppSidebar.vue
+      - frontend/src/views/LoginView.vue
+      - frontend/src/views/MapViewerView.vue
+      - frontend/src/composables/map/useOlMap.ts
+      - shared/work-items.yaml
+      - shared/map-viewer-handoff.md
   - id: DOCS-002
     milestone: null
     title: 同步植被监测项目名称与 NDVI 基线文档
