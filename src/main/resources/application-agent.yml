@@ -1,0 +1,7 @@
+# Explicit opt-in. No provider key, JWT or infrastructure credentials are forwarded.
+app:
+  agent:
+    enabled: ${AGENT_ENABLED:false}
+    base-url: ${AGENT_BASE_URL:http://agent-service:8000}
+    internal-token: ${AGENT_INTERNAL_TOKEN:}
+    model: ${DEEPSEEK_MODEL:deepseek-v4-flash}

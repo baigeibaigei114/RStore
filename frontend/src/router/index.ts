@@ -10,6 +10,7 @@ import SpatialQueryView from '@/views/SpatialQueryView.vue'
 import TaskCreateView from '@/views/TaskCreateView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
 import TaskListView from '@/views/TaskListView.vue'
+import AgentView from '@/views/AgentView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -26,6 +27,7 @@ const router = createRouter({
       component: AppLayout,
       redirect: '/dashboard',
       children: [
+        { path: 'agent', name: 'Agent', component: AgentView, meta: { title: 'NDVI助手', activeMenu: '/agent' } },
         {
           path: 'dashboard',
           name: 'Dashboard',
@@ -87,8 +89,8 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   document.title = to.meta.title
-    ? `${String(to.meta.title)} - 遥感影像平台`
-    : '遥感影像智能解译与时空资产管理平台'
+    ? `${String(to.meta.title)} - 区域植被监测平台`
+    : '面向区域植被监测的遥感分析与报告平台'
 
   const authStore = useAuthStore()
 

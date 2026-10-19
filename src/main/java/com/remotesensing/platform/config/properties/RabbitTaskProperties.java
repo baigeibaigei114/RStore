@@ -12,6 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties(prefix = "rabbitmq.remote-sensing-task")
 public class RabbitTaskProperties {
+    /** 活跃执行的续租期限，最小30秒。 */
+    private Integer leaseSeconds = 120;
 
     /** 遥感任务交换器名称。 */
     private String exchange;

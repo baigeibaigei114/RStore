@@ -8,6 +8,12 @@ import type { ApiResult } from '@/types/api'
  */
 export const TOKEN_KEY = 'rs_access_token'
 
+/** Preserve a definite business rejection so controlled writes can distinguish it from an unknown outcome. */
+export class ApiError extends Error {
+  code: number
+  constructor(code: number, message: string) { super(message); this.name = 'ApiError'; this.code = code }
+}
+
 /**
  * 扩展 Axios 请求配置，支持 silentError 选项
  * 当 silentError 为 true 时，响应/请求异常不会弹出全局错误提示
@@ -70,7 +76,7 @@ request.interceptors.response.use(
         if (!config.silentError) {
           ElMessage.error(message)
         }
-        return Promise.reject(new Error(message))
+        return Promise.reject(new ApiError(body.code, message))
       }
 
       return body.data

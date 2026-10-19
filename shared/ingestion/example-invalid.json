@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 99,
+  "productType": "SENTINEL2_L2A",
+  "note": "Deliberately invalid example: unsupported version and missing required fields"
+}

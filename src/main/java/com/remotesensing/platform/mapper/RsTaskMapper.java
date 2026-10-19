@@ -136,13 +136,39 @@ public interface RsTaskMapper {
                                @Param("errorMessage") String errorMessage);
 
     /**
-     * Worker 领取任务：将 PENDING 状态的任务更新为 PROCESSING。
-     * 通过 WHERE status='PENDING' 条件保证并发安全，只有一个 Worker 能领取成功。
+     * Worker 领取 PENDING/RETRYING 任务，分配独立执行标识、输出键和租约。
+     * 条件更新限制执行预算；调用者必须在事务中持有任务行锁。
      *
      * @param id 任务主键
      * @return 受影响行数（0 表示已被其他 Worker 领取）
      */
-    int claimForRunning(@Param("id") Long id);
+    int claimForRunning(@Param("id") Long id, @Param("attemptId") String attemptId,
+                        @Param("outputObjectKey") String outputObjectKey, @Param("leaseSeconds") int leaseSeconds);
+
+    @org.apache.ibatis.annotations.Select("""
+        SELECT id, owner_id, client_request_id, task_code, image_id, task_type, task_name,
+            status, priority, progress, retry_count, max_retry_count, output_bucket,
+            output_object_key, params::text AS params, error_message, submitted_at,
+            started_at, finished_at, created_at, updated_at, attempt_id, attempt_count, lease_until
+        FROM rs_task WHERE id=#{id} FOR UPDATE
+        """)
+    RsTask selectByIdForUpdate(@Param("id") Long id);
+
+    @org.apache.ibatis.annotations.Update("""
+        UPDATE rs_task SET lease_until=clock_timestamp() + (#{seconds} * INTERVAL '1 second'),
+            updated_at=clock_timestamp()
+        WHERE id=#{id} AND status='RUNNING' AND attempt_id=#{attemptId}
+          AND lease_until > clock_timestamp()
+        """)
+    int renewLease(@Param("id") Long id, @Param("attemptId") String attemptId, @Param("seconds") int seconds);
+
+    @org.apache.ibatis.annotations.Select("""
+        SELECT id FROM rs_task
+        WHERE (status='RUNNING' AND lease_until <= clock_timestamp())
+           OR (status IN ('PENDING','RETRYING') AND attempt_count >= max_retry_count)
+        ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED
+        """)
+    java.util.List<Long> selectExpiredTasks();
 
     /**
      * 统计指定影像下处于活跃状态（非终态）的任务数量。

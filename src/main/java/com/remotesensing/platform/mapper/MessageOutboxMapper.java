@@ -13,6 +13,22 @@ import org.apache.ibatis.annotations.Param;
  */
 @Mapper
 public interface MessageOutboxMapper {
+    @org.apache.ibatis.annotations.Select("""
+        SELECT o.id, o.aggregate_id FROM message_outbox o
+        WHERE retry_count >= max_retry_count AND next_retry_at <= clock_timestamp()
+          AND (status='SENDING' OR (status='FAILED' AND EXISTS
+              (SELECT 1 FROM rs_task t WHERE t.id=o.aggregate_id AND t.status IN ('PENDING','RETRYING'))))
+        ORDER BY o.id LIMIT 100 FOR UPDATE SKIP LOCKED
+        """)
+    List<MessageOutbox> selectExhausted();
+
+    @org.apache.ibatis.annotations.Update("""
+        UPDATE message_outbox SET status='FAILED', error_message='发布确认超时或发送预算耗尽',
+            updated_at=clock_timestamp()
+        WHERE id=#{id} AND status='SENDING' AND retry_count >= max_retry_count
+          AND next_retry_at <= clock_timestamp()
+        """)
+    int exhaustSending(@Param("id") Long id);
 
     /**
      * 插入一条发件箱记录。

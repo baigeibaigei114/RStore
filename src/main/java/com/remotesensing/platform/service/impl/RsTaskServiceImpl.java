@@ -3,6 +3,10 @@ package com.remotesensing.platform.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.NdviMetadataValidator;
+import com.remotesensing.platform.common.InputAdmission;
+import com.remotesensing.platform.common.TaskSubmissionIntent;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
@@ -27,6 +31,7 @@ import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.GeoServerService;
 import com.remotesensing.platform.service.ImageBandCapabilityService;
 import com.remotesensing.platform.service.MessageOutboxService;
+import com.remotesensing.platform.service.MonitoringRegionService;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.service.RsTaskService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
@@ -101,6 +106,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private final MinioService minioService;
     private final TransactionTemplate transactionTemplate;
     private final CurrentUserContext currentUserContext;
+    private final MonitoringRegionService monitoringRegions;
 
     public RsTaskServiceImpl(RsImageMapper imageMapper,
                              RsTaskMapper taskMapper,
@@ -114,7 +120,8 @@ public class RsTaskServiceImpl implements RsTaskService {
                              GeoServerService geoServerService,
                              MinioService minioService,
                              PlatformTransactionManager transactionManager,
-                             CurrentUserContext currentUserContext) {
+                             CurrentUserContext currentUserContext,
+                             MonitoringRegionService monitoringRegions) {
         this.imageMapper = imageMapper;
         this.taskMapper = taskMapper;
         this.taskLogMapper = taskLogMapper;
@@ -128,6 +135,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         this.minioService = minioService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.currentUserContext = currentUserContext;
+        this.monitoringRegions = monitoringRegions;
     }
 
     /**
@@ -147,12 +155,17 @@ public class RsTaskServiceImpl implements RsTaskService {
      */
     @Override
     public RsTaskSubmitVO submit(RsTaskSubmitDTO submitDTO) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Use the transaction preparation entry point inside a transaction");
+        }
+        JsonNode intent = TaskSubmissionIntent.from(submitDTO);
         // 第一阶段：事务内完成所有数据变更。
         PreparedTask preparedTask;
         try {
-            preparedTask = transactionTemplate.execute(status -> prepareTask(submitDTO));
-        } catch (DuplicateKeyException exception) {
-            return resolveDuplicateSubmit(submitDTO, exception);
+            preparedTask = transactionTemplate.execute(status -> prepareTask(submitDTO, intent));
+        } catch (DuplicateKeyException | BusinessException exception) {
+            // 唯一索引或影像状态竞争均可能先于重复请求查询完成。
+            return resolveDuplicateSubmit(submitDTO, intent, exception);
         }
         if (preparedTask == null) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "任务提交失败：事务未返回任务信息");
@@ -163,6 +176,35 @@ public class RsTaskServiceImpl implements RsTaskService {
             publishTaskMessage(preparedTask);
         }
         return new RsTaskSubmitVO(preparedTask.task().getId());
+    }
+
+    @Override
+    public RsTask prepareSubmissionInCurrentTransaction(RsTaskSubmitDTO dto, RsImage lockedImage,
+                                                        com.fasterxml.jackson.databind.node.ObjectNode region) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("Task preparation requires the caller's transaction");
+        }
+        if (lockedImage == null || region == null || dto.getMonitoringRegionId() == null || !lockedImage.getId().equals(dto.getImageId())
+                || !region.path("regionId").isIntegralNumber()
+                || region.path("regionId").longValue() != dto.getMonitoringRegionId()
+                || !("PUBLIC".equals(lockedImage.getVisibility())
+                    || currentUserContext.getCurrentUserId().equals(lockedImage.getOwnerId()))
+                || lockedImage.getDeletedAt() != null) {
+            throw new BusinessException(409, "确认资源与提交意图不一致");
+        }
+        PreparedTask prepared = prepareTask(dto, TaskSubmissionIntent.from(dto), lockedImage, region);
+        if (prepared.publishRequired()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    // A different thread has no completed transaction resources. The durable
+                    // Outbox scheduler also handles a full queue or a process stopping here.
+                    if (!com.remotesensing.platform.agent.TaskOutboxDispatch.offer(() -> publishTaskMessage(prepared)))
+                        log.warn("Outbox post-commit queue full; persistent compensation taskId={}", prepared.task().getId());
+                }
+            });
+        }
+        return prepared.task();
     }
 
     /**
@@ -324,17 +366,24 @@ public class RsTaskServiceImpl implements RsTaskService {
      * @param submitDTO 任务提交参数
      * @return 准备好的任务数据（任务实体 + 输出路径 + Outbox ID）
      */
-    private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO) {
+    private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO, JsonNode intent) {
+        return prepareTask(submitDTO, intent, null, null);
+    }
+
+    private PreparedTask prepareTask(RsTaskSubmitDTO submitDTO, JsonNode intent, RsImage lockedImage,
+                                     com.fasterxml.jackson.databind.node.ObjectNode lockedRegion) {
         String currentUserId = currentUserContext.getCurrentUserId();
         String clientRequestId = normalizeClientRequestId(submitDTO.getClientRequestId());
         if (!isBlank(clientRequestId)) {
             RsTask existingTask = taskMapper.selectByOwnerAndClientRequestId(currentUserId, clientRequestId);
             if (existingTask != null) {
+                TaskSubmissionIntent.requireMatch(existingTask.getParams(), intent);
                 return new PreparedTask(existingTask, existingTask.getOutputObjectKey(), null, false);
             }
         }
         // 第一步：校验影像是否存在且当前用户有访问权限。影像按用户隔离，不可越权提交。
-        RsImage image = imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId);
+        RsImage image = lockedImage == null
+                ? imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId) : lockedImage;
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权访问");
         }
@@ -343,10 +392,27 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
         }
         Map<String, Object> taskParams = ensureMutableParams(submitDTO);
+        taskParams.remove(TaskSubmissionIntent.FIELD);
+        // 该字段只能由服务器生成，防止客户端伪造追溯信息。
+        taskParams.remove("inputSnapshot");
+        taskParams.remove("regionSnapshot");
+        if (submitDTO.getMonitoringRegionId() != null
+                && (submitDTO.getTaskType() != RemoteSensingTaskMessage.TaskType.NDVI
+                    || submitDTO.getMonitoringRegionId() <= 0)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "监测区域仅支持 NDVI，区域 ID 必须为正整数");
+        }
         if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION) {
             validateAndFillChangeDetectionParams(image, currentUserId, taskParams);
         } else {
             imageBandCapabilityService.validateAndFillTaskParams(image, submitDTO.getTaskType(), taskParams);
+        }
+
+        if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.NDVI) {
+            taskParams.put("inputSnapshot", InputAdmission.snapshot(image.getMetadataJson(), image.getId(), taskParams));
+            if (submitDTO.getMonitoringRegionId() != null) {
+                taskParams.put("regionSnapshot", lockedRegion == null
+                        ? monitoringRegions.snapshot(submitDTO.getMonitoringRegionId()) : lockedRegion.deepCopy());
+            }
         }
 
         // 第三步：CAS 式状态变更（READY -> PROCESSING）。使用 UPDATE ... WHERE status='READY' 保证
@@ -356,6 +422,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
 
         // 第四步：创建任务记录，初始状态为 PENDING。
+        taskParams.put(TaskSubmissionIntent.FIELD, intent);
         RsTask task = buildPendingTask(submitDTO, currentUserId);
         taskMapper.insert(task);
 
@@ -370,7 +437,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         return new PreparedTask(task, outputObjectKey, outboxId, true);
     }
 
-    private RsTaskSubmitVO resolveDuplicateSubmit(RsTaskSubmitDTO submitDTO, DuplicateKeyException exception) {
+    private RsTaskSubmitVO resolveDuplicateSubmit(RsTaskSubmitDTO submitDTO, JsonNode intent, RuntimeException exception) {
         String clientRequestId = normalizeClientRequestId(submitDTO.getClientRequestId());
         if (isBlank(clientRequestId)) {
             throw exception;
@@ -382,6 +449,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (existingTask == null) {
             throw exception;
         }
+        TaskSubmissionIntent.requireMatch(existingTask.getParams(), intent);
         return new RsTaskSubmitVO(existingTask.getId());
     }
 
@@ -540,11 +608,11 @@ public class RsTaskServiceImpl implements RsTaskService {
      *   （{@code taskMapper.claimForRunning}，WHERE status=oldStatus）尝试变更为 RUNNING；
      *   更新行数 = 0 说明已被其他 Worker 抢先。</li>
      * </ol>
-     * 使用 CAS 而不是 SELECT ... FOR UPDATE 的原因是：避免行锁带来的数据库连接池竞争，
-     * 且 Worker 抢占场景下冲突概率低，CAS 失败后重试成本远低于锁等待。
+     * 短事务内锁定任务行，将领取、回调和超时回收串行化；
+     * UPDATE 仍检查状态和执行预算，事务内不执行影像计算。
      */
     private RsTaskClaimVO claimInTransaction(Long taskId) {
-        RsTask task = taskMapper.selectById(taskId);
+        RsTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
         }
@@ -560,7 +628,9 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
 
         // CAS 式抢占：只有 status 仍然等于当前值时才更新为 RUNNING。
-        int updated = taskMapper.claimForRunning(taskId);
+        String attemptId = UUID.randomUUID().toString();
+        String outputKey = "result/attempts/task_" + taskId + "/" + attemptId + ".tif";
+        int updated = taskMapper.claimForRunning(taskId, attemptId, outputKey, leaseSeconds());
         if (updated <= 0) {
             // CAS 失败，重新查询最新状态返回给调用方，便于调用方决策重试。
             RsTask latestTask = taskMapper.selectById(taskId);
@@ -573,9 +643,19 @@ public class RsTaskServiceImpl implements RsTaskService {
         taskLog.setTaskId(taskId);
         taskLog.setLogLevel("INFO");
         taskLog.setMessage("Worker 抢占任务成功：" + task.getStatus() + " -> " + TaskStatus.RUNNING.dbValue());
-        taskLog.setDetail(toJson(Map.of("fromStatus", task.getStatus(), "toStatus", TaskStatus.RUNNING.dbValue())));
+        taskLog.setDetail(toJson(Map.of("fromStatus", task.getStatus(), "toStatus", TaskStatus.RUNNING.dbValue(),
+                "attemptId", attemptId, "outputObjectKey", outputKey)));
         taskLogMapper.insert(taskLog);
-        return new RsTaskClaimVO(true, TaskClaimAction.CLAIMED.dbValue(), TaskStatus.RUNNING.dbValue(), "任务抢占成功", task.getOutputObjectKey());
+        RsTaskClaimVO claimed = new RsTaskClaimVO(true, TaskClaimAction.CLAIMED.dbValue(),
+                TaskStatus.RUNNING.dbValue(), "任务抢占成功", outputKey);
+        claimed.setAttemptId(attemptId);
+        claimed.setLeaseSeconds(leaseSeconds());
+        return claimed;
+    }
+
+    private int leaseSeconds() {
+        Integer seconds = rabbitTaskProperties.getLeaseSeconds();
+        return seconds == null ? 120 : Math.max(30, seconds);
     }
 
     /**
@@ -591,7 +671,7 @@ public class RsTaskServiceImpl implements RsTaskService {
      * </ul>
      */
     private void updateStatusInTransaction(Long taskId, RsTaskStatusUpdateDTO updateDTO) {
-        RsTask task = taskMapper.selectById(taskId);
+        RsTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "任务不存在");
         }
@@ -599,6 +679,18 @@ public class RsTaskServiceImpl implements RsTaskService {
         // 第一步：校验目标状态合法性和状态流转可行性。
         TaskStatus targetStatus = normalizeStatus(updateDTO.getStatus());
         TaskStatus currentStatus = TaskStatus.fromDb(task.getStatus());
+        if (currentStatus == TaskStatus.RUNNING && task.getAttemptId() == null && task.getLeaseUntil() != null) {
+            throw new BusinessException(409, "历史执行缺少 attemptId，等待回收后重新提交");
+        }
+        if (task.getAttemptId() != null) {
+            if (!task.getAttemptId().equals(updateDTO.getAttemptId())) {
+                throw new BusinessException(409, "执行 attemptId 不匹配");
+            }
+            if (!currentStatus.isTerminal() && taskMapper.renewLease(taskId, updateDTO.getAttemptId(), leaseSeconds()) != 1) {
+                throw new BusinessException(409, "执行租约已过期或不再运行");
+            }
+            if (currentStatus == TaskStatus.RUNNING && targetStatus == TaskStatus.RUNNING) return;
+        }
         validateTransition(currentStatus, targetStatus);
         if (isDuplicateTerminalCallback(currentStatus, targetStatus)) {
             return;
@@ -609,6 +701,11 @@ public class RsTaskServiceImpl implements RsTaskService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "SUCCESS 状态必须提供 outputObjectKey");
         }
         validateSuccessOutputObjectKey(task, updateDTO, targetStatus);
+        if (targetStatus == TaskStatus.SUCCESS) {
+            NdviMetadataValidator.validate(
+                    updateDTO.getResultMetadata(), task.getTaskType());
+            NdviMetadataValidator.validateTaskRegion(updateDTO.getResultMetadata(), task.getParams());
+        }
         if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");
         }
@@ -693,7 +790,9 @@ public class RsTaskServiceImpl implements RsTaskService {
         message.setInputObjectKey(image.getObjectKey());
         message.setOutputBucket(minioProperties.getBucketName());
         message.setOutputObjectKey(outputObjectKey);
-        message.setParams(submitDTO.getParams());
+        Map<String, Object> executionParams = new LinkedHashMap<>(submitDTO.getParams());
+        executionParams.remove(TaskSubmissionIntent.FIELD);
+        message.setParams(executionParams);
         return message;
     }
 
@@ -776,6 +875,9 @@ public class RsTaskServiceImpl implements RsTaskService {
                 : task.getOutputBucket();
 
         RsResultFile resultFile = buildResultFile(task, outputBucket, outputObjectKey);
+        if (updateDTO.getResultMetadata() != null && !updateDTO.getResultMetadata().isNull()) {
+            resultFile.setResultMetadata(toJson(updateDTO.getResultMetadata()));
+        }
         RsResultFile existing = resultFileMapper.selectByTaskId(task.getId());
         if (existing == null) {
             resultFileMapper.insert(resultFile);

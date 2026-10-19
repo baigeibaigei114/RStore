@@ -76,6 +76,7 @@ export function uploadImageApi(
   const formData = new FormData()
   formData.append('file', params.file)
   formData.append('name', params.name)
+  if (params.manifest) formData.append('manifest', params.manifest)
 
   if (params.sensor) {
     formData.append('sensor', params.sensor)
@@ -87,7 +88,7 @@ export function uploadImageApi(
     formData.append('cloudPercent', String(params.cloudPercent))
   }
 
-  return request.post<unknown, ImageDetail>('/images/upload', formData, {
+  return request.post<unknown, ImageDetail>(params.manifest ? '/images/upload-standardized' : '/images/upload', formData, {
     onUploadProgress,
   })
 }

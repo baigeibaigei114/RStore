@@ -25,6 +25,7 @@
     <el-skeleton v-if="loading && !image" :rows="8" animated />
 
     <template v-else-if="image">
+      <InputProvenance :raw="image.metadataJson" />
       <el-row :gutter="16">
         <el-col :xs="24" :lg="8">
           <el-card class="detail-card" shadow="never">
@@ -173,6 +174,7 @@
 </template>
 
 <script setup lang="ts">
+import InputProvenance from '@/components/InputProvenance.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'

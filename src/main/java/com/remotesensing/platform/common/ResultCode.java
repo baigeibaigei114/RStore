@@ -17,6 +17,8 @@ public enum ResultCode {
     /** 用户无权限访问该资源 */
     FORBIDDEN(403, "无权访问"),
 
+    CONFLICT(409, "请求冲突"),
+
     /** 触发限流，请求频率超过配置阈值 */
     TOO_MANY_REQUESTS(429, "请求过于频繁，请稍后再试"),
 

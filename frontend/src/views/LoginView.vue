@@ -4,8 +4,8 @@
       <div class="login-brand">
         <div class="brand-mark">遥感</div>
         <div>
-          <h1>遥感影像平台</h1>
-          <p>登录后进入影像资产与智能解译联调环境</p>
+          <h1>区域植被监测平台</h1>
+          <p>遥感分析与报告 · 从影像到可追溯的监测结果</p>
         </div>
       </div>
 

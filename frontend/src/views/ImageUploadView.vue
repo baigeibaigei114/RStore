@@ -15,6 +15,20 @@
         class="upload-form"
       >
         <el-row :gutter="18">
+          <el-col :span="24">
+            <el-form-item label="入库方式">
+              <el-radio-group v-model="standardized" :disabled="uploading">
+                <el-radio-button :value="false">普通影像资产</el-radio-button>
+                <el-radio-button :value="true">标准化影像包 · NDVI</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-alert :closable="false" type="info" :title="standardized
+              ? '仅支持 v1 Sentinel-2 反射率包。采集时间使用来源 JSON；检查通过不等于科学真实性认证。'
+              : '普通上传不获得 NDVI 分析准入；历史结果仍可查看。'" />
+            <el-form-item v-if="standardized" label="来源说明 JSON（最大 64 KiB）">
+              <input type="file" accept=".json,application/json" :disabled="uploading" @change="selectManifest" />
+            </el-form-item>
+          </el-col>
           <el-col :xs="24" :lg="14">
             <el-form-item label="GeoTIFF 文件" prop="file">
               <el-upload
@@ -42,11 +56,11 @@
               <el-input v-model="form.name" clearable placeholder="例如：杭州西湖 Sentinel-2 影像" />
             </el-form-item>
 
-            <el-form-item label="传感器">
+            <el-form-item v-if="!standardized" label="传感器">
               <el-input v-model="form.sensor" clearable placeholder="例如：Sentinel-2、Landsat-8" />
             </el-form-item>
 
-            <el-form-item label="采集时间">
+            <el-form-item v-if="!standardized" label="采集时间">
               <el-date-picker
                 v-model="form.captureTime"
                 type="datetime"
@@ -56,7 +70,7 @@
               />
             </el-form-item>
 
-            <el-form-item label="云量">
+            <el-form-item v-if="!standardized" label="云量">
               <el-input-number
                 v-model="form.cloudPercent"
                 :min="0"
@@ -108,6 +122,12 @@ const formRef = ref<FormInstance>()
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const fileList = ref<UploadFile[]>([])
+const standardized = ref(false)
+const manifest = ref<File>()
+
+function selectManifest(event: Event) {
+  manifest.value = (event.target as HTMLInputElement).files?.[0]
+}
 
 const form = reactive<UploadForm>({
   file: null,
@@ -164,6 +184,10 @@ async function submitUpload() {
     return
   }
 
+  if (standardized.value && (!manifest.value || manifest.value.size > 65536)) {
+    ElMessage.warning('请选择不超过 64 KiB 的来源 JSON')
+    return
+  }
   uploading.value = true
   uploadPercent.value = 0
 
@@ -171,6 +195,7 @@ async function submitUpload() {
     const image = await uploadImageApi(
       {
         file: form.file,
+        manifest: standardized.value ? manifest.value : undefined,
         name: form.name,
         sensor: form.sensor || undefined,
         captureTime: form.captureTime || undefined,

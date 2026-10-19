@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.InputAdmission;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.enums.ImageStatus;
@@ -43,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,6 +134,10 @@ public class RsImageServiceImpl implements RsImageService {
         }
 
         RsImage image = toEntity(createDTO);
+        // 客户端元数据不能声明服务器准入；保留其它用户字段。
+        ObjectNode suppliedMetadata = parseMetadataObject(image.getMetadataJson());
+        suppliedMetadata.remove("admission");
+        image.setMetadataJson(suppliedMetadata.toString());
         image.setOwnerId(currentUserContext.getCurrentUserId());
         image.setVisibility(Visibility.PRIVATE.dbValue());
         try {
@@ -174,6 +180,24 @@ public class RsImageServiceImpl implements RsImageService {
                             String sensor,
                             OffsetDateTime captureTime,
                             BigDecimal cloudPercent) {
+        return uploadInternal(file, name, sensor, captureTime, cloudPercent, null);
+    }
+
+    @Override
+    public RsImageVO uploadStandardized(MultipartFile file, MultipartFile manifest, String name) {
+        if (manifest == null || manifest.isEmpty() || manifest.getSize() > InputAdmission.MAX_MANIFEST_BYTES) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "来源 JSON 必须为 1~65536 字节");
+        }
+        try (var stream = manifest.getInputStream()) {
+            byte[] bytes = stream.readNBytes(InputAdmission.MAX_MANIFEST_BYTES + 1);
+            return uploadInternal(file, name, "Sentinel-2", null, null, bytes);
+        } catch (IOException e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "无法读取来源 JSON");
+        }
+    }
+
+    private RsImageVO uploadInternal(MultipartFile file, String name, String sensor,
+                                    OffsetDateTime captureTime, BigDecimal cloudPercent, byte[] manifest) {
         if (name == null || name.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像名称不能为空");
         }
@@ -184,31 +208,39 @@ public class RsImageServiceImpl implements RsImageService {
 
         LocalGeoTiffFile localFile = null;
         MinioUploadVO uploadVO = null;
+        AtomicBoolean mayCompensate = new AtomicBoolean(true);
+        Long imageId;
         try {
             localFile = saveToLocalTemp(file);
             // 上传主流程只复用这一份临时文件完成解析和原始影像上传，缩略图交给后台任务独立处理。
             GeoTiffMetadataVO metadata = imageBandCapabilityService.enrichMetadata(
                     geoTiffMetadataService.parse(localFile.filePath())
             );
+            metadata.setAdmission(null);
+            if (manifest != null) {
+                metadata.setAdmission(InputAdmission.validate(manifest, localFile.filePath(), metadata));
+                captureTime = OffsetDateTime.parse(metadata.getAdmission().path("manifest").path("captureTime").asText());
+            }
             uploadVO = minioService.uploadGeoTiff(localFile.filePath(), localFile.originalFilename(), localFile.contentType());
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
             image.setOwnerId(currentUserContext.getCurrentUserId());
             image.setVisibility(Visibility.PRIVATE.dbValue());
-            insertImageInTransaction(image);
-
-            return getById(image.getId());
+            insertImageInTransaction(image, mayCompensate);
+            imageId = image.getId();
         } catch (DataIntegrityViolationException exception) {
             // 数据库事务无法回滚 MinIO 对象，失败分支需要主动清理已上传文件。
-            deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
+            compensateUploadIfSafe(uploadVO, mayCompensate.get());
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录保存失败：" + exception.getMostSpecificCause().getMessage());
         } catch (RuntimeException exception) {
-            // 非数据库异常同样可能发生在 MinIO 上传之后，统一做对象存储补偿。
-            deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
+            // 未知提交结果不可假定失败；保留对象供后续核对。
+            compensateUploadIfSafe(uploadVO, mayCompensate.get());
             throw exception;
         } finally {
             deleteLocalFileQuietly(localFile);
             uploadSemaphore.release();
         }
+        // 事务提交后的读取不属于上传补偿范围。
+        return getById(imageId);
     }
 
     /**
@@ -379,6 +411,11 @@ public class RsImageServiceImpl implements RsImageService {
         Map<String, Integer> mapping = buildUserBandMapping(updateDTO);
         validateBandMapping(mapping, image.getBandCount());
         String metadataJson = buildUserConfirmedMetadataJson(image.getMetadataJson(), mapping);
+        ObjectNode updatedMetadata = parseMetadataObject(metadataJson);
+        ObjectNode admission = updatedMetadata.putObject("admission");
+        admission.put("status", "UNVERIFIED");
+        admission.put("reason", "波段配置已修改，请重新上传标准化影像包");
+        metadataJson = updatedMetadata.toString();
 
         int updated = imageMapper.updateMetadataJson(id, currentUserId, metadataJson);
         if (updated <= 0) {
@@ -445,16 +482,27 @@ public class RsImageServiceImpl implements RsImageService {
         return image;
     }
 
-    private void insertImageInTransaction(RsImage image) {
+    private void insertImageInTransaction(RsImage image, AtomicBoolean mayCompensate) {
         // 文件处理完成后才开启短事务，只覆盖影像元数据入库这一步。
         transactionTemplate.executeWithoutResult(status -> {
-            imageMapper.insert(image);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
+                public void afterCompletion(int completionStatus) {
+                    mayCompensate.set(completionStatus == STATUS_ROLLED_BACK);
+                }
+
+                @Override
                 public void afterCommit() {
-                    thumbnailAsyncService.generateAsync(image.getId());
+                    try {
+                        thumbnailAsyncService.generateAsync(image.getId());
+                    } catch (RuntimeException exception) {
+                        log.warn("影像已入库，缩略图调度失败，imageId={}", image.getId(), exception);
+                    }
                 }
             });
+            // 只有明确回滚才补偿；COMMITTED/UNKNOWN 均保留对象等待核对。
+            mayCompensate.set(false);
+            imageMapper.insert(image);
         });
     }
 
@@ -748,6 +796,15 @@ public class RsImageServiceImpl implements RsImageService {
 
     private BigDecimal center(BigDecimal min, BigDecimal max) {
         return min.add(max).divide(BigDecimal.valueOf(2));
+    }
+
+    private void compensateUploadIfSafe(MinioUploadVO upload, boolean mayCompensate) {
+        if (upload == null) return;
+        if (mayCompensate) {
+            deleteObjectQuietly(upload.getObjectKey());
+        } else {
+            log.warn("上传事务未确认回滚，保留对象等待核对，objectKey={}", upload.getObjectKey());
+        }
     }
 
     private void deleteObjectQuietly(String objectKey) {

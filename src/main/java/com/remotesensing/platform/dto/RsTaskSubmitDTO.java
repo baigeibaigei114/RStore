@@ -2,6 +2,7 @@ package com.remotesensing.platform.dto;
 
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
 import lombok.Data;
@@ -16,6 +17,10 @@ public class RsTaskSubmitDTO {
     /** 待处理的遥感影像主键 ID，对应 rs_image 表的 id 列。不能为空。 */
     @NotNull(message = "影像 ID 不能为空")
     private Long imageId;
+
+    /** 可选私有监测区域；省略时保留整幅裁剪矩形统计。 */
+    @Positive
+    private Long monitoringRegionId;
 
     /** 任务类型枚举（NDVI / NDWI / CHANGE_DETECTION），对应 RemoteSensingTaskMessage.TaskType。不能为空。 */
     @NotNull(message = "任务类型不能为空")

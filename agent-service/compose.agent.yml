@@ -1,0 +1,22 @@
+# Merge after root docker-compose.yml. No host port; no service gets indexer credentials.
+services:
+  agent-service:
+    profiles: ["agent"]
+    build:
+      context: ./agent-service
+    environment:
+      AGENT_ENABLED: "true"
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:?configure a separate internal token}
+      AGENT_DATABASE_URL: ${AGENT_DATABASE_URL:?configure the knowledge reader role}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?configure the provider key}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      AGENT_MODEL_PATH: /models/7999e1d3359715c523056ef9478215996d62a620
+    volumes:
+      - ${AGENT_MODEL_SNAPSHOT_DIR:?provide the fixed cached snapshot directory}:/models/7999e1d3359715c523056ef9478215996d62a620:ro
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,uuid; r=urllib.request.Request('http://127.0.0.1:8000/internal/v1/health',headers={'X-Internal-Token':os.environ['AGENT_INTERNAL_TOKEN'],'X-Request-Id':str(uuid.uuid4())}); urllib.request.urlopen(r,timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

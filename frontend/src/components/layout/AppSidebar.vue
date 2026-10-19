@@ -3,8 +3,8 @@
     <div class="brand">
       <div class="brand-mark">遥感</div>
       <div v-if="!appStore.sidebarCollapsed" class="brand-text">
-        <strong>遥感影像平台</strong>
-        <span>资产管理与智能解译</span>
+        <strong>区域植被监测平台</strong>
+        <span>遥感分析与报告</span>
       </div>
     </div>
 
@@ -36,6 +36,7 @@ import {
   MapLocation,
   UploadFilled,
   Plus,
+  ChatDotRound,
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -45,6 +46,7 @@ const appStore = useAppStore()
 
 const menuItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
+  { path: '/agent', title: 'NDVI助手', icon: ChatDotRound },
   { path: '/images', title: '影像资产', icon: Files },
   { path: '/images/upload', title: '影像上传', icon: UploadFilled },
   { path: '/map', title: '地图浏览', icon: MapLocation },

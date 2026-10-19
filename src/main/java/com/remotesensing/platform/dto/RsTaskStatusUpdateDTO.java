@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * 遥感任务状态更新请求 DTO。
@@ -11,6 +12,7 @@ import lombok.Data;
  */
 @Data
 public class RsTaskStatusUpdateDTO {
+    private String attemptId;
 
     /** 任务最新状态值，如 PROCESSING / COMPLETED / FAILED，对应 rs_task 表 status 列。不能为空。 */
     @NotBlank(message = "任务状态不能为空")
@@ -26,6 +28,9 @@ public class RsTaskStatusUpdateDTO {
 
     /** 结果文件在 MinIO 中的对象键（objectKey），对应 rs_task 表 output_object_key 列。 */
     private String outputObjectKey;
+
+    /** 版本化结果统计对象；旧 Worker 可不提供。 */
+    private JsonNode resultMetadata;
 
     /** 任务失败时的详细错误信息，对应 rs_task 表 error_message 列。 */
     private String errorMessage;

@@ -49,6 +49,234 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 @ExtendWith(MockitoExtension.class)
 class RsTaskServiceImplTest {
 
+    @Test
+    void migratedLegacyRunningCallbackIsRejected() {
+        var task = task(1L, "user-a", "RUNNING", "result/legacy.tif");
+        task.setLeaseUntil(java.time.OffsetDateTime.now().plusSeconds(120));
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        var dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("历史执行");
+        verify(resultFileMapper, never()).insert(any());
+    }
+
+    @Test
+    void leasedTerminalDuplicateDoesNotWriteResultsAgain() {
+        var task = task(1L, "user-a", "SUCCESS", "result/current.tif");
+        task.setAttemptId("current");
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        var dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        dto.setAttemptId("current");
+        service.updateStatus(1L, dto);
+        verify(resultFileMapper, never()).insert(any());
+        verify(taskMapper, never()).renewLease(any(), any(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void claimAllocatesIndependentAttemptAndOutput() {
+        var task = task(1L, "user-a", "PENDING", "result/original.tif");
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        when(taskMapper.claimForRunning(org.mockito.ArgumentMatchers.eq(1L), any(), any(),
+                org.mockito.ArgumentMatchers.eq(120))).thenReturn(1);
+        var first = service.claim(1L);
+        var second = service.claim(1L);
+        assertThat(first.getAttemptId()).isNotBlank().isNotEqualTo(second.getAttemptId());
+        assertThat(first.getOutputObjectKey()).contains(first.getAttemptId()).isNotEqualTo(second.getOutputObjectKey());
+        assertThat(first.getLeaseSeconds()).isEqualTo(120);
+    }
+
+    @Test
+    void staleAttemptCannotUpdateEvenTerminalTask() {
+        for (String status : new String[]{"RUNNING", "SUCCESS"}) {
+            var task = task(1L, "user-a", status, "result/current.tif");
+            task.setAttemptId("current");
+            when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+            var dto = new RsTaskStatusUpdateDTO();
+            dto.setStatus("SUCCESS");
+            dto.setAttemptId("old");
+            assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                    .isInstanceOf(BusinessException.class).hasMessageContaining("attemptId");
+        }
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void expiredLeaseCannotCompleteOrRenew() {
+        var task = task(1L, "user-a", "RUNNING", "result/current.tif");
+        task.setAttemptId("current");
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        for (String status : new String[]{"SUCCESS", "RUNNING"}) {
+            var dto = new RsTaskStatusUpdateDTO();
+            dto.setStatus(status);
+            dto.setAttemptId("current");
+            assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                    .isInstanceOf(BusinessException.class).hasMessageContaining("租约");
+        }
+        verify(resultFileMapper, never()).insert(any());
+    }
+
+    @Test
+    void heartbeatRenewsWithoutCreatingStatusLog() {
+        var task = task(1L, "user-a", "RUNNING", "result/current.tif");
+        task.setAttemptId("current");
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        when(taskMapper.renewLease(1L, "current", 120)).thenReturn(1);
+        var dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("RUNNING");
+        dto.setAttemptId("current");
+        service.updateStatus(1L, dto);
+        verify(taskLogMapper, never()).insert(any());
+    }
+
+    @Test
+    void sameKeyWithDifferentIntentMustNotTouchImageOrPublish() {
+        var original = new RsTaskSubmitDTO();
+        original.setImageId(10L);
+        original.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        var stored = new RsTask();
+        stored.setId(88L);
+        stored.setParams(new ObjectMapper().createObjectNode().set(
+                com.remotesensing.platform.common.TaskSubmissionIntent.FIELD,
+                com.remotesensing.platform.common.TaskSubmissionIntent.from(original)).toString());
+        original.setClientRequestId("key");
+        original.setMonitoringRegionId(5L);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByOwnerAndClientRequestId("user-a", "key")).thenReturn(stored);
+        assertThatThrownBy(() -> service.submit(original))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("不同");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(messageOutboxService, never()).createTaskMessage(any(), any());
+    }
+
+    @Test
+    void concurrentSameKeyLoserResolvesAfterImageStateRace() throws Exception {
+        var initialReads = new java.util.concurrent.CyclicBarrier(2);
+        var inserted = new java.util.concurrent.CountDownLatch(1);
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var claimed = new java.util.concurrent.atomic.AtomicBoolean();
+        var saved = new java.util.concurrent.atomic.AtomicReference<RsTask>();
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(taskMapper.selectByOwnerAndClientRequestId("user-a", "race")).thenAnswer(call -> {
+            if (reads.incrementAndGet() <= 2) {
+                initialReads.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                return null;
+            }
+            return saved.get();
+        });
+        var image = readyImage(10L, "user-a", "raw/test.tif");
+        image.setMetadataJson(trustedFourBandMetadata());
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(image);
+        when(imageMapper.markProcessingIfReady(10L)).thenAnswer(call -> {
+            if (claimed.compareAndSet(false, true)) return 1;
+            assertThat(inserted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            return 0;
+        });
+        when(taskMapper.insert(any())).thenAnswer(call -> {
+            RsTask task = call.getArgument(0);
+            task.setId(99L);
+            saved.set(task);
+            inserted.countDown();
+            return 1;
+        });
+        when(messageOutboxService.createTaskMessage(any(), any())).thenReturn(55L);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.Callable<Long> submit = () -> {
+            var dto = new RsTaskSubmitDTO();
+            dto.setImageId(10L);
+            dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+            dto.setClientRequestId("race");
+            return service.submit(dto).getTaskId();
+        };
+        try {
+            var first = executor.submit(submit);
+            var second = executor.submit(submit);
+            assertThat(first.get(10, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(99L);
+            assertThat(second.get(10, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(99L);
+            verify(taskMapper).insert(any());
+            verify(messageOutboxService).createTaskMessage(any(), any());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void unverifiedImageCannotSubmitEvenWithForgedSnapshot() {
+        RsImage image = readyImage(10L, "user-a", "raw/test.tif");
+        image.setMetadataJson(trustedFourBandMetadata().replace("\"PASSED\"", "\"UNVERIFIED\""));
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setParams(Map.of("redBand", 3, "nirBand", 4, "inputSnapshot", Map.of("status", "PASSED")));
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(image);
+        assertThatThrownBy(() -> service.submit(dto)).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("标准化");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode baselineMetadata() throws Exception {
+        return (com.fasterxml.jackson.databind.node.ObjectNode) new ObjectMapper().readTree("""
+                {"schemaVersion":1,"algorithm":"NDVI","scope":"cropped_raster",
+                 "bandMapping":{"redBand":3,"nirBand":4},
+                 "statistics":{"totalPixelCount":4,"validPixelCount":3,"invalidPixelCount":1,
+                 "validPixelRatio":0.75,"min":0,"max":0.5,"mean":0.3333333333333333}}
+                """);
+    }
+
+    @Test
+    void successCallbackShouldPersistStatistics() throws Exception {
+        RsTask task = task(1L, "user-a", TaskStatus.RUNNING.dbValue(), "result/ndvi.tif");
+        task.setTaskType("NDVI");
+        task.setImageId(10L);
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        dto.setProgress(100);
+        dto.setOutputObjectKey("result/ndvi.tif");
+        dto.setResultMetadata(baselineMetadata());
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        when(taskMapper.updateStatusFromWorker(1L, "RUNNING", "SUCCESS", 100, "result/ndvi.tif", null))
+                .thenReturn(1);
+        service.updateStatus(1L, dto);
+        ArgumentCaptor<RsResultFile> captor = ArgumentCaptor.forClass(RsResultFile.class);
+        verify(resultFileMapper).insert(captor.capture());
+        assertThat(new ObjectMapper().readTree(captor.getValue().getResultMetadata()))
+                .isEqualTo(dto.getResultMetadata());
+    }
+
+    @Test
+    void invalidStatisticsShouldNotUpdateTask() throws Exception {
+        RsTask task = task(1L, "user-a", "RUNNING", "result/ndvi.tif");
+        task.setTaskType("NDVI");
+        RsTaskStatusUpdateDTO dto = new RsTaskStatusUpdateDTO();
+        dto.setStatus("SUCCESS");
+        var metadata = baselineMetadata();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) metadata.get("statistics"))
+                .put("validPixelCount", 5);
+        dto.setResultMetadata(metadata);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        assertThatThrownBy(() -> service.updateStatus(1L, dto))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("像素数量");
+        verify(taskMapper, never()).updateStatusFromWorker(any(), any(), any(), any(), any(), any());
+        verify(resultFileMapper, never()).insert(any());
+    }
+
+    @Test
+    void metadataValidatorRejectsMalformedValues() throws Exception {
+        for (String field : new String[]{"min", "max", "mean", "validPixelRatio"}) {
+            var metadata = baselineMetadata();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) metadata.get("statistics")).put(field, "NaN");
+            assertThatThrownBy(() -> com.remotesensing.platform.common.NdviMetadataValidator.validate(metadata, "NDVI"))
+                    .isInstanceOf(BusinessException.class);
+        }
+        var metadata = baselineMetadata();
+        metadata.put("schemaVersion", 2);
+        assertThatThrownBy(() -> com.remotesensing.platform.common.NdviMetadataValidator.validate(metadata, "NDVI"))
+                .isInstanceOf(BusinessException.class);
+    }
+
     @Mock
     private RsImageMapper imageMapper;
 
@@ -83,9 +311,12 @@ class RsTaskServiceImplTest {
     private PlatformTransactionManager transactionManager;
 
     private RsTaskServiceImpl service;
+    @Mock
+    private com.remotesensing.platform.service.MonitoringRegionService monitoringRegions;
 
     @BeforeEach
     void setUp() {
+        lenient().when(rabbitTaskProperties.getLeaseSeconds()).thenReturn(120);
         lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
                 .thenReturn(new SimpleTransactionStatus());
         service = new RsTaskServiceImpl(
@@ -101,7 +332,8 @@ class RsTaskServiceImplTest {
                 geoServerService,
                 minioService,
                 transactionManager,
-                currentUserContext
+                currentUserContext,
+                monitoringRegions
         );
     }
 
@@ -137,6 +369,7 @@ class RsTaskServiceImplTest {
         ArgumentCaptor<RsTask> taskCaptor = ArgumentCaptor.forClass(RsTask.class);
         verify(taskMapper).insert(taskCaptor.capture());
         assertThat(taskCaptor.getValue().getClientRequestId()).isEqualTo("submit-001");
+        assertThat(taskCaptor.getValue().getParams()).contains("inputSnapshot", "ndvi-v1", "unit-test-only");
         verify(messageOutboxService).createTaskMessage(org.mockito.ArgumentMatchers.eq(1L), any(RemoteSensingTaskMessage.class));
         verify(messageOutboxService).publishById(99L);
     }
@@ -151,6 +384,9 @@ class RsTaskServiceImplTest {
 
         RsTask existingTask = new RsTask();
         existingTask.setId(88L);
+        existingTask.setParams(new ObjectMapper().createObjectNode().set(
+                com.remotesensing.platform.common.TaskSubmissionIntent.FIELD,
+                com.remotesensing.platform.common.TaskSubmissionIntent.from(dto)).toString());
         existingTask.setOwnerId("user-a");
         existingTask.setClientRequestId("submit-001");
         existingTask.setStatus(TaskStatus.PENDING.dbValue());
@@ -186,6 +422,9 @@ class RsTaskServiceImplTest {
 
         RsTask existingTask = new RsTask();
         existingTask.setId(89L);
+        existingTask.setParams(new ObjectMapper().createObjectNode().set(
+                com.remotesensing.platform.common.TaskSubmissionIntent.FIELD,
+                com.remotesensing.platform.common.TaskSubmissionIntent.from(dto)).toString());
         existingTask.setOwnerId("user-a");
         existingTask.setClientRequestId("submit-001");
 
@@ -462,7 +701,7 @@ class RsTaskServiceImplTest {
         dto.setProgress(100);
         dto.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
 
-        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
         when(taskMapper.updateStatusFromWorker(
                 1L,
                 TaskStatus.RUNNING.dbValue(),
@@ -494,7 +733,7 @@ class RsTaskServiceImplTest {
         dto.setProgress(100);
         dto.setOutputObjectKey("result/NDVI/2026/05/task_1_other.tif");
 
-        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
 
         assertThatThrownBy(() -> service.updateStatus(1L, dto))
                 .isInstanceOf(BusinessException.class)
@@ -521,7 +760,7 @@ class RsTaskServiceImplTest {
         dto.setProgress(100);
         dto.setOutputObjectKey("result/NDVI/2026/05/task_1.tif");
 
-        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
 
         service.updateStatus(1L, dto);
 
@@ -545,7 +784,7 @@ class RsTaskServiceImplTest {
         dto.setStatus(TaskStatus.FAILED.dbValue());
         dto.setErrorMessage("处理失败");
 
-        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
 
         service.updateStatus(1L, dto);
 
@@ -570,7 +809,7 @@ class RsTaskServiceImplTest {
         dto.setStatus(TaskStatus.RETRYING.dbValue());
         dto.setMessage("波段编号 4 超出范围，当前影像共有 2 个波段");
 
-        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
         when(taskMapper.updateStatusFromWorker(
                 1L,
                 TaskStatus.RUNNING.dbValue(),
@@ -594,6 +833,47 @@ class RsTaskServiceImplTest {
         RsTask task = invocation.getArgument(0);
         task.setId(1L);
         return 1;
+    }
+
+    @Test
+    void regionalSubmitUsesServerSnapshotForTaskAndMessage() throws Exception {
+        RsImage image = readyImage(10L, "owner", "raw/input.tif");
+        image.setMetadataJson(trustedFourBandMetadata());
+        when(currentUserContext.getCurrentUserId()).thenReturn("owner");
+        when(imageMapper.selectAccessibleById(10L, "owner")).thenReturn(image);
+        var snapshot = new ObjectMapper().readTree("{\"regionId\":7,\"version\":2,\"name\":\"server\"}");
+        when(monitoringRegions.snapshot(7L)).thenReturn((com.fasterxml.jackson.databind.node.ObjectNode) snapshot);
+        when(imageMapper.markProcessingIfReady(10L)).thenReturn(1);
+        when(taskMapper.insert(any())).thenAnswer(this::fillTaskId);
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setMonitoringRegionId(7L);
+        dto.setParams(Map.of("regionSnapshot", Map.of("name", "forged")));
+        service.submit(dto);
+        var captor = ArgumentCaptor.forClass(RsTask.class);
+        verify(taskMapper).insert(captor.capture());
+        assertThat(new ObjectMapper().readTree(captor.getValue().getParams()).get("regionSnapshot"))
+                .isEqualTo(snapshot);
+        var message = ArgumentCaptor.forClass(RemoteSensingTaskMessage.class);
+        verify(messageOutboxService).createTaskMessage(any(), message.capture());
+        assertThat(message.getValue().getParams().get("regionSnapshot")).isEqualTo(snapshot);
+    }
+
+    @Test
+    void unauthorizedRegionCannotCreateTaskOrLockImage() {
+        RsImage image = readyImage(10L, "owner", "raw/input.tif");
+        image.setMetadataJson(trustedFourBandMetadata());
+        when(currentUserContext.getCurrentUserId()).thenReturn("owner");
+        when(imageMapper.selectAccessibleById(10L, "owner")).thenReturn(image);
+        when(monitoringRegions.snapshot(7L)).thenThrow(new BusinessException(400, "区域不存在或无权访问"));
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(10L); dto.setTaskType(RemoteSensingTaskMessage.TaskType.NDVI);
+        dto.setMonitoringRegionId(7L);
+        assertThatThrownBy(() -> service.submit(dto)).hasMessageContaining("无权访问");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+        verify(messageOutboxService, never()).createTaskMessage(any(), any());
     }
 
     private RsTask task(Long id, String ownerId, String status, String outputObjectKey) {
@@ -624,6 +904,8 @@ class RsTaskServiceImplTest {
         return """
                 {
                   "bandCount": 4,
+                  "admission": {"status":"PASSED","validatorVersion":"input-v1",
+                    "manifest":{"sourceId":"unit-test-only","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
                   "bandMapping": {
                     "blue": 1,
                     "green": 2,

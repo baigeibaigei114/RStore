@@ -40,6 +40,14 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/images")
 public class RsImageController {
 
+    @PostMapping("/upload-standardized")
+    public Result<RsImageVO> uploadStandardized(@RequestParam("file") MultipartFile file,
+                                               @RequestParam("manifest") MultipartFile manifest,
+                                               @RequestParam("name") String name) {
+        checkUploadRateLimit();
+        return Result.success(imageService.uploadStandardized(file, manifest, name));
+    }
+
     /** WGS84 坐标系下有效经度下限，超出该范围的空间查询无意义。 */
     private static final BigDecimal MIN_LNG = BigDecimal.valueOf(-180);
     /** WGS84 坐标系下有效经度上限。 */

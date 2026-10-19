@@ -3,12 +3,21 @@
     <div class="page-title">
       <span>地图浏览</span>
       <h2>地图与图层</h2>
-      <p>当前页面已封装基础地图能力，后续可叠加影像范围、空间查询结果和 GeoServer 发布图层。</p>
+      <p>定位监测影像，查看分析结果；关闭底图可避免道路与地名干扰。</p>
     </div>
 
     <div class="map-viewer">
       <div ref="mapTarget" class="ol-map"></div>
 
+      <div class="map-toolbar">
+        <el-button :disabled="!loadedLayer" :loading="locating" @click="locateLoadedLayer">定位当前影像</el-button>
+        <el-button :aria-expanded="panelOpen" aria-controls="map-controls" @click="panelOpen = !panelOpen">
+          {{ panelOpen ? '收起面板' : '展开面板' }}
+        </el-button>
+      </div>
+
+      <aside v-show="panelOpen" id="map-controls" class="map-controls" aria-label="地图与图层控制">
+      <MonitoringRegionPanel :map="map" />
       <el-card class="map-panel" shadow="never">
         <template #header>
           <div class="card-header">
@@ -100,8 +109,12 @@
           <el-form-item label="图层名称">
             <el-input v-model="wmsForm.layers" placeholder="workspace:layer_name" />
           </el-form-item>
-          <el-form-item label="透明度">
+          <el-form-item :label="`影像不透明度 · ${wmsOpacityPercent}%`">
             <el-slider v-model="wmsOpacityPercent" :min="0" :max="100" @input="handleOpacityChange" />
+          </el-form-item>
+          <el-form-item label="显示地图底图">
+            <el-switch v-model="baseMapVisible" @change="setBaseLayerVisible(baseMapVisible)" />
+            <span class="display-hint">关闭后使用纯色背景，不改变影像数据</span>
           </el-form-item>
           <div class="map-panel-actions">
             <el-button :disabled="!hasWmsLayer" @click="removeWmsLayer">移除</el-button>
@@ -109,6 +122,7 @@
           </div>
         </el-form>
       </el-card>
+      </aside>
     </div>
   </section>
 </template>
@@ -123,7 +137,10 @@
  *   - 支持图层透明度调节和图层移除
  * 路由查询参数支持：?imageId=xxx&taskType=xxx 自动筛选图层
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import WKT from 'ol/format/WKT'
+import MonitoringRegionPanel from '@/components/MonitoringRegionPanel.vue'
+import { getImageDetailApi } from '@/api/image'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
@@ -140,8 +157,14 @@ const route = useRoute()
 const mapTarget = ref<HTMLElement>()
 
 /* ==================== WMS 透明度 ==================== */
-/** WMS 图层透明度百分比（0-100），默认 75% */
-const wmsOpacityPercent = ref(75)
+/** 影像默认完全不透明；底图默认显示，可手动关闭。 */
+const wmsOpacityPercent = ref(100)
+const baseMapVisible = ref(true)
+const panelOpen = ref(true)
+const loadedLayer = ref<LayerListItem>()
+const locating = ref(false)
+let locationRequest = 0
+let resizeObserver: ResizeObserver | undefined
 /** 标记当前是否有已加载的 WMS 图层 */
 const hasWmsLayer = ref(false)
 
@@ -184,6 +207,7 @@ const layerQuery = reactive<LayerSearchParams>({
  * - resetView: 重置视图到全国范围
  */
 const {
+  map,
   pointerLonLat,
   zoom,
   ready,
@@ -191,6 +215,7 @@ const {
   addWmsLayer,
   removeWmsLayer: removeLayer,
   updateWmsOpacity,
+  setBaseLayerVisible,
   resetView,
 } = useOlMap({
   center: [104, 35],
@@ -216,11 +241,54 @@ onMounted(async () => {
   /** 初始化地图 */
   if (mapTarget.value) {
     initMap(mapTarget.value)
+    setBaseLayerVisible(baseMapVisible.value)
+    resizeObserver = new ResizeObserver(() => map.value?.updateSize())
+    resizeObserver.observe(mapTarget.value)
   }
 
   /** 加载已发布图层列表 */
   await fetchLayers()
 })
+
+onBeforeUnmount(() => {
+  locationRequest++
+  resizeObserver?.disconnect()
+})
+
+async function locateLoadedLayer() {
+  const layer = loadedLayer.value
+  if (!layer) return
+  const requestId = ++locationRequest
+  locating.value = true
+  try {
+    const image = await getImageDetailApi(layer.imageId)
+    if (requestId !== locationRequest) return
+    if (!image.footprintWkt) {
+      ElMessage.warning('该影像缺少空间范围，暂时无法定位')
+      return
+    }
+    const geometry = new WKT().readGeometry(image.footprintWkt, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857',
+    })
+    const extent = geometry.getExtent()
+    if (!extent.every(Number.isFinite) || extent[0] >= extent[2] || extent[1] >= extent[3]) {
+      ElMessage.warning('影像空间范围无效，暂时无法定位')
+      return
+    }
+    const width = mapTarget.value?.clientWidth ?? 0
+    const rightPadding = panelOpen.value && width > 760 ? 400 : 40
+    map.value?.getView().fit(extent, {
+      padding: [70, rightPadding, 40, 40],
+      maxZoom: 17,
+      duration: 450,
+    })
+  } catch {
+    if (requestId === locationRequest) ElMessage.warning('无法读取影像范围，请检查权限或稍后重试；图层仍可浏览')
+  } finally {
+    if (requestId === locationRequest) locating.value = false
+  }
+}
 
 /**
  * 手动添加 WMS 图层
@@ -233,6 +301,9 @@ function handleAddWmsLayer() {
     return
   }
 
+  locationRequest++
+  locating.value = false
+  loadedLayer.value = undefined
   addWmsLayer({
     url: wmsForm.url,
     layers: wmsForm.layers,
@@ -240,7 +311,7 @@ function handleAddWmsLayer() {
     authToken: wmsForm.url.startsWith('/api/') ? currentToken() : undefined,
   })
   hasWmsLayer.value = true
-  ElMessage.success('WMS 图层已加载')
+  ElMessage.success('已添加 WMS 图层；手动服务暂不支持自动定位')
 }
 
 /**
@@ -298,11 +369,16 @@ function handleLoadSelectedLayer() {
   })
 
   hasWmsLayer.value = true
-  ElMessage.success(`已加载图层：${qualifiedLayerName}`)
+  loadedLayer.value = { ...selectedLayer.value }
+  void locateLoadedLayer()
+  ElMessage.success(`已添加图层：${qualifiedLayerName}`)
 }
 
 /** 移除地图上当前显示的 WMS 图层 */
 function removeWmsLayer() {
+  locationRequest++
+  locating.value = false
+  loadedLayer.value = undefined
   removeLayer()
   hasWmsLayer.value = false
 }
@@ -340,3 +416,78 @@ function currentToken() {
   return localStorage.getItem(TOKEN_KEY) || undefined
 }
 </script>
+
+<style scoped>
+.map-viewer {
+  height: clamp(580px, 76vh, 900px);
+  min-height: 580px;
+  background: #e9edf0;
+}
+
+.ol-map {
+  height: 100%;
+  min-height: 0;
+}
+
+.map-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 52px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+
+.map-toolbar .el-button + .el-button {
+  margin-left: 0;
+}
+
+.map-controls {
+  position: absolute;
+  top: 62px;
+  right: 14px;
+  bottom: 32px;
+  width: 350px;
+  z-index: 2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px #10182818;
+}
+
+.map-panel,
+.map-layer-panel {
+  position: static;
+  width: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.map-layer-panel {
+  border-top: 1px solid #e4e7ec;
+}
+
+.map-panel-actions {
+  flex-wrap: wrap;
+}
+
+.display-hint {
+  margin-left: 10px;
+  color: #667085;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .map-controls {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 30px;
+    width: auto;
+    max-height: 44%;
+  }
+}
+</style>
