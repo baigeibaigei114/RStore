@@ -286,68 +286,6 @@ body {
   margin-bottom: 0;
 }
 
-.ai-plan-head {
-  margin-bottom: 16px;
-}
-
-.ai-plan-head h3 {
-  margin: 10px 0 6px;
-  color: #101828;
-  font-size: 18px;
-}
-
-.ai-plan-head p {
-  margin: 0;
-  color: #667085;
-  line-height: 1.7;
-}
-
-.ai-plan-alert {
-  margin-bottom: 12px;
-}
-
-.ai-error-list {
-  margin: 0 0 16px;
-  padding-left: 18px;
-  color: #d92d20;
-  line-height: 1.7;
-}
-
-.ai-plan-steps {
-  padding-top: 4px;
-}
-
-.ai-plan-step {
-  padding: 10px 12px;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.ai-plan-step-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.ai-plan-step p {
-  margin: 8px 0;
-  color: #344054;
-  line-height: 1.6;
-}
-
-.drawer-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.drawer-hint {
-  margin: 8px 0 0;
-  text-align: right;
-}
-
 .ai-report-summary {
   margin-top: 14px;
 }

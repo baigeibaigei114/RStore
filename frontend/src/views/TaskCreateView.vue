@@ -144,6 +144,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getMonitoringRegionApi, listMonitoringRegionsApi, type MonitoringRegion } from '@/api/monitoringRegion'
 import { searchImagesApi, getImageDetailApi } from '@/api/image'
 import { createTaskApi } from '@/api/task'
+import { createSubmissionIntent } from '@/utils/submissionIntent'
 import type { ImageListItem } from '@/types/image'
 import type { TaskSubmitParams, TaskType } from '@/types/task'
 
@@ -343,20 +344,24 @@ function formatSupportedTasks(image?: ImageListItem) {
   return image.supportedTaskTypes.join('、')
 }
 
+const submissionRequestId = createSubmissionIntent()
+
 async function submitTask() {
-  const valid = await formRef.value?.validate().catch(() => false)
-
-  if (!valid) {
-    return
-  }
-
-  const payload = buildPayload(true)
-  if (!payload) {
-    return
-  }
-
+  if (submitting.value) return
   submitting.value = true
   try {
+    const valid = await formRef.value?.validate().catch(() => false)
+
+    if (!valid) {
+      return
+    }
+
+    const payload = buildPayload(true)
+    if (!payload) {
+      return
+    }
+
+    payload.clientRequestId = submissionRequestId(payload)
     const result = await createTaskApi(payload)
     ElMessage.success('任务创建成功')
     await router.push(`/tasks/${result.taskId}`)

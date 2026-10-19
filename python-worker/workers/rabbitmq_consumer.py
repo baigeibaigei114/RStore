@@ -23,6 +23,7 @@ import pika
 
 from clients.callback_client import CallbackClient
 from config import RabbitMqSettings
+from workers.lease_execution import LeaseLost, execute_with_lease
 
 
 class RabbitMqConsumer:
@@ -100,7 +101,11 @@ class RabbitMqConsumer:
         # start_consuming() 进入阻塞式事件循环，等价于 Java 中
         # channel.basicConsume() + CountDownLatch.await() 的组合。
         # 进程将在此处永久阻塞，直到连接关闭或收到 KeyboardInterrupt。
-        channel.start_consuming()
+        try:
+            channel.start_consuming()
+        finally:
+            if connection.is_open:
+                connection.close()
 
     def _handle_message(self, channel, method, properties, body: bytes) -> None:
         """单条消息的处理回调。
@@ -131,6 +136,7 @@ class RabbitMqConsumer:
         # 管道符 | 是 Python 3.10+ 的联合类型写法（PEP 604），
         # 等价于旧版 typing.Optional[dict[str, Any]]。
         message: dict[str, Any] | None = None
+        attempt_id = None
         try:
             # body 是 bytes 类型，先 decode 为 UTF-8 字符串，再用 json.loads 反序列化为 dict。
             # Python json.loads(s) 等价于 Java 中 ObjectMapper.readValue(s, Map.class)。
@@ -169,7 +175,21 @@ class RabbitMqConsumer:
                 return
 
             # 执行实际的业务处理。
-            result = processor.process(message)
+            attempt_id = claim_result.get("attemptId")
+            output_key = claim_result.get("outputObjectKey")
+            lease_seconds = claim_result.get("leaseSeconds")
+            if not attempt_id or not output_key or not isinstance(lease_seconds, (int, float)) or lease_seconds < 30:
+                raise LeaseLost("后端未返回租约协议，请同步升级后端与 Worker")
+            # 队列中可能是旧输出键，执行路径只能使用本次抢占响应。
+            message["outputObjectKey"] = output_key
+            result = execute_with_lease(
+                lambda: processor.process(message),
+                lambda: self._callback_client.update_status(
+                    task_id, "RUNNING", extra={"attemptId": attempt_id}),
+                lambda: channel.connection.process_data_events(time_limit=0.5),
+                lease_seconds,
+            )
+            result["attemptId"] = attempt_id
 
             # 只有结果文件已上传且 SUCCESS 回调成功后才 ack，尽量让消息确认与业务成功同向。
             # 这样设计可以保证：如果回调失败，消息会被重新入队并重试，
@@ -183,12 +203,16 @@ class RabbitMqConsumer:
                 flush=True,
             )
 
+        except LeaseLost:
+            # fail closed，退出连接使未ACK投递回队；后台计算线程不可安全强杀。
+            # 旧输出独立存储，后端租约到期负责收敛；服务管理器可重启进程。
+            raise
         except ValueError as exc:
             # ValueError 表示业务逻辑校验失败（如不支持的 taskType、缺少必要参数），
             # 属于不可恢复的错误，直接标记 FAILED 并拒绝消息（不重新入队）。
             task_id = self._extract_task_id(message)
             self._fail_non_retryable(
-                channel, method.delivery_tag, task_id, str(exc)
+                channel, method.delivery_tag, task_id, str(exc), attempt_id
             )
             print(
                 f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}",
@@ -202,11 +226,11 @@ class RabbitMqConsumer:
                 # 异步更新状态为重试中，不阻塞消息的重新入队。
                 # safe_update_status 保证回调异常不会覆盖原始异常。
                 self._callback_client.safe_update_status(
-                    task_id, "RETRYING", message=str(exc)
+                    task_id, "RETRYING", message=str(exc), extra={"attemptId": attempt_id}
                 )
 
             self._requeue_or_reject(
-                channel, method.delivery_tag, task_id, str(exc)
+                channel, method.delivery_tag, task_id, str(exc), attempt_id
             )
             print(
                 f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}",
@@ -219,6 +243,7 @@ class RabbitMqConsumer:
         delivery_tag: int,
         task_id: int | None,
         reason: str,
+        attempt_id: str | None = None,
     ) -> None:
         """处理不可重试的错误：标记 FAILED 并确认（拒绝但不重新入队）消息。
 
@@ -242,7 +267,7 @@ class RabbitMqConsumer:
         try:
             # 先尝试告知后端该任务失败。
             self._callback_client.update_status(
-                task_id, "FAILED", message=reason
+                task_id, "FAILED", message=reason, extra={"attemptId": attempt_id}
             )
             # 标记业务完败后仍 ACK 消息，而非 reject(requeue=false)，
             # 因为我们已经消费并处理了这个错误（更新了后端状态），不应再重新入队。
@@ -252,10 +277,10 @@ class RabbitMqConsumer:
             # 此时根据配置决定是否重新入队以等待后端恢复。
             if self._settings.requeue_on_error:
                 self._callback_client.safe_update_status(
-                    task_id, "RETRYING", message=str(callback_exc)
+                    task_id, "RETRYING", message=str(callback_exc), extra={"attemptId": attempt_id}
                 )
             self._requeue_or_reject(
-                channel, delivery_tag, task_id, str(callback_exc)
+                channel, delivery_tag, task_id, str(callback_exc), attempt_id
             )
 
     def _requeue_or_reject(
@@ -264,6 +289,7 @@ class RabbitMqConsumer:
         delivery_tag: int,
         task_id: int | None,
         reason: str,
+        attempt_id: str | None = None,
     ) -> None:
         """根据 requeue_on_error 配置决定重新入队还是拒绝消息。
 
@@ -289,7 +315,7 @@ class RabbitMqConsumer:
         else:
             if task_id is not None:
                 self._callback_client.safe_update_status(
-                    task_id, "FAILED", message=reason
+                    task_id, "FAILED", message=reason, extra={"attemptId": attempt_id}
                 )
             # 不可恢复错误直接拒绝，交给 RabbitMQ 死信链路保留失败消息。
             # reject(requeue=false) 等价于 Java 中 channel.basicReject(deliveryTag, false)。

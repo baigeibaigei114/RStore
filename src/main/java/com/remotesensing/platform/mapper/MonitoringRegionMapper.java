@@ -14,6 +14,9 @@ public interface MonitoringRegionMapper {
     @Select("SELECT " + COLUMNS + " FROM monitoring_region WHERE id=#{id} AND owner_id=#{owner}")
     MonitoringRegionVO find(@Param("id") Long id, @Param("owner") String owner);
 
+    @Select("SELECT " + COLUMNS + " FROM monitoring_region WHERE id=#{id} AND owner_id=#{owner} FOR UPDATE")
+    MonitoringRegionVO lock(@Param("id") Long id, @Param("owner") String owner);
+
     @Select("""
         SELECT ST_IsValid(g) AND NOT ST_IsEmpty(g) AND ST_Area(g)>0
         FROM (SELECT ST_SetSRID(ST_GeomFromGeoJSON(#{geometry}),4326) AS g) q

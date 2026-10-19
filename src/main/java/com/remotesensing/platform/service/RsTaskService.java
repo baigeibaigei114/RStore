@@ -26,6 +26,11 @@ import java.util.List;
  */
 public interface RsTaskService {
 
+    /** 加入调用方事务，使用已锁资源准备任务并注册最外层afterCommit；禁止无事务调用。 */
+    com.remotesensing.platform.entity.RsTask prepareSubmissionInCurrentTransaction(
+            RsTaskSubmitDTO submitDTO, com.remotesensing.platform.entity.RsImage lockedImage,
+            com.fasterxml.jackson.databind.node.ObjectNode lockedRegionSnapshot);
+
     /**
      * 提交遥感处理任务。
      * <p>

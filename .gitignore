@@ -65,3 +65,14 @@ data/
 docs/
 
 .claude/
+
+# Local Agent collaboration, review evidence and desktop artifacts
+/AGENTS.md
+/shared/agent-mvp/
+/shared/specs/
+/shared/templates/
+/shared/reliability/*handoff.md
+/shared/reliability/README.md
+/shared/reliability/lease-contract.md
+/output/
+/postman/

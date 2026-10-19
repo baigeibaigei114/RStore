@@ -6,6 +6,7 @@ export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'RETRYIN
 
 /** 提交解译任务的请求参数 */
 export interface TaskSubmitParams {
+  clientRequestId?: string
   /** 待处理的影像 ID */
   imageId: number
   monitoringRegionId?: number

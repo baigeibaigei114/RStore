@@ -24,6 +24,14 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /** Retired or unknown routes must remain 404 instead of entering the generic 500 handler. */
+    @ExceptionHandler({org.springframework.web.servlet.NoHandlerFoundException.class,
+            org.springframework.web.servlet.resource.NoResourceFoundException.class})
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+    public Result<Void> handleNotFound(Exception exception) {
+        return Result.fail(404, "接口不存在");
+    }
+
     /** 处理主动抛出的业务异常，使用异常中携带的自定义错误码。 */
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException exception) {

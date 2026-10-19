@@ -40,6 +40,8 @@ public interface RsImageMapper {
     RsImage selectAccessibleById(@Param("id") Long id,
                                  @Param("currentUserId") String currentUserId);
 
+    RsImage lockAccessibleById(@Param("id") Long id, @Param("currentUserId") String currentUserId);
+
     /**
      * 分页查询当前用户可访问的影像列表。
      * 返回公开影像 + 当前用户自己的私有影像。

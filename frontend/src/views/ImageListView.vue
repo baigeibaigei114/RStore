@@ -25,7 +25,7 @@
 
       <div class="ai-actions">
         <el-button :loading="aiParseLoading" :icon="Search" @click="handleAiParse">解析条件</el-button>
-        <el-button type="primary" :loading="aiPlanLoading" @click="handleCreateAiPlan">生成计划</el-button>
+        <el-button type="primary" @click="router.push('/agent')">打开NDVI助手</el-button>
       </div>
 
       <el-alert
@@ -190,14 +190,6 @@
       </div>
     </el-card>
 
-    <AiPlanDrawer
-      v-model:visible="aiPlanDrawerVisible"
-      :plan="aiPlan"
-      :confirm-loading="aiPlanConfirmLoading"
-      :cancel-loading="aiPlanCancelLoading"
-      @confirm="handleConfirmAiPlan"
-      @cancel="handleCancelAiPlan"
-    />
   </section>
 </template>
 
@@ -206,15 +198,9 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
-import {
-  cancelAiPlanApi,
-  confirmAiPlanApi,
-  createAiPlanApi,
-  parseAiQueryApi,
-} from '@/api/ai'
+import { parseAiQueryApi } from '@/api/ai'
 import { deleteImageApi, searchImagesApi } from '@/api/image'
-import AiPlanDrawer from '@/components/ai/AiPlanDrawer.vue'
-import type { AiPlan, AiQueryParseResult } from '@/types/ai'
+import type { AiQueryParseResult } from '@/types/ai'
 import type {
   ImageListItem,
   ImageSearchParams,
@@ -235,12 +221,7 @@ const loading = ref(false)
 const deletingId = ref<number>()
 const aiInput = ref('')
 const aiParseLoading = ref(false)
-const aiPlanLoading = ref(false)
-const aiPlanConfirmLoading = ref(false)
-const aiPlanCancelLoading = ref(false)
 const aiParsed = ref<AiQueryParseResult | null>(null)
-const aiPlan = ref<AiPlan | null>(null)
-const aiPlanDrawerVisible = ref(false)
 const imageList = ref<ImageListItem[]>([])
 
 const queryForm = reactive<QueryForm>({
@@ -314,49 +295,6 @@ async function handleAiParse() {
     ElMessage.success('AI 已解析条件，请确认后手动查询')
   } finally {
     aiParseLoading.value = false
-  }
-}
-
-async function handleCreateAiPlan() {
-  if (!aiInput.value.trim()) {
-    ElMessage.warning('请先输入自然语言需求')
-    return
-  }
-
-  aiPlanLoading.value = true
-  try {
-    aiPlan.value = await createAiPlanApi(aiInput.value.trim())
-    aiPlanDrawerVisible.value = true
-  } finally {
-    aiPlanLoading.value = false
-  }
-}
-
-async function handleConfirmAiPlan() {
-  if (!aiPlan.value) {
-    return
-  }
-
-  aiPlanConfirmLoading.value = true
-  try {
-    aiPlan.value = await confirmAiPlanApi(aiPlan.value.id)
-    ElMessage.success('计划已确认。请继续手动检索影像或提交任务。')
-  } finally {
-    aiPlanConfirmLoading.value = false
-  }
-}
-
-async function handleCancelAiPlan() {
-  if (!aiPlan.value) {
-    return
-  }
-
-  aiPlanCancelLoading.value = true
-  try {
-    aiPlan.value = await cancelAiPlanApi(aiPlan.value.id)
-    ElMessage.success('计划已取消')
-  } finally {
-    aiPlanCancelLoading.value = false
   }
 }
 

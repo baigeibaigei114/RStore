@@ -37,6 +37,7 @@
 
     <select id="selectById" resultType="com.remotesensing.platform.entity.RsTask">
         SELECT
+            attempt_id, attempt_count, lease_until,
             id,
             owner_id,
             client_request_id,
@@ -262,11 +263,16 @@
     <update id="claimForRunning">
         UPDATE rs_task
         SET status = 'RUNNING',
+            attempt_id = #{attemptId},
+            attempt_count = attempt_count + 1,
+            lease_until = clock_timestamp() + (#{leaseSeconds} * INTERVAL '1 second'),
+            output_object_key = #{outputObjectKey},
             started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
             error_message = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND status IN ('PENDING', 'RETRYING')
+          AND attempt_count &lt; max_retry_count
     </update>
 
     <select id="countActiveByImageId" resultType="long">
@@ -285,5 +291,6 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND status IN ('PENDING', 'RUNNING', 'RETRYING')
+          AND (status != 'RUNNING' OR lease_until IS NULL OR lease_until &lt;= clock_timestamp())
     </update>
 </mapper>

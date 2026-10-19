@@ -208,6 +208,13 @@
           AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
     </select>
 
+    <select id="lockAccessibleById" resultMap="RsImageResultMap">
+        SELECT <include refid="BaseColumnList"/> FROM rs_image
+        WHERE id = #{id} AND deleted_at IS NULL
+          AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
+        FOR UPDATE
+    </select>
+
     <select id="selectPage" resultMap="RsImageResultMap">
         SELECT
         <include refid="BaseColumnList"/>

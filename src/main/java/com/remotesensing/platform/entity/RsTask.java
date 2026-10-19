@@ -12,6 +12,9 @@ import lombok.Data;
  */
 @Data
 public class RsTask {
+    private String attemptId;
+    private Integer attemptCount;
+    private OffsetDateTime leaseUntil;
 
     /** 主键 ID。 */
     private Long id;

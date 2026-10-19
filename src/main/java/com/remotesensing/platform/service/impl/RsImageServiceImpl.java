@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -207,6 +208,8 @@ public class RsImageServiceImpl implements RsImageService {
 
         LocalGeoTiffFile localFile = null;
         MinioUploadVO uploadVO = null;
+        AtomicBoolean mayCompensate = new AtomicBoolean(true);
+        Long imageId;
         try {
             localFile = saveToLocalTemp(file);
             // 上传主流程只复用这一份临时文件完成解析和原始影像上传，缩略图交给后台任务独立处理。
@@ -222,21 +225,22 @@ public class RsImageServiceImpl implements RsImageService {
             RsImage image = buildUploadImage(name, sensor, captureTime, cloudPercent, metadata, uploadVO);
             image.setOwnerId(currentUserContext.getCurrentUserId());
             image.setVisibility(Visibility.PRIVATE.dbValue());
-            insertImageInTransaction(image);
-
-            return getById(image.getId());
+            insertImageInTransaction(image, mayCompensate);
+            imageId = image.getId();
         } catch (DataIntegrityViolationException exception) {
             // 数据库事务无法回滚 MinIO 对象，失败分支需要主动清理已上传文件。
-            deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
+            compensateUploadIfSafe(uploadVO, mayCompensate.get());
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像记录保存失败：" + exception.getMostSpecificCause().getMessage());
         } catch (RuntimeException exception) {
-            // 非数据库异常同样可能发生在 MinIO 上传之后，统一做对象存储补偿。
-            deleteObjectQuietly(uploadVO == null ? null : uploadVO.getObjectKey());
+            // 未知提交结果不可假定失败；保留对象供后续核对。
+            compensateUploadIfSafe(uploadVO, mayCompensate.get());
             throw exception;
         } finally {
             deleteLocalFileQuietly(localFile);
             uploadSemaphore.release();
         }
+        // 事务提交后的读取不属于上传补偿范围。
+        return getById(imageId);
     }
 
     /**
@@ -478,16 +482,27 @@ public class RsImageServiceImpl implements RsImageService {
         return image;
     }
 
-    private void insertImageInTransaction(RsImage image) {
+    private void insertImageInTransaction(RsImage image, AtomicBoolean mayCompensate) {
         // 文件处理完成后才开启短事务，只覆盖影像元数据入库这一步。
         transactionTemplate.executeWithoutResult(status -> {
-            imageMapper.insert(image);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
+                public void afterCompletion(int completionStatus) {
+                    mayCompensate.set(completionStatus == STATUS_ROLLED_BACK);
+                }
+
+                @Override
                 public void afterCommit() {
-                    thumbnailAsyncService.generateAsync(image.getId());
+                    try {
+                        thumbnailAsyncService.generateAsync(image.getId());
+                    } catch (RuntimeException exception) {
+                        log.warn("影像已入库，缩略图调度失败，imageId={}", image.getId(), exception);
+                    }
                 }
             });
+            // 只有明确回滚才补偿；COMMITTED/UNKNOWN 均保留对象等待核对。
+            mayCompensate.set(false);
+            imageMapper.insert(image);
         });
     }
 
@@ -781,6 +796,15 @@ public class RsImageServiceImpl implements RsImageService {
 
     private BigDecimal center(BigDecimal min, BigDecimal max) {
         return min.add(max).divide(BigDecimal.valueOf(2));
+    }
+
+    private void compensateUploadIfSafe(MinioUploadVO upload, boolean mayCompensate) {
+        if (upload == null) return;
+        if (mayCompensate) {
+            deleteObjectQuietly(upload.getObjectKey());
+        } else {
+            log.warn("上传事务未确认回滚，保留对象等待核对，objectKey={}", upload.getObjectKey());
+        }
     }
 
     private void deleteObjectQuietly(String objectKey) {

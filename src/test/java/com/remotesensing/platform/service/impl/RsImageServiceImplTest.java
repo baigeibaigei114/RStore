@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.transaction.PlatformTransactionManager;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.assertj.core.api.Assertions.*;
@@ -54,10 +53,62 @@ class RsImageServiceImplTest {
     private final MinioService storage = mock(MinioService.class);
     private final GeoTiffMetadataService parser = mock(GeoTiffMetadataService.class);
     private final CurrentUserContext user = mock(CurrentUserContext.class);
+    private final ThumbnailAsyncService thumbnails = mock(ThumbnailAsyncService.class);
+    private final TestTransactionManager transactions = new TestTransactionManager();
     private final RsImageServiceImpl service = new RsImageServiceImpl(images, mock(RsTaskMapper.class),
             storage, parser, new ImageBandCapabilityServiceImpl(new ObjectMapper()),
-            mock(ThumbnailAsyncService.class), new ObjectMapper(), new UploadProperties(),
-            mock(PlatformTransactionManager.class), user);
+            thumbnails, new ObjectMapper(), new UploadProperties(), transactions, user);
+
+    /** 执行真实 Spring 同步回调，但不连接数据库。 */
+    private static class TestTransactionManager extends org.springframework.transaction.support.AbstractPlatformTransactionManager {
+        boolean unknownCommit;
+        protected Object doGetTransaction() { return new Object(); }
+        protected void doBegin(Object tx, org.springframework.transaction.TransactionDefinition definition) {}
+        protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {
+            if (unknownCommit) throw new org.springframework.transaction.TransactionSystemException("unknown commit");
+        }
+        protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) {}
+    }
+
+    private void prepareOrdinaryUpload() {
+        var metadata = new GeoTiffMetadataVO();
+        when(parser.parse(any(Path.class))).thenReturn(metadata);
+        when(user.getCurrentUserId()).thenReturn("test-user");
+        when(storage.uploadGeoTiff(any(Path.class), anyString(), anyString()))
+                .thenReturn(new com.remotesensing.platform.vo.MinioUploadVO("test", "raw/test.tif", 3L, "image/tiff"));
+        when(images.insert(any())).thenAnswer(call -> {
+            ((RsImage) call.getArgument(0)).setId(1L);
+            return 1;
+        });
+    }
+
+    private void uploadOrdinary() {
+        service.upload(new MockMultipartFile("file", "test.tif", "image/tiff", new byte[]{1,2,3}),
+                "test", null, null, null);
+    }
+
+    @Test void committedUploadSurvivesDetailReadFailure() {
+        prepareOrdinaryUpload();
+        when(images.selectAccessibleById(1L, "test-user")).thenThrow(new IllegalStateException("read failed"));
+        assertThatThrownBy(this::uploadOrdinary).hasMessageContaining("read failed");
+        verify(storage, never()).deleteObject(anyString());
+    }
+
+    @Test void committedUploadSurvivesThumbnailSchedulingFailure() {
+        prepareOrdinaryUpload();
+        var returned = new RsImage(); returned.setId(1L); returned.setOwnerId("test-user");
+        when(images.selectAccessibleById(1L, "test-user")).thenReturn(returned);
+        doThrow(new IllegalStateException("executor unavailable")).when(thumbnails).generateAsync(1L);
+        assertThatCode(this::uploadOrdinary).doesNotThrowAnyException();
+        verify(storage, never()).deleteObject(anyString());
+    }
+
+    @Test void unknownCommitMustNotDeleteObject() {
+        prepareOrdinaryUpload();
+        transactions.unknownCommit = true;
+        assertThatThrownBy(this::uploadOrdinary).hasMessageContaining("unknown commit");
+        verify(storage, never()).deleteObject(anyString());
+    }
 
     @Test void invalidPackageDoesNotReachStorageOrDatabase() {
         when(parser.parse(any(Path.class))).thenReturn(new GeoTiffMetadataVO());

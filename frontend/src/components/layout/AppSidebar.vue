@@ -36,6 +36,7 @@ import {
   MapLocation,
   UploadFilled,
   Plus,
+  ChatDotRound,
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -45,6 +46,7 @@ const appStore = useAppStore()
 
 const menuItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
+  { path: '/agent', title: 'NDVI助手', icon: ChatDotRound },
   { path: '/images', title: '影像资产', icon: Files },
   { path: '/images/upload', title: '影像上传', icon: UploadFilled },
   { path: '/map', title: '地图浏览', icon: MapLocation },

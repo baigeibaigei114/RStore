@@ -57,12 +57,26 @@ public class CurrentUserContext {
                 return jwtUser.userId();
             }
 
-            if (authProperties.isDevUserHeaderEnabled()) {
+            String path = request.getRequestURI().substring(request.getContextPath().length());
+            if (authProperties.isDevUserHeaderEnabled() && !path.startsWith("/agent/")) {
                 String userId = request.getHeader(USER_ID_HEADER);
                 if (userId != null && !userId.isBlank()) {
                     return userId.trim();
                 }
                 return authProperties.getDefaultUserId();
+            }
+        }
+        throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), ResultCode.UNAUTHORIZED.getMessage());
+    }
+
+    /** Agent入口始终要求JWT，即使普通开发接口允许X-User-Id。 */
+    public String getAuthenticatedUserId() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servletAttributes) {
+            String authorization = servletAttributes.getRequest().getHeader(AUTHORIZATION_HEADER);
+            if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
+                var user = jwtTokenService.parseToken(authorization.substring(BEARER_PREFIX.length()).trim());
+                if (!tokenBlacklistService.isBlacklistedByJti(user.jti())) return user.userId();
             }
         }
         throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), ResultCode.UNAUTHORIZED.getMessage());

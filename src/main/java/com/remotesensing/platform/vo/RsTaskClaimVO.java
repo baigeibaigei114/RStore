@@ -1,6 +1,5 @@
 package com.remotesensing.platform.vo;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 
 /**
@@ -8,8 +7,17 @@ import lombok.Data;
  * 用于向 Worker 返回任务领取结果，包含是否成功领取、需执行的动作及任务当前状态。
  */
 @Data
-@AllArgsConstructor
 public class RsTaskClaimVO {
+    private String attemptId;
+    private Integer leaseSeconds;
+
+    public RsTaskClaimVO(Boolean claimed, String action, String taskStatus, String message, String outputObjectKey) {
+        this.claimed = claimed;
+        this.action = action;
+        this.taskStatus = taskStatus;
+        this.message = message;
+        this.outputObjectKey = outputObjectKey;
+    }
 
     /** 是否成功领取任务（true=已领取，false=无待处理任务或已被其他 Worker 领取）。 */
     private Boolean claimed;
