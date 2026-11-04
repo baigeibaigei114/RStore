@@ -31,7 +31,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         // Worker Token 拦截器：只保护 Worker 回调接口，校验 X-Worker-Token 请求头。
         registry.addInterceptor(new WorkerTokenInterceptor(authProperties))
-                .addPathPatterns("/tasks/*/claim", "/tasks/*/status");
+                .addPathPatterns("/tasks/*/claim", "/tasks/*/status", "/internal/ingestion/**");
 
         // 用户认证拦截器：保护除登录、健康检查、Worker 回调外的所有接口。
         registry.addInterceptor(new AuthInterceptor(currentUserContext))
@@ -41,7 +41,8 @@ public class WebConfig implements WebMvcConfigurer {
                         "/auth/logout",
                         "/actuator/health",
                         "/tasks/*/claim",
-                        "/tasks/*/status"
+                        "/tasks/*/status",
+                        "/internal/ingestion/**"
                 );
     }
 }

@@ -89,6 +89,9 @@ services:
     restart: unless-stopped
     mem_limit: 2g
     environment:
+      INGESTION_BUCKET_NAME: ${INGESTION_BUCKET_NAME:-rs-ingestion}
+      INGESTION_ENABLED: ${INGESTION_ENABLED:-false}
+      INGESTION_STANDARDIZATION_ENABLED: ${INGESTION_STANDARDIZATION_ENABLED:-false}
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx1024m
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rs_image_asset
       SPRING_DATASOURCE_USERNAME: postgres
@@ -139,7 +142,10 @@ services:
     container_name: rs-python-worker
     restart: unless-stopped
     mem_limit: 2816m
+    cpus: 2.0
     environment:
+      INGESTION_BUCKET: ${INGESTION_BUCKET_NAME:-rs-ingestion}
+      INGESTION_ENABLED: ${INGESTION_ENABLED:-false}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -151,7 +157,7 @@ services:
       MINIO_SECURE: "false"
       BACKEND_BASE_URL: http://backend:8080
       WORKER_TOKEN: dev-worker-token-change-me
-      WORKER_TEMP_DIR: /tmp/rs-worker
+      WORKER_TEMP_DIR: /work/ingestion-tmp
     depends_on:
       rabbitmq:
         condition: service_started
@@ -159,8 +165,11 @@ services:
         condition: service_started
       backend:
         condition: service_started
+    volumes:
+      - ingestion-worker-tmp:/work/ingestion-tmp
 
 volumes:
+  ingestion-worker-tmp:
   postgres_data:
   rabbitmq_data:
   minio_data:

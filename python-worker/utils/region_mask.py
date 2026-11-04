@@ -16,7 +16,7 @@ def snapshot_digest(snapshot: dict) -> str:
     ).hexdigest()
 
 
-def region_mask(dataset, snapshot: dict) -> np.ndarray:
+def region_mask(dataset, snapshot: dict, *, allow_empty=False) -> np.ndarray:
     if (snapshot.get("schemaVersion") != 1 or snapshot.get("crs") != "EPSG:4326"
             or snapshot.get("pixelRule") != "center_covered"
             or dataset.crs is None):
@@ -69,6 +69,6 @@ def region_mask(dataset, snapshot: dict) -> np.ndarray:
             if dy != 0:
                 inside ^= ((ay > y) != (by > y)) & (x < ax + (y - ay) * dx / dy)
         mask[start:stop, col_start:col_end] = inside | boundary
-    if not mask.any():
+    if not allow_empty and not mask.any():
         raise ValueError("Region contains no pixel centers at input resolution")
     return mask

@@ -8,6 +8,8 @@ import lombok.Data;
  */
 @Data
 public class RsTaskClaimVO {
+    private Long slotFence;
+    private String hardDeadline;
     private String attemptId;
     private Integer leaseSeconds;
 

@@ -49,6 +49,7 @@ const menuItems = [
   { path: '/agent', title: 'NDVI助手', icon: ChatDotRound },
   { path: '/images', title: '影像资产', icon: Files },
   { path: '/images/upload', title: '影像上传', icon: UploadFilled },
+  { path: '/ingestion', title: '产品入库', icon: UploadFilled },
   { path: '/map', title: '地图浏览', icon: MapLocation },
   { path: '/spatial-query', title: '空间查询', icon: Location },
   { path: '/tasks', title: '任务管理', icon: DataAnalysis },
