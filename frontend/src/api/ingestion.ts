@@ -1,4 +1,5 @@
 import request from '@/api/request'
+import type { AssetMapRequest, PublicationView, StandardizedLayerPage } from '@/types/ingestion'
 import type { ConfirmationView, ConfirmRequest, CreateProduct, CreatedProduct, JobPage, JobRetryRequest, JobSubmission, JobView, PreflightRequest, ProductPage, ProductView, RetryRequest } from '@/types/ingestion'
 
 export const createProduct = (body: CreateProduct) => request.post<unknown, CreatedProduct>('/ingestion/products', body, { silentError: true })
@@ -11,6 +12,12 @@ export const confirmPreflight = (id: string, body: ConfirmRequest) => request.po
 export const getIngestionJob = (id: string) => request.get<unknown, JobView>(`/ingestion/jobs/${id}`, { silentError: true })
 export const listIngestionJobs = () => request.get<unknown, JobPage>('/ingestion/jobs', { params: { page: 1, pageSize: 20 }, silentError: true })
 export const retryIngestionJob = (id: string, body: JobRetryRequest) => request.post<unknown, JobSubmission>(`/ingestion/jobs/${id}/retry`, body, { silentError: true })
+export const getPublication = (jobId: string) => request.get<unknown, PublicationView | null>(`/ingestion/jobs/${jobId}/publication`, { silentError: true })
+export const retryPublication = (jobId: string, body: RetryRequest) => request.post<unknown, PublicationView>(`/ingestion/jobs/${jobId}/publication/retry`, body, { silentError: true })
+export const listStandardizedLayers = (page = 1) => request.get<unknown, StandardizedLayerPage>('/ingestion/layers', { params: { page, pageSize: 20 }, silentError: true })
+export const assetMapBlob = (layerId: string, p: AssetMapRequest, signal?: AbortSignal) =>
+  request.get<unknown, Blob>(`/ingestion/layers/${layerId}/wms`, { params: { bbox: p.bbox, srs: p.srs, width: p.width, height: p.height, transparent: p.transparent }, responseType: 'blob', signal, silentError: true })
+export const assetCoverageBlob = (layerId: string, signal?: AbortSignal) => request.get<unknown, Blob>(`/ingestion/layers/${layerId}/wcs`, { responseType: 'blob', signal, silentError: true })
 export const previewBlob = (id: string, signal?: AbortSignal) => request.get<unknown, Blob>(`/ingestion/products/${id}/preview`, { responseType: 'blob', signal, silentError: true })
 export const uploadProduct = (id: string, file: File, progress: (percent: number) => void, signal?: AbortSignal) =>
   request.put<unknown, { productId: string; status: string; version: number }>(`/ingestion/products/${id}/content`, file, {
@@ -34,6 +41,8 @@ const messages: Record<string, string> = {
   ASSET_UNAVAILABLE: '已登记影像已删除或不可用，不能复制原作业生成第二份资产。', ASSET_CHANGED: '已登记影像的准入信息已变化，请核对资产。',
   HARD_TIMEOUT: '本阶段超过时限，请查询失败记录后决定是否重试。', LEASE_LOST: '本次执行已失去租约，等待停止和状态收敛。',
   DISPATCH_FAILED: '工作投递未完成，请查询作业状态。',
+  PUBLISH_FAILED: '地图发布未通过验证。影像已保留，可单独重试发布。',
+  PUBLISH_UNCERTAIN: '地图服务响应尚未确认。影像已保留，需先核对服务恢复状态。',
 }
 export function ingestionMessage(reason?: string) { return reason ? messages[reason] || '本阶段未完成，请查看状态后重试。' : '' }
 export function describeIngestionError(error: unknown): { status?: number; message: string } {

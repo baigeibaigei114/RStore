@@ -11,6 +11,11 @@ import org.springframework.stereotype.Component;
 public class IngestionProperties {
     private boolean enabled = false;
     private boolean standardizationEnabled = false;
+    private boolean publicationEnabled = false;
+    /** Operator confirms the private network after checking the deployment; ACL is also checked live. */
+    private boolean mapBoundaryVerified = false;
+    private long mapCopyQuota = 4L << 30;
+    private int publishDeadlineSeconds = 120;
     private String bucketName;
     private String profileVersion = "safe-l2a-profile-v1";
     private String tempDirectory = "data/ingestion-upload";

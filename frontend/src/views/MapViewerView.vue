@@ -124,6 +124,16 @@
       </el-card>
       </aside>
     </div>
+    <section class="asset-browser" aria-label="本人标准化影像">
+      <div class="asset-browser-heading"><div><h3>本人标准化影像</h3><p>查看完成地图验证的私有资产。</p></div><el-button :loading="assetLoading" @click="loadAssets(assetPage)">{{ assetsOpened ? '刷新资产图层' : '查看资产图层' }}</el-button></div>
+      <p v-if="assetError" role="status">{{ assetError }}</p>
+      <p v-else-if="assetsOpened && !assetLoading && !assetLayers.length">暂无可用的标准化影像图层。</p>
+      <template v-if="assetLayers.length">
+        <el-select v-model="selectedAssetId" clearable placeholder="选择本人影像" aria-label="选择本人标准化影像"><el-option v-for="asset in assetLayers" :key="asset.layerId" :label="asset.name" :value="asset.layerId" /></el-select>
+        <el-pagination v-if="assetTotal > 20" small layout="prev, pager, next" :current-page="assetPage" :page-size="20" :total="assetTotal" @current-change="loadAssets" />
+      </template>
+      <StandardizedAssetMap v-if="selectedAsset" :layer-id="selectedAsset.layerId" :name="selectedAsset.name" :bounds="selectedAsset.bounds" />
+    </section>
   </section>
 </template>
 
@@ -140,6 +150,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import WKT from 'ol/format/WKT'
 import MonitoringRegionPanel from '@/components/MonitoringRegionPanel.vue'
+import StandardizedAssetMap from '@/components/ingestion/StandardizedAssetMap.vue'
+import { describeIngestionError, listStandardizedLayers } from '@/api/ingestion'
+import type { StandardizedLayer } from '@/types/ingestion'
 import { getImageDetailApi } from '@/api/image'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -151,6 +164,21 @@ import type { LayerListItem, LayerSearchParams } from '@/types/layer'
 
 /** 路由实例，用于读取查询参数 */
 const route = useRoute()
+const assetLayers = ref<StandardizedLayer[]>([]), selectedAssetId = ref<string>(), assetsOpened = ref(false), assetLoading = ref(false), assetError = ref(''), assetPage = ref(1), assetTotal = ref(0)
+const selectedAsset = computed(() => assetLayers.value.find(asset => asset.layerId === selectedAssetId.value))
+let assetRequest = 0
+async function loadAssets(page: number) {
+  const call = ++assetRequest, token = localStorage.getItem(TOKEN_KEY)
+  assetsOpened.value = true; assetLoading.value = true; assetError.value = ''
+  try {
+    const result = await listStandardizedLayers(page)
+    if (call !== assetRequest || token !== localStorage.getItem(TOKEN_KEY)) return
+    assetLayers.value = result.items; assetPage.value = result.page; assetTotal.value = result.total
+    if (!result.items.some(asset => asset.layerId === selectedAssetId.value)) selectedAssetId.value = undefined
+  } catch (error) {
+    if (call === assetRequest) { assetLayers.value = []; selectedAssetId.value = undefined; assetError.value = describeIngestionError(error).message }
+  } finally { if (call === assetRequest) assetLoading.value = false }
+}
 
 /* ==================== 地图相关 ==================== */
 /** 地图容器 DOM 元素引用 */
@@ -251,6 +279,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  assetRequest++
   locationRequest++
   resizeObserver?.disconnect()
 })
@@ -416,6 +445,9 @@ function currentToken() {
   return localStorage.getItem(TOKEN_KEY) || undefined
 }
 </script>
+<style scoped>
+.asset-browser{margin-top:24px;padding:20px;border:1px solid #d8e2d9;border-radius:8px;background:#f7faf6}.asset-browser-heading{display:flex;justify-content:space-between;align-items:center;gap:14px}.asset-browser h3{margin:0 0 6px;color:#315f4c;font-size:16px}.asset-browser p{font-size:12px;color:#697e6e}.asset-browser .el-select{width:min(350px,100%);margin:12px 0}.asset-browser .el-pagination{margin-bottom:12px}
+</style>
 
 <style scoped>
 .map-viewer {

@@ -1,6 +1,8 @@
 import type { RegionPolygon } from '@/api/monitoringRegion'
 import type { ConfirmRequest, CreateProduct, JobRetryRequest, PreflightRequest, RetryRequest } from '@/types/ingestion'
 
+interface PublicationRetryIntent { jobId: string; publicationId: string; body: RetryRequest }
+
 export interface IngestionDraft {
   productId?: string; confirmationId?: string; selectedRegionId?: number; imageName?: string
   productName?: string
@@ -8,12 +10,21 @@ export interface IngestionDraft {
   regionSaveUnknown?: boolean
   create?: CreateProduct; preflight?: PreflightRequest; retry?: { productId: string; body: RetryRequest }
   jobId?: string; confirm?: { confirmationId: string; body: ConfirmRequest }; jobRetry?: { jobId: string; body: JobRetryRequest }
+  publicationRetries?: Record<string, PublicationRetryIntent>
 }
 const key = (owner: string) => `rs_ingestion_v1:${encodeURIComponent(owner)}`
 export function loadIngestionDraft(owner: string): IngestionDraft {
   try {
     const value = JSON.parse(sessionStorage.getItem(key(owner)) || '{}')
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as IngestionDraft : {}
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    const { publicationRetry, ...draft } = value as IngestionDraft & { publicationRetry?: PublicationRetryIntent }
+    if (publicationRetry?.publicationId) {
+      draft.publicationRetries = {
+        [publicationRetry.publicationId]: publicationRetry,
+        ...draft.publicationRetries,
+      }
+    }
+    return draft
   } catch { return {} }
 }
 export function saveIngestionDraft(owner: string, draft: IngestionDraft) {

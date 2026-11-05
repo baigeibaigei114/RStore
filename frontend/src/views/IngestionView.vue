@@ -78,7 +78,11 @@
           <div class="confirmation-footer"><el-button type="primary" :loading="working" :disabled="!confirmation.confirmationHash || (!draft.confirm && !['READY', 'CONSUMED'].includes(confirmation.status))" @click="confirmCurrent">{{ draft.confirm ? '恢复上次确认请求' : confirmation.status === 'CONSUMED' ? '查看确认作业' : '确认并标准化' }}</el-button><span>只按上述快照处理，不自动计算 NDVI。</span></div>
           <p v-if="draft.confirm" class="muted">确认请求已保留。网络结果不明时先刷新，恢复会沿用原请求键与确认哈希。</p>
         </section>
-        <IngestionJobPanel :job="job" :items="jobsHistory" :busy="working || refreshing" :can-retry="product?.status === 'READY'" :conflict="jobConflict" :latest-read="jobLatestRead" :retry-pending="!!draft.jobRetry" @refresh="refresh" @retry="retryJob" @reload="reloadJobForRetry" @choose="chooseJob" />
+        <IngestionJobPanel :job="job" :items="jobsHistory" :busy="working || refreshing" :can-retry="product?.status === 'READY'" :conflict="jobConflict" :latest-read="jobLatestRead" :retry-pending="!!draft.jobRetry"
+          :publication="publication" :publication-conflict="publicationConflict" :publication-latest-read="publicationLatestRead" :publication-retry-pending="publicationRetryPending"
+          @refresh="refresh" @retry="retryJob" @reload="reloadJobForRetry" @choose="chooseJob" @publication-retry="retryMapPublication" @publication-reload="reloadPublication" @map="mapOpen = !mapOpen" />
+        <StandardizedAssetMap v-if="mapOpen && publication?.status === 'AVAILABLE' && publication.layerId && job?.assetStatus === 'AVAILABLE' && job.publicationId === publication.publicationId"
+          :layer-id="publication.layerId" :name="job.regionSnapshot.name" :geometry="job.regionSnapshot.geometry" />
       </main>
     </div>
   </section>
@@ -89,11 +93,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProductRegionMap from '@/components/ingestion/ProductRegionMap.vue'
 import IngestionJobPanel from '@/components/ingestion/IngestionJobPanel.vue'
-import { confirmPreflight, createPreflight, createProduct, describeIngestionError, getIngestionJob, getPreflight, getProduct, ingestionMessage, listIngestionJobs, listProducts, retryIngestionJob, retryProduct, uploadProduct } from '@/api/ingestion'
+import StandardizedAssetMap from '@/components/ingestion/StandardizedAssetMap.vue'
+import { confirmPreflight, createPreflight, createProduct, describeIngestionError, getIngestionJob, getPreflight, getProduct, getPublication, ingestionMessage, listIngestionJobs, listProducts, retryIngestionJob, retryProduct, retryPublication, uploadProduct } from '@/api/ingestion'
 import { listMonitoringRegionsApi, saveMonitoringRegionApi, type MonitoringRegion, type RegionPolygon } from '@/api/monitoringRegion'
 import { TOKEN_KEY } from '@/api/request'
 import { useAuthStore } from '@/stores/auth'
-import type { ConfirmationView, JobView, ProductStatus, ProductView } from '@/types/ingestion'
+import type { ConfirmationView, JobView, ProductStatus, ProductView, PublicationView } from '@/types/ingestion'
 import { loadIngestionDraft, saveIngestionDraft, type IngestionDraft } from '@/utils/ingestionIntent'
 
 const auth = useAuthStore(), router = useRouter(), route = useRoute()
@@ -101,8 +106,13 @@ const owner = ref(''), productName = ref(''), file = ref<File>(), percent = ref(
 const working = ref(false), refreshing = ref(false), message = ref(''), messageKind = ref<'info' | 'warning' | 'error'>('info'), loginRequired = ref(false), stateConflict = ref(false)
 const latestRead = ref(false)
 const job = ref<JobView>(), jobsHistory = ref<JobView[]>([]), jobConflict = ref(false), jobLatestRead = ref(false)
+const publication = ref<PublicationView>(), publicationConflict = ref(false), publicationLatestRead = ref(false), mapOpen = ref(false)
 const history = ref<ProductView[]>([]), historyPage = ref(1), historyTotal = ref(0), regions = ref<MonitoringRegion[]>([])
 const draft = reactive<IngestionDraft>({})
+const publicationRetryPending = computed(() => {
+  const id = publication.value?.publicationId
+  return !!id && draft.publicationRetries?.[id]?.jobId === job.value?.jobId && !!draft.publicationRetries?.[id]
+})
 let alive = true, token = '', sequence = 0, jobSequence = 0, pollCount = 0, timer: ReturnType<typeof setTimeout> | undefined, uploadAbort: AbortController | undefined
 const selectedRegion = computed(() => regions.value.find(r => r.id === draft.selectedRegionId))
 const displayGeometry = computed(() => {
@@ -164,7 +174,15 @@ async function refreshJob() {
   if (!id || !current()) return false
   const result = await getIngestionJob(id)
   if (!current() || call !== jobSequence || id !== draft.jobId) return false
-  job.value = result; return true
+  job.value = result
+  if (result.status !== 'SUCCEEDED' || result.assetStatus !== 'AVAILABLE' || !result.publicationId) { publication.value = undefined; mapOpen.value = false; return true }
+  try {
+    const view = await getPublication(id)
+    if (current() && call === jobSequence && id === draft.jobId) publication.value = view?.publicationId === result.publicationId ? view : undefined
+  } catch (error) {
+    if (alive && call === jobSequence && id === draft.jobId) { publication.value = undefined; publicationFeedback(error) }
+  }
+  return current() && call === jobSequence && id === draft.jobId
 }
 async function refreshCurrent() {
   const id = draft.productId, call = ++sequence
@@ -193,7 +211,7 @@ async function refresh() {
 }
 function schedulePolling() {
   clearTimeout(timer)
-  const active = ['UPLOADING', 'INSPECT_QUEUED', 'INSPECTING'].includes(product.value?.status || '') || confirmation.value?.status === 'PENDING' || ['QUEUED', 'RUNNING', 'VALIDATING'].includes(job.value?.status || '')
+  const active = ['UPLOADING', 'INSPECT_QUEUED', 'INSPECTING'].includes(product.value?.status || '') || confirmation.value?.status === 'PENDING' || ['QUEUED', 'RUNNING', 'VALIDATING'].includes(job.value?.status || '') || (job.value?.assetStatus === 'AVAILABLE' && ['PENDING', 'PUBLISHING'].includes(job.value.publicationStatus || ''))
   if (!current() || !active) return
   if (pollCount >= 60) { note('后台仍在处理，可稍后手动刷新。离开页面不会中断已上传产品的后台处理。'); return }
   timer = setTimeout(async () => {
@@ -209,8 +227,11 @@ async function chooseProduct(id: string) {
 }
 function newProduct() {
   if (working.value) return
+  const pendingPublications = draft.publicationRetries
   sequence++; clearTimeout(timer); Object.keys(draft).forEach(k => delete draft[k as keyof IngestionDraft])
+  if (pendingPublications) draft.publicationRetries = pendingPublications
   product.value = undefined; confirmation.value = undefined; job.value = undefined; jobSequence++; jobConflict.value = false; file.value = undefined; percent.value = 0; productName.value = ''; stateConflict.value = false; message.value = ''
+  publication.value = undefined; publicationConflict.value = false; publicationLatestRead.value = false; mapOpen.value = false
   persist(); void router.replace({ query: {} })
 }
 function selectFile(event: Event) {
@@ -339,8 +360,45 @@ async function restoreConfirmation() {
 async function chooseJob(id: string) {
   if (working.value || !current()) return
   working.value = true; jobSequence++; job.value = undefined; draft.jobId = id; jobConflict.value = false; jobLatestRead.value = false; persist()
+  publication.value = undefined; publicationConflict.value = false; publicationLatestRead.value = false; mapOpen.value = false
   try { await router.replace({ query: { ...route.query, jobId: id } }); await refreshJob(); pollCount = 0; schedulePolling() }
   catch (error) { feedback(error) }
+  finally { if (alive) working.value = false }
+}
+function publicationFeedback(error: unknown) {
+  if (!alive) return
+  const detail = describeIngestionError(error); message.value = detail.message; messageKind.value = 'warning'
+  if (detail.status === 401) { loginRequired.value = true; mapOpen.value = false }
+  if (detail.status === 409) { publicationConflict.value = true; publicationLatestRead.value = false }
+}
+async function reloadPublication() {
+  if (!current() || working.value) return
+  try { await refreshJob(); publicationLatestRead.value = !!publication.value; if (publicationLatestRead.value) note('已读取发布最新状态。你可以按该版本明确重试。') }
+  catch (error) { publicationFeedback(error) }
+}
+async function retryMapPublication(useLatest: boolean) {
+  const selected = job.value, currentPublication = publication.value
+  if (!selected || selected.assetStatus !== 'AVAILABLE' || !currentPublication || working.value || !current() || (useLatest && !publicationLatestRead.value)) return
+  working.value = true
+  try {
+    const publicationId = currentPublication.publicationId
+    draft.publicationRetries ??= {}
+    const retries = draft.publicationRetries
+    let pending = useLatest ? undefined : retries[publicationId]
+    if (pending?.jobId === selected.jobId) {
+      const known = await getPublication(selected.jobId)
+      if (!current() || draft.jobId !== selected.jobId || known?.publicationId !== currentPublication.publicationId) return
+      publication.value = known
+    } else {
+      if (currentPublication.status !== 'FAILED' || currentPublication.generation >= 3) return
+      pending = { jobId: selected.jobId, publicationId, body: { clientRequestId: crypto.randomUUID(), expectedVersion: currentPublication.version } }
+      retries[publicationId] = pending
+    }
+    persist(); await retryPublication(selected.jobId, pending.body)
+    if (!current() || draft.jobId !== selected.jobId) return
+    delete retries[publicationId]; publicationConflict.value = false; publicationLatestRead.value = false; persist()
+    note('已确认发布请求，继续使用原资产。'); await refreshJob(); await loadJobs(); pollCount = 0; schedulePolling()
+  } catch (error) { publicationFeedback(error) }
   finally { if (alive) working.value = false }
 }
 async function reloadJobForRetry() {

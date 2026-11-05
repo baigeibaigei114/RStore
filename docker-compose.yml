@@ -68,20 +68,24 @@ services:
     restart: unless-stopped
     mem_limit: 1536m
     environment:
-      GEOSERVER_ADMIN_USER: admin
-      GEOSERVER_ADMIN_PASSWORD: geoserver
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver}
       JAVA_OPTS: -Xms256m -Xmx1152m
       TZ: Asia/Shanghai
-    ports:
-      - "8081:8080"
+    # Only the business backend joins this network; there is no host GeoServer port.
+    networks:
+      - private-map
     volumes:
       - geoserver_data:/opt/geoserver/data_dir
-      - ./data/geoserver-raster:/opt/geoserver/raster-data
+      - ./data/geoserver-raster:/opt/geoserver/raster-data:ro
     depends_on:
       postgres:
         condition: service_healthy
 
   backend:
+    networks:
+      - default
+      - private-map
     build:
       context: .
       dockerfile: Dockerfile
@@ -92,6 +96,12 @@ services:
       INGESTION_BUCKET_NAME: ${INGESTION_BUCKET_NAME:-rs-ingestion}
       INGESTION_ENABLED: ${INGESTION_ENABLED:-false}
       INGESTION_STANDARDIZATION_ENABLED: ${INGESTION_STANDARDIZATION_ENABLED:-false}
+      INGESTION_PUBLICATION_ENABLED: ${INGESTION_PUBLICATION_ENABLED:-false}
+      INGESTION_MAP_BOUNDARY_VERIFIED: ${INGESTION_MAP_BOUNDARY_VERIFIED:-false}
+      GEOSERVER_INGESTION_READ_USERNAME: ${GEOSERVER_INGESTION_READ_USERNAME:-}
+      GEOSERVER_INGESTION_READ_PASSWORD: ${GEOSERVER_INGESTION_READ_PASSWORD:-}
+      GEOSERVER_INGESTION_PUBLISH_USERNAME: ${GEOSERVER_INGESTION_PUBLISH_USERNAME:-}
+      GEOSERVER_INGESTION_PUBLISH_PASSWORD: ${GEOSERVER_INGESTION_PUBLISH_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx1024m
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rs_image_asset
       SPRING_DATASOURCE_USERNAME: postgres
@@ -110,8 +120,8 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: remote-sensing-images
       GEOSERVER_URL: http://geoserver:8080/geoserver
-      GEOSERVER_USERNAME: admin
-      GEOSERVER_PASSWORD: geoserver
+      GEOSERVER_USERNAME: ${GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver}
       GEOSERVER_SHARED_DATA_LOCAL_DIR: /app/data/geoserver-raster
       GEOSERVER_SHARED_DATA_GEOSERVER_DIR: /opt/geoserver/raster-data
       PYTHON_WORKER_PYTHON_EXECUTABLE: /opt/rs-python/bin/python
@@ -175,3 +185,7 @@ volumes:
   minio_data:
   redis_data:
   geoserver_data:
+
+networks:
+  private-map:
+    internal: true

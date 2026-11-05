@@ -204,8 +204,6 @@ public class IngestionJobService {
         products.enabled();ObjectNode j=job(owner,id,false);
         ObjectNode p=db.one("SELECT * FROM ingest_publication WHERE job_id=? AND owner_id=?",id,owner);if(p==null)return db.tree(null);
         assetUsable(j);
-        ObjectNode result=db.object().put("publicationId",p.path("id").asText()).put("imageId",p.path("image_id").asLong())
-                .put("status",p.path("status").asText()).put("version",p.path("version").asLong()).putNull("layerId").putNull("wmsPath").putNull("wcsPath");
-        result.set("error",p.path("last_error"));return result;
+        return IngestionPublicationService.view(p);
     }
 }

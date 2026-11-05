@@ -37,3 +37,14 @@ export interface JobView extends Omit<JobSubmission, 'reused'> {
 }
 export interface JobRetryRequest extends RetryRequest { productId: string }
 export interface JobPage { items: JobView[]; page: number; pageSize: number; total: number }
+export type PublicationStatus = 'PENDING' | 'PUBLISHING' | 'AVAILABLE' | 'FAILED'
+export interface PublicationView {
+  publicationId: string; imageId: number; status: PublicationStatus; version: number; generation: number
+  error: IngestionError | null; layerId: string | null; wmsPath: string | null; wcsPath: string | null
+}
+export interface StandardizedLayer {
+  sourceKind: 'STANDARDIZED_IMAGE'; layerId: string; imageId: number; name: string
+  bounds: { left: number; bottom: number; right: number; top: number }; wmsPath: string; wcsPath: string
+}
+export interface StandardizedLayerPage { items: StandardizedLayer[]; page: number; pageSize: number; total: number }
+export interface AssetMapRequest { bbox: string; srs: 'EPSG:3857'; width: number; height: number; transparent: boolean }

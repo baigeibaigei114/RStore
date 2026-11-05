@@ -43,9 +43,9 @@ public class IngestionService {
         require(global+bytes<=config.getGlobalRawQuota() && owned+bytes<=config.getOwnerRawQuota(),429,"QUOTA_EXCEEDED");
     }
     public void queueCapacity() {
-        long count=db.count("SELECT (SELECT count(*) FROM ingest_outbox w WHERE w.kind IN ('INSPECT','PREFLIGHT','STANDARDIZE','VALIDATE') AND w.status<>'FAILED'"
+        long count=db.count("SELECT (SELECT count(*) FROM ingest_outbox w WHERE (w.kind IN ('INSPECT','PREFLIGHT','STANDARDIZE','VALIDATE') OR (? AND w.kind='PUBLISH')) AND w.status<>'FAILED'"
                 + " AND NOT EXISTS(SELECT 1 FROM ingest_attempt a WHERE a.work_id=w.id AND a.status IN ('RESULT_REPORTED','SUCCEEDED','FAILED')))"
-                + "+(SELECT count(*) FROM ingest_product WHERE status='UPLOADING')");
+                + "+(SELECT count(*) FROM ingest_product WHERE status='UPLOADING')",config.isPublicationEnabled());
         require(count<config.getMaxWaitingWorks(),503,"CAPACITY_BUSY");
     }
     public Created create(String owner, JsonNode body) {
