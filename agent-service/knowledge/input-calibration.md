@@ -6,7 +6,7 @@ sourceUrl: null
 reviewedAt: '2026-10-12'
 ---
 # 标准化输入
-依据仓库shared/ingestion/contract.md，首版支持Sentinel-2 L2A裁剪反射率GeoTIFF，四个Float32波段按B02、B03、B04、B08排列，NoData为-9999，最大2048乘2048像素，CRS和仿射网格完整。新NDVI使用redBand=3、nirBand=4，波段序号从一开始且必须不同。
+本平台支持符合入库规则的Sentinel-2 L2A裁剪反射率GeoTIFF，四个Float32波段按B02、B03、B04、B08排列，NoData为-9999，最大2048乘2048像素，CRS和仿射网格完整。新NDVI使用redBand=3、nirBand=4，波段序号从一开始且必须不同。
 
 ## 离线校准
 原始DN必须先按实际产品元数据的scale和offset转为反射率。输入像素已经是地表反射率时，栅格本身scale/offset应为1/0，Worker不再次校准。重复应用偏移会改变NDVI，不能把重复校准的样本用于业务解释。

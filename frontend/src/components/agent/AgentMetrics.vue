@@ -1,11 +1,11 @@
 <template>
   <div class="metrics" aria-label="任务真实统计">
-    <div class="metric lead"><span>区域 NDVI 均值</span><strong>{{ number(statistics.mean) }}</strong><small>单期区域统计</small></div>
+    <div class="metric lead"><span>区域 NDVI 均值</span><strong>{{ number(statistics.mean) }}</strong><small>区域内有效像素的平均绿度指标</small></div>
     <div class="metric"><span>最小 / 最大</span><strong>{{ number(statistics.min) }} / {{ number(statistics.max) }}</strong></div>
-    <div class="metric"><span>有效像素比例</span><strong>{{ percent(statistics.validPixelRatio) }}</strong><small>不是植被覆盖率</small></div>
+    <div class="metric"><span>有效像素比例</span><strong>{{ percent(statistics.validPixelRatio) }}</strong><small>区域内参与统计的像素占比</small></div>
     <div class="metric"><span>有效 / 总像素</span><strong>{{ number(statistics.validPixelCount) }} / {{ number(statistics.totalPixelCount) }}</strong></div>
     <div class="metric"><span>无效像素</span><strong>{{ number(statistics.invalidPixelCount) }}</strong></div>
-    <div class="metric"><span>区域完整覆盖率</span><strong>{{ percent(coverageRatio) }}</strong></div>
+    <div class="metric"><span>影像范围覆盖率</span><strong>{{ percent(coverageRatio) }}</strong><small>监测区域落在影像范围内的比例</small></div>
   </div>
 </template>
 <script setup lang="ts">
