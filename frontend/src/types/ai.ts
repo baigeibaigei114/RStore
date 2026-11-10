@@ -33,6 +33,7 @@ export interface AiTaskReport {
 export interface TaskResultAnswer {
   requestId: string
   resultVersion: string
+  number: number
   question: string
   status: 'RUNNING' | 'COMPLETE' | 'FAILED'
   error: string | null
@@ -45,14 +46,18 @@ export interface TaskResultAnswer {
 }
 
 export interface TaskResultAnswerState {
-  resultVersion: string
+  resultVersion: string | null
+  currentVersion: string | null
   canAsk: boolean
   message?: string
-  turn?: TaskResultAnswer | null
+  turns: TaskResultAnswer[]
+  hasEarlier: boolean
+  historyVersions: string[]
 }
 
 export interface TaskResultQuestion {
   requestId: string
   resultVersion: string
+  expectedTurn: number
   question: string
 }

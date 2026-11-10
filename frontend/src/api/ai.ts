@@ -15,8 +15,9 @@ export function generateTaskReportApi(taskId: number | string, silentError = fal
   return request.post<unknown, AiTaskReport>(`/ai/reports/from-task/${taskId}`, undefined, { silentError })
 }
 
-export function getTaskResultAnswerApi(taskId: string, signal: AbortSignal) {
-  return request.get<unknown, TaskResultAnswerState>(`/agent/task-results/${taskId}/answers`, { signal, silentError: true })
+export function getTaskResultAnswerApi(taskId: string, signal: AbortSignal, version?: string, beforeTurn?: number) {
+  return request.get<unknown, TaskResultAnswerState>(`/agent/task-results/${taskId}/answers`,
+    { params: { version, beforeTurn }, signal, silentError: true })
 }
 
 export function askTaskResultApi(taskId: string, question: TaskResultQuestion, signal: AbortSignal) {

@@ -17,6 +17,7 @@ import com.remotesensing.platform.mapper.RsResultFileMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.RateLimitService;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,13 +72,13 @@ class TaskResultAnswerServiceTest {
         ObjectNode request = question(question);
         UUID requestId = UUID.fromString(request.path("requestId").asText());
         String version = request.path("resultVersion").asText();
-        when(store.reserve(OWNER, TASK_ID, requestId, version, question, 90)).thenReturn(true);
+        when(store.reserve(OWNER, TASK_ID, requestId, version, question, 90, 0)).thenReturn(true);
         when(agent.post("result-answers", object().put("question", question), Duration.ofSeconds(30)))
                 .thenReturn(object().put("kind", "VALID_PIXELS"));
         doAnswer(invocation -> {
             String answer = invocation.getArgument(3);
             when(store.find(OWNER, TASK_ID, requestId)).thenReturn(
-                    new TaskResultAnswerStore.Turn(requestId, version, question, "COMPLETE", answer, null));
+                    new TaskResultAnswerStore.Turn(requestId, version, 1, question, "COMPLETE", answer, null));
             return null;
         }).when(store).complete(eq(OWNER), eq(TASK_ID), eq(requestId), anyString());
 
@@ -100,7 +101,7 @@ class TaskResultAnswerServiceTest {
 
         when(users.getAuthenticatedUserId()).thenReturn("another");
         assertEquals("TASK_NOT_FOUND", assertThrows(AgentFailure.class, () -> service.ask(TASK_ID, request)).errorCode);
-        verify(store, never()).reserve(anyString(), anyLong(), any(), anyString(), anyString(), anyInt());
+        verify(store, never()).reserve(anyString(), anyLong(), any(), anyString(), anyString(), anyInt(), anyInt());
         verifyNoInteractions(agent);
     }
 
@@ -117,7 +118,7 @@ class TaskResultAnswerServiceTest {
         String question = "均值是多少？";
         ObjectNode request = question(question);
         UUID requestId = UUID.fromString(request.path("requestId").asText());
-        when(store.reserve(eq(OWNER), eq(TASK_ID), eq(requestId), anyString(), eq(question), anyInt())).thenReturn(true);
+        when(store.reserve(eq(OWNER), eq(TASK_ID), eq(requestId), anyString(), eq(question), anyInt(), eq(0))).thenReturn(true);
         when(agent.post(eq("result-answers"), any(), any())).thenAnswer(ignored -> {
             file.setObjectKey("internal/new-attempt.tif");
             return object().put("kind", "MEAN");
@@ -128,8 +129,83 @@ class TaskResultAnswerServiceTest {
         verify(store, never()).complete(anyString(), anyLong(), any(), anyString());
     }
 
+    @Test
+    void restoresOrderedHistoryAndOnlySendsThePreviousVerifiedTopicOnFollowUp() {
+        String followUp = "它的分母是多少？";
+        ObjectNode request = question(followUp).put("expectedTurn", 1);
+        String version = request.path("resultVersion").asText();
+        UUID requestId = UUID.fromString(request.path("requestId").asText());
+        var first = new TaskResultAnswerStore.Turn(UUID.randomUUID(), version, 1,
+                "比例是多少？", "COMPLETE", "{\"kind\":\"VALID_RATIO\"}", null);
+        when(store.history(OWNER, TASK_ID, version, Integer.MAX_VALUE, 31)).thenReturn(List.of(first));
+        when(store.previousComplete(OWNER, TASK_ID, version, 1)).thenReturn(first);
+        when(store.reserve(OWNER, TASK_ID, requestId, version, followUp, 90, 1)).thenReturn(true);
+        ObjectNode prompt = object().put("question", followUp).put("previousKind", "VALID_RATIO");
+        when(agent.post("result-answers", prompt, Duration.ofSeconds(30))).thenReturn(object().put("kind", "FOLLOW_UP"));
+        doAnswer(invocation -> {
+            var second = new TaskResultAnswerStore.Turn(requestId, version, 2,
+                    followUp, "COMPLETE", invocation.getArgument(3), null);
+            when(store.find(OWNER, TASK_ID, requestId)).thenReturn(second);
+            when(store.history(OWNER, TASK_ID, version, Integer.MAX_VALUE, 31)).thenReturn(List.of(second, first));
+            return null;
+        }).when(store).complete(eq(OWNER), eq(TASK_ID), eq(requestId), anyString());
+
+        assertEquals("比例是多少？", service.get(TASK_ID, null, null).path("turns").get(0).path("question").asText());
+        verifyNoInteractions(agent);
+        assertEquals(8, service.ask(TASK_ID, request).path("answer").path("evidence").get(1).path("value").asInt());
+        var restored = service.get(TASK_ID, null, null).path("turns");
+        assertEquals(1, restored.get(0).path("number").asInt());
+        assertEquals(2, restored.get(1).path("number").asInt());
+        verify(agent, times(1)).post("result-answers", prompt, Duration.ofSeconds(30));
+    }
+
+    @Test
+    void priorVersionRemainsReadableAndStaleTurnCannotCallModel() {
+        ObjectNode stale = question("它的分母是多少？").put("expectedTurn", 1);
+        String version = stale.path("resultVersion").asText();
+        var earlier = new TaskResultAnswerStore.Turn(UUID.randomUUID(), version, 1,
+                "比例是多少？", "COMPLETE", "{\"kind\":\"VALID_PIXELS\"}", null);
+        assertEquals("TURN_CHANGED", assertThrows(AgentFailure.class, () -> service.ask(TASK_ID, stale)).errorCode);
+        file.setObjectKey("internal/new-attempt.tif");
+        when(store.versions(OWNER, TASK_ID)).thenReturn(List.of(version));
+        when(store.history(OWNER, TASK_ID, version, Integer.MAX_VALUE, 31)).thenReturn(List.of(earlier));
+
+        JsonNode old = service.get(TASK_ID, version, null);
+        assertFalse(old.path("canAsk").asBoolean());
+        assertEquals(1, old.path("turns").size());
+        assertNotEquals(version, old.path("currentVersion").asText());
+        assertEquals(0, service.get(TASK_ID, null, null).path("turns").size());
+        limits.setEnabled(false);
+        JsonNode disabled = service.get(TASK_ID, version, null);
+        assertFalse(disabled.path("canAsk").asBoolean());
+        assertEquals(old.path("turns"), disabled.path("turns"));
+        verifyNoInteractions(agent);
+    }
+
+    @Test
+    void requestsClarificationForAnAmbiguousFollowUp() {
+        String question = "它是多少？";
+        ObjectNode request = question(question).put("expectedTurn", 1);
+        String version = request.path("resultVersion").asText();
+        UUID requestId = UUID.fromString(request.path("requestId").asText());
+        var range = new TaskResultAnswerStore.Turn(UUID.randomUUID(), version, 1,
+                "最小值和最大值是多少？", "COMPLETE", "{\"kind\":\"RANGE\"}", null);
+        when(store.previousComplete(OWNER, TASK_ID, version, 1)).thenReturn(range);
+        when(store.reserve(OWNER, TASK_ID, requestId, version, question, 90, 1)).thenReturn(true);
+        when(agent.post(eq("result-answers"), any(), any())).thenReturn(object().put("kind", "FOLLOW_UP"));
+        doAnswer(invocation -> {
+            when(store.find(OWNER, TASK_ID, requestId)).thenReturn(new TaskResultAnswerStore.Turn(
+                    requestId, version, 2, question, "COMPLETE", invocation.getArgument(3), null));
+            return null;
+        }).when(store).complete(eq(OWNER), eq(TASK_ID), eq(requestId), anyString());
+
+        JsonNode answer = service.ask(TASK_ID, request).path("answer");
+        assertEquals("CLARIFY", answer.path("kind").asText());
+        assertTrue(answer.path("evidence").isEmpty());
+    }
+
     private ObjectNode question(String text) {
-        return object().put("requestId", UUID.randomUUID().toString())
-                .put("resultVersion", service.get(TASK_ID).path("resultVersion").asText()).put("question", text);
+        return object().put("requestId", UUID.randomUUID().toString()).put("expectedTurn", 0)
+                .put("resultVersion", service.get(TASK_ID, null, null).path("resultVersion").asText()).put("question", text);
     }
 }

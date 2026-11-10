@@ -152,13 +152,17 @@ class AnswerRequest(StrictModel):
     question: Text
 
 
+ResultTopic = Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "VALID_RATIO", "COVERAGE",
+                      "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+
+
 class ResultAnswerRequest(StrictModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    previousKind: ResultTopic | None = None
 
 
 class ResultAnswerSelection(StrictModel):
-    kind: Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "COVERAGE",
-                  "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+    kind: ResultTopic | Literal["FOLLOW_UP", "CLARIFY"]
 
 
 class EvidenceQuote(StrictModel):

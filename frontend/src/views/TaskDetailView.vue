@@ -35,7 +35,7 @@
       </el-button>
     </div>
 
-    <TaskResultAnswers v-if="ndviStatistics && regionSnapshot && auth.isLoggedIn"
+    <TaskResultAnswers v-if="task?.taskType === 'NDVI' && task.status === 'SUCCESS' && regionSnapshot && auth.isLoggedIn"
       :key="answerViewKey" :task-id="taskId" />
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">

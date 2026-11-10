@@ -22,3 +22,14 @@ def test_result_question_returns_only_a_valid_answer_kind(output, status):
     assert model.last_payload == {"question": question}
     if status == 200:
         assert response.json()["kind"] == "VALID_PIXELS"
+
+
+def test_follow_up_receives_only_the_previous_verified_topic():
+    model = ModelDouble({"kind": "FOLLOW_UP"})
+    service = AgentService(None, None, model)
+    body = {"question": "它的分母是多少？", "previousKind": "VALID_RATIO"}
+    with TestClient(create_app(Settings(internal_token=TOKEN), service)) as client:
+        response = client.post("/internal/v1/result-answers", headers=headers(), json=body)
+    assert response.status_code == 200
+    assert response.json()["kind"] == "FOLLOW_UP"
+    assert model.last_payload == body

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -19,8 +20,10 @@ public class TaskResultAnswerController {
     }
 
     @GetMapping
-    public Result<JsonNode> get(@PathVariable long taskId) {
-        return Result.success(service.get(taskId));
+    public Result<JsonNode> get(@PathVariable long taskId,
+                                @RequestParam(required = false) String version,
+                                @RequestParam(required = false) Integer beforeTurn) {
+        return Result.success(service.get(taskId, version, beforeTurn));
     }
 
     @PostMapping
