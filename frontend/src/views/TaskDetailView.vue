@@ -35,6 +35,8 @@
       </el-button>
     </div>
 
+    <TaskResultAnswers v-if="ndviStatistics && regionSnapshot && auth.isLoggedIn"
+      :key="answerViewKey" :task-id="taskId" />
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="16">
@@ -273,6 +275,7 @@
 
 <script setup lang="ts">
 import InputProvenance from '@/components/InputProvenance.vue'
+import TaskResultAnswers from '@/components/agent/TaskResultAnswers.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -310,6 +313,11 @@ const taskId = computed(() => String(route.params.id))
 
 const regionSnapshot = computed(() => getRegionSnapshot(task.value))
 const ndviStatistics = computed(() => readStatistics(task.value, resultFile.value))
+const answerViewKey = computed(() => {
+  const file = resultFile.value
+  return JSON.stringify([auth.userInfo?.userId, taskId.value, file?.id, file?.minioBucket, file?.objectKey,
+    file?.checksum, file?.fileSize, file?.resultMetadata])
+})
 
 const formattedParams = computed(() => {
   if (!task.value?.params) {

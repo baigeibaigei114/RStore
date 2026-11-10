@@ -29,3 +29,30 @@ export interface AiTaskReport {
   createdAt?: string
   updatedAt?: string
 }
+
+export interface TaskResultAnswer {
+  requestId: string
+  resultVersion: string
+  question: string
+  status: 'RUNNING' | 'COMPLETE' | 'FAILED'
+  error: string | null
+  answer: {
+    kind: string
+    statement: string
+    regionVersion: number
+    evidence: { key: string; label: string; value: number; unit: 'decimal' | 'count' | 'ratio' }[]
+  } | null
+}
+
+export interface TaskResultAnswerState {
+  resultVersion: string
+  canAsk: boolean
+  message?: string
+  turn?: TaskResultAnswer | null
+}
+
+export interface TaskResultQuestion {
+  requestId: string
+  resultVersion: string
+  question: string
+}

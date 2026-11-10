@@ -1,13 +1,14 @@
 package com.remotesensing.platform.agent;
 
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.resultanalysis.TaskResultAnswerController;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.annotation.Order;
 import org.springframework.web.bind.annotation.*;
 
 /** Prevent framework/provider exception details from entering Agent browser responses or logs. */
 @Order(-10)
-@RestControllerAdvice(assignableTypes = AgentController.class)
+@RestControllerAdvice(assignableTypes = {AgentController.class, TaskResultAnswerController.class})
 public class AgentAdvice {
     @ExceptionHandler(AgentFailure.class)
     public Result<?> failure(AgentFailure error, HttpServletRequest request) {

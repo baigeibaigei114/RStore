@@ -152,6 +152,15 @@ class AnswerRequest(StrictModel):
     question: Text
 
 
+class ResultAnswerRequest(StrictModel):
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class ResultAnswerSelection(StrictModel):
+    kind: Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "COVERAGE",
+                  "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+
+
 class EvidenceQuote(StrictModel):
     citationId: str = Field(pattern=r"^C[1-5]$")
     quote: str = Field(min_length=1, max_length=650)

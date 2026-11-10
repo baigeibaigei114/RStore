@@ -37,6 +37,7 @@ uv sync --frozen
 
 1. `src/main/resources/db/upgrade/20261003_task_lease.sql`
 2. `src/main/resources/db/upgrade/20261014_agent_ndvi.sql`
+3. `src/main/resources/db/upgrade/20261111_result_analysis.sql`（部署任务结果页问答前执行）
 
 不要重建业务库或清理历史表。知识库使用PostgreSQL 16/PostGIS/pgvector，显式执行`agent-service/sql/001_knowledge.sql`，独立配置最小权限的索引写角色与运行只读角色；迁移不包含生产凭据。
 确认配置及模型就绪后，在agent-service目录显式同步：
