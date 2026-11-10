@@ -13,6 +13,8 @@
 """
 
 from typing import Any
+import os
+import uuid
 
 import requests
 
@@ -36,13 +38,19 @@ class CallbackClient:
 
     def __init__(self, settings: CallbackSettings):
         self._settings = settings
+        self.runtime_enabled = os.getenv('INGESTION_ENABLED', '').lower() == 'true'
+        self.executor_id = str(uuid.uuid4())
+        self._runtime = {}
 
     def _headers(self) -> dict[str, str]:
         """构造 HTTP 请求头，携带 Worker 鉴权 Token。
 
         返回的 dict 相当于 Java 中 HttpHeaders 对象，在 requests 库中直接传入即可。
         """
-        return {"X-Worker-Token": self._settings.worker_token}
+        headers = {"X-Worker-Token": self._settings.worker_token}
+        if self.runtime_enabled:
+            headers.update({"X-Worker-Protocol": "ingestion-v1", "X-Worker-Id": self.executor_id})
+        return headers
 
     def update_status(
         self,
@@ -83,6 +91,8 @@ class CallbackClient:
         # f-string 是 Python 的字符串插值语法（Python 3.6+ 引入），
         # 等价于 Java 中的 String.format("...%s...", var) 或 MessageFormat.format。
         # 与 Java 相比，f-string 更简洁，表达式直接嵌入花括号内。
+        if self.runtime_enabled and task_id in self._runtime:
+            payload["slotFence"] = self._runtime[task_id]["slotFence"]
         url = f"{self._settings.base_url.rstrip('/')}/api/tasks/{task_id}/status"
         response = requests.post(
             url,
@@ -116,7 +126,31 @@ class CallbackClient:
             headers=self._headers(),
             timeout=self._settings.timeout_seconds,
         )
-        return self._parse_result(response) or {}
+        result = self._parse_result(response) or {}
+        if self.runtime_enabled and result.get("action") == "CLAIMED":
+            if type(result.get("slotFence")) is not int or not result.get("hardDeadline"):
+                raise CallbackError("Shared compute protocol missing")
+            self._runtime[task_id] = result
+        return result
+
+    def runtime_ready(self, capabilities=None):
+        payload = {"schemaVersion": 1, "profileVersion": "safe-l2a-profile-v1"}
+        if capabilities is not None:
+            payload["capabilities"] = capabilities
+        response = requests.post(f"{self._settings.base_url.rstrip('/')}/api/internal/ingestion/runtime/ready",
+            headers=self._headers(), json=payload,
+            timeout=self._settings.timeout_seconds)
+        return self._parse_result(response)
+
+    def report_stopped(self, task_id, termination):
+        context = self._runtime.get(task_id)
+        if not self.runtime_enabled or context is None:
+            return
+        response = requests.post(f"{self._settings.base_url.rstrip('/')}/api/internal/ingestion/runtime/ndvi/{task_id}/stopped",
+            headers=self._headers(), json={"slotFence": context["slotFence"], "termination": termination},
+            timeout=self._settings.timeout_seconds)
+        self._parse_result(response)
+        self._runtime.pop(task_id, None)
 
     def safe_update_status(
         self,

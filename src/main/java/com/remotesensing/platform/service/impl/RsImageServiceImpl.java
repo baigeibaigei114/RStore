@@ -50,6 +50,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.remotesensing.platform.ingestion.workflow.IngestionAssetReadService;
+import com.remotesensing.platform.ingestion.api.IngestionProblem;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -92,6 +95,7 @@ public class RsImageServiceImpl implements RsImageService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final CurrentUserContext currentUserContext;
+    private IngestionAssetReadService ingestionAssetReader;
     // 大文件上传会占用磁盘 IO、请求线程和 Python 进程，这里先用轻量闸门限制并发。
     private final Semaphore uploadSemaphore;
 
@@ -115,6 +119,12 @@ public class RsImageServiceImpl implements RsImageService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.currentUserContext = currentUserContext;
         this.uploadSemaphore = new Semaphore(Math.max(1, uploadProperties.getMaxConcurrent()));
+    }
+
+    /** Legacy-only application contexts may omit ingestion; ingestion reads then fail closed. */
+    @Autowired(required = false)
+    public void setIngestionAssetReader(IngestionAssetReadService reader) {
+        this.ingestionAssetReader = reader;
     }
 
     /**
@@ -271,6 +281,15 @@ public class RsImageServiceImpl implements RsImageService {
     @Transactional(readOnly = true)
     public FilePresignedUrlVO getDownloadUrl(Long id) {
         RsImage image = getAccessibleImage(id);
+        if (image.getObjectKey() != null && image.getObjectKey().startsWith("ingestion/")) {
+            try {
+                IngestionProblem.require(ingestionAssetReader != null,503,"SERVICE_UNAVAILABLE");
+                return ingestionAssetReader.downloadUrl(image);
+            } catch (IngestionProblem problem) {
+                // This endpoint retains the existing image API error envelope/advice.
+                throw new BusinessException(problem.status,problem.reason);
+            }
+        }
         if (isBlank(image.getObjectKey())) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "原始影像文件不存在");
         }

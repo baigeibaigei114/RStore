@@ -17,8 +17,8 @@ import type {
  * @param params - 任务提交参数，包含 imageId（影像 ID）、taskType（任务类型）及可选的自定义 params
  * @returns Promise<TaskSubmitResult> - 包含新创建的 taskId
  */
-export function createTaskApi(params: TaskSubmitParams) {
-  return request.post<unknown, TaskSubmitResult>('/tasks', params)
+export function createTaskApi(params: TaskSubmitParams, silentError = false) {
+  return request.post<unknown, TaskSubmitResult>('/tasks', params, { silentError })
 }
 
 /**
@@ -27,8 +27,8 @@ export function createTaskApi(params: TaskSubmitParams) {
  * @param params - 分页参数，包含 pageNum 和 pageSize
  * @returns Promise<PageResult<TaskListItem>> - 分页的任务摘要列表
  */
-export function listTasksApi(params: TaskPageParams) {
-  return request.get<unknown, PageResult<TaskListItem>>('/tasks', { params })
+export function listTasksApi(params: TaskPageParams, silentError = false) {
+  return request.get<unknown, PageResult<TaskListItem>>('/tasks', { params, silentError })
 }
 
 /**
@@ -37,8 +37,8 @@ export function listTasksApi(params: TaskPageParams) {
  * @param taskId - 任务 ID（数字或字符串）
  * @returns Promise<TaskDetail> - 任务完整详情
  */
-export function getTaskDetailApi(taskId: number | string) {
-  return request.get<unknown, TaskDetail>(`/tasks/${taskId}`)
+export function getTaskDetailApi(taskId: number | string, silentError = false) {
+  return request.get<unknown, TaskDetail>(`/tasks/${taskId}`, { silentError })
 }
 
 /**

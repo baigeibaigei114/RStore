@@ -80,6 +80,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class RsTaskServiceImpl implements RsTaskService {
+    private com.remotesensing.platform.ingestion.runtime.ComputeSlots ingestionSlots;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setIngestionSlots(com.remotesensing.platform.ingestion.runtime.ComputeSlots slots) {
+        this.ingestionSlots = slots;
+    }
+
 
     private static final Logger log = LoggerFactory.getLogger(RsTaskServiceImpl.class);
     /** 日期格式化器（年），用于构建结果文件路径中的 yyyy 层级。 */
@@ -240,7 +247,35 @@ public class RsTaskServiceImpl implements RsTaskService {
      */
     @Override
     public RsTaskClaimVO claim(Long taskId) {
-        return transactionTemplate.execute(status -> claimInTransaction(taskId));
+        if (ingestionSlots == null || !ingestionSlots.enabled())
+            return transactionTemplate.execute(status -> claimInTransaction(taskId));
+        String executor = ingestionSlots.requestExecutor();
+        var permit = ingestionSlots.reserve("COMPUTE", "NDVI:" + taskId, executor, 900);
+        if (permit == null) return new RsTaskClaimVO(false, "BUSY", null, "计算服务忙或恢复中", null);
+        boolean[] rolledBack = {false};
+        try {
+            RsTaskClaimVO result = transactionTemplate.execute(status -> {
+                // Only an owned transaction's confirmed rollback proves no attempt committed.
+                if (status.isNewTransaction() && TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCompletion(int completionStatus) {
+                            rolledBack[0] = completionStatus == STATUS_ROLLED_BACK;
+                        }
+                    });
+                }
+                return claimInTransaction(taskId);
+            });
+            if (Boolean.TRUE.equals(result.getClaimed())) {
+                result.setSlotFence(permit.fence());
+                result.setHardDeadline(permit.hardDeadline().toString());
+            } else ingestionSlots.stopped("COMPUTE", "NDVI:" + taskId, executor, permit.fence());
+            return result;
+        } catch (RuntimeException error) {
+            if (rolledBack[0]) ingestionSlots.stopped("COMPUTE", "NDVI:" + taskId, executor, permit.fence());
+            else ingestionSlots.recovery("COMPUTE", "NDVI:" + taskId, executor, permit.fence());
+            throw error;
+        }
     }
 
     /**
@@ -682,6 +717,8 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (currentStatus == TaskStatus.RUNNING && task.getAttemptId() == null && task.getLeaseUntil() != null) {
             throw new BusinessException(409, "历史执行缺少 attemptId，等待回收后重新提交");
         }
+        if (ingestionSlots != null && !currentStatus.isTerminal())
+            ingestionSlots.guardNdvi(taskId, updateDTO.getSlotFence());
         if (task.getAttemptId() != null) {
             if (!task.getAttemptId().equals(updateDTO.getAttemptId())) {
                 throw new BusinessException(409, "执行 attemptId 不匹配");

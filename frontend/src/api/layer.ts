@@ -1,4 +1,4 @@
-import request from '@/api/request'
+import request, { apiEndpoint } from '@/api/request'
 import type { PageResult } from '@/types/api'
 import type { LayerListItem, LayerSearchParams } from '@/types/layer'
 
@@ -13,17 +13,13 @@ export function listLayersApi(params: LayerSearchParams) {
 }
 
 /**
- * 规范化代理 URL：确保 URL 以 /api/ 开头
- * 若 URL 为空返回空字符串；若不以 /api/ 开头则自动补充前缀
+ * 将后端返回的代理路径解析到当前配置的 API 地址，兼容本地 /api 路径。
+ * URL 为空时返回空字符串。
  * @param url - 原始代理 URL
  * @returns 规范化后的 URL 或空字符串
  */
 export function normalizeProxyUrl(url?: string) {
-  if (!url) {
-    return ''
-  }
-
-  return url.startsWith('/api/') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`
+  return apiEndpoint(url)
 }
 
 /**
@@ -33,7 +29,7 @@ export function normalizeProxyUrl(url?: string) {
  * @returns WMS 代理 URL 字符串
  */
 export function getLayerProxyWmsUrl(layer: Pick<LayerListItem, 'id' | 'proxyWmsUrl'>) {
-  return normalizeProxyUrl(layer.proxyWmsUrl) || `/api/layers/${layer.id}/wms`
+  return normalizeProxyUrl(layer.proxyWmsUrl) || apiEndpoint(`/layers/${layer.id}/wms`)
 }
 
 /**
@@ -43,5 +39,5 @@ export function getLayerProxyWmsUrl(layer: Pick<LayerListItem, 'id' | 'proxyWmsU
  * @returns WCS 代理 URL 字符串
  */
 export function getLayerProxyWcsUrl(layer: Pick<LayerListItem, 'id' | 'proxyWcsUrl'>) {
-  return normalizeProxyUrl(layer.proxyWcsUrl) || `/api/layers/${layer.id}/wcs`
+  return normalizeProxyUrl(layer.proxyWcsUrl) || apiEndpoint(`/layers/${layer.id}/wcs`)
 }

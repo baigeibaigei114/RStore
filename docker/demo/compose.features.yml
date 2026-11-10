@@ -1,0 +1,82 @@
+# Merge after the immutable core release; supply secrets.env and features.env explicitly.
+services:
+  postgres:
+    image: rs-demo-postgres:20261109-vector1
+    networks: [default, agent-private]
+
+  geoserver:
+    environment:
+      # Keep idle connections longer than the Java client's five-minute pool lifetime.
+      HTTP_CONNECTION_TIMEOUT: "600000"
+      # The initialized security directory now has three managed identities; do not re-bootstrap it.
+      EXISTING_DATA_DIR: /opt/geoserver/data_dir
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "--max-time", "5", "http://127.0.0.1:8080/geoserver/web/"]
+      interval: 10s
+      timeout: 6s
+      start_period: 45s
+      retries: 20
+
+  backend:
+    mem_limit: 2048m
+    networks: [default, private-map, agent-private]
+    environment:
+      SPRING_PROFILES_ACTIVE: demo,agent
+      AGENT_ENABLED: "true"
+      AGENT_BASE_URL: http://agent-service:8000
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:?set AGENT_INTERNAL_TOKEN}
+      APP_AI_ENABLED: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      INGESTION_ENABLED: "true"
+      INGESTION_STANDARDIZATION_ENABLED: "true"
+      INGESTION_PUBLICATION_ENABLED: ${INGESTION_PUBLICATION_ENABLED:-false}
+      INGESTION_MAP_BOUNDARY_VERIFIED: ${INGESTION_MAP_BOUNDARY_VERIFIED:-false}
+      INGESTION_BUCKET_NAME: rs-demo-ingestion
+      INGESTION_TEMP_DIRECTORY: /work/ingestion-upload
+      INGESTION_OWNER_RAW_QUOTA: "2147483648"
+      INGESTION_GLOBAL_RAW_QUOTA: "4294967296"
+      INGESTION_OWNER_ASSET_QUOTA: "1073741824"
+      INGESTION_GLOBAL_ASSET_QUOTA: "2147483648"
+      INGESTION_MAP_COPY_QUOTA: "1073741824"
+      GEOSERVER_INGESTION_READ_USERNAME: ${GEOSERVER_INGESTION_READ_USERNAME:?set reader}
+      GEOSERVER_INGESTION_READ_PASSWORD: ${GEOSERVER_INGESTION_READ_PASSWORD:?set reader password}
+      GEOSERVER_INGESTION_PUBLISH_USERNAME: ${GEOSERVER_INGESTION_PUBLISH_USERNAME:?set publisher}
+      GEOSERVER_INGESTION_PUBLISH_PASSWORD: ${GEOSERVER_INGESTION_PUBLISH_PASSWORD:?set publisher password}
+    volumes:
+      - ingestion-upload:/work/ingestion-upload
+
+  worker:
+    environment:
+      INGESTION_ENABLED: "true"
+      INGESTION_BUCKET: rs-demo-ingestion
+
+  gateway:
+    volumes:
+      - /opt/ndvi-demo/features-20261109-ai-safe1/gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+  agent-service:
+    image: rs-demo-agent:20261109-ai-safe1
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: 1.0
+    env_file: [/opt/ndvi-demo/agent-runtime.env]
+    networks: [agent-private, agent-egress]
+    volumes:
+      - /opt/ndvi-demo/models/7999e1d3359715c523056ef9478215996d62a620:/models/7999e1d3359715c523056ef9478215996d62a620:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,uuid; r=urllib.request.Request('http://127.0.0.1:8000/internal/v1/ready',headers={'X-Internal-Token':os.environ['AGENT_INTERNAL_TOKEN'],'X-Request-Id':str(uuid.uuid4())}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      start_period: 90s
+      retries: 15
+
+volumes:
+  ingestion-upload:
+
+networks:
+  agent-private:
+    internal: true
+  agent-egress:

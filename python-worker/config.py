@@ -107,6 +107,7 @@ class WorkerSettings:
     """Worker 自身运行配置。"""
 
     temp_dir: Path = Path(os.getenv("WORKER_TEMP_DIR", "tmp")).resolve()
+    ingestion_enabled: bool = _env_bool("INGESTION_ENABLED", False)
 
 
 @dataclass(frozen=True)

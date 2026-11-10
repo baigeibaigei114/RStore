@@ -1,14 +1,30 @@
 <template>
-  <section>
+  <section class="analysis-result">
     <div class="page-title">
       <span>任务详情</span>
-      <h2>{{ task?.taskName || task?.taskCode || `任务 ID：${taskId}` }}</h2>
-      <p>查看任务状态、进度、输入输出对象、错误信息和 Worker 回调日志。</p>
+      <h2>{{ task?.imageName || '读取分析结果' }}</h2>
+      <p>{{ regionSnapshot ? `${regionSnapshot.name} · 版本 ${regionSnapshot.version}` : '分析范围与结果以提交时快照为准' }}</p>
     </div>
+
+    <el-alert v-if="connectionError" :title="connectionError" type="warning" show-icon :closable="false" class="result-feedback" />
+    <el-button v-if="expired" @click="relogin">重新登录并返回原任务</el-button>
+    <el-card shadow="never" class="result-summary">
+      <div class="result-state"><strong>{{ taskStatusText(task?.status) }}</strong><span>最近成功读取：{{ lastRead || '尚未读取' }}</span></div>
+      <template v-if="ndviStatistics">
+        <div class="statistics-grid"><div><span>{{ regionSnapshot ? '区域 NDVI 均值' : 'NDVI 均值' }}</span><strong>{{ ndviStatistics.mean.toFixed(4) }}</strong><small>{{ regionSnapshot ? '仅统计区域内的有效像素' : '统计整幅裁剪矩形内有效像素' }}</small></div>
+          <div><span>有效像素比例</span><strong>{{ (ndviStatistics.validPixelRatio * 100).toFixed(2) }}<small>%</small></strong><small>{{ ndviStatistics.validPixelCount.toLocaleString() }} / {{ ndviStatistics.totalPixelCount.toLocaleString() }} 个区域内像素</small></div></div>
+        <p class="result-note">有效像素比例不是植被覆盖率；单期 NDVI 不能直接判断作物健康或预测产量。</p>
+      </template>
+      <p v-else-if="task?.status === 'SUCCESS'">计算已完成，暂未取得可用统计。已保留任务，可刷新结果。</p>
+      <p v-else-if="isActiveStatus(task?.status)">任务已受理，你可以离开此页，稍后从最近分析、任务列表或原链接继续查看。</p>
+      <div v-if="task?.status === 'FAILED' || task?.status === 'CANCELED'" class="failure"><p>{{ task.status === 'CANCELED' ? '本次任务已取消。可带回原选项，核对后重新发起分析。' : failureMessage(task.errorMessage) }}</p><el-button @click="returnOptions">带回原选项重新核对</el-button></div>
+      <p v-if="task?.status === 'SUCCESS'" class="result-note">地图：{{ resultFile?.status === 'PUBLISHED' ? '已就绪' : ['FAILED', 'PUBLISH_FAILED'].includes(resultFile?.status || '') ? '发布失败，计算结果仍可查看' : '尚未就绪，统计可独立查看' }}</p>
+    </el-card>
 
     <div class="detail-actions">
       <el-button @click="router.push('/tasks')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="refreshAll">刷新</el-button>
+      <el-button v-if="resultFile?.status === 'PUBLISHED' && qualifiedResultLayerName" @click="openResultLayerInMap">查看地图</el-button>
       <el-button
         type="primary"
         :loading="resultDownloadLoading"
@@ -19,6 +35,7 @@
       </el-button>
     </div>
 
+    <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="16">
         <el-card class="detail-card" shadow="never">
@@ -250,6 +267,7 @@
         </el-card>
       </el-col>
     </el-row>
+    </el-collapse-item></el-collapse>
   </section>
 </template>
 
@@ -268,6 +286,10 @@ import {
 } from '@/api/task'
 import type { AiRiskLevel, AiTaskReport } from '@/types/ai'
 import type { TaskDetail, TaskLog, TaskResultFile, TaskStatus, TaskType } from '@/types/task'
+import { useAuthStore } from '@/stores/auth'
+import { useTaskRefresh } from '@/composables/useTaskRefresh'
+import { isUnauthorized } from '@/utils/regionAnalysis'
+import { failureMessage, isActiveStatus, readStatistics, regionSnapshot as getRegionSnapshot, taskStatusText } from '@/utils/taskPresentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -276,47 +298,18 @@ const logLoading = ref(false)
 const resultDownloadLoading = ref(false)
 const resultLoading = ref(false)
 const aiReportLoading = ref(false)
-const polling = ref(false)
+const auth = useAuthStore()
+const connectionError = ref(''), expired = ref(false), lastRead = ref('')
+const technicalOpen = ref<string[]>([])
 const task = ref<TaskDetail | null>(null)
 const resultFile = ref<TaskResultFile | null>(null)
 const aiReport = ref<AiTaskReport | null>(null)
 const logs = ref<TaskLog[]>([])
-const pollingTimer = ref<number>()
 
 const taskId = computed(() => String(route.params.id))
 
-interface NdviStatistics {
-  totalPixelCount: number
-  validPixelCount: number
-  invalidPixelCount: number
-  validPixelRatio: number
-  min: number
-  max: number
-  mean: number
-}
-
-const regionSnapshot = computed(() => {
-  try { return JSON.parse(task.value?.params || '{}').regionSnapshot || null }
-  catch { return null }
-})
-
-const ndviStatistics = computed<NdviStatistics | null>(() => {
-  if (!resultFile.value?.resultMetadata) return null
-  try {
-    const metadata = JSON.parse(resultFile.value.resultMetadata)
-    if (![1, 2].includes(metadata.schemaVersion) || metadata.algorithm !== 'NDVI'
-        || !['cropped_raster', 'monitoring_region'].includes(metadata.scope)) return null
-    const stats = metadata.statistics
-    const keys = ['totalPixelCount', 'validPixelCount', 'invalidPixelCount',
-      'validPixelRatio', 'min', 'max', 'mean']
-    if (!stats || !keys.every((key) => typeof stats[key] === 'number' && Number.isFinite(stats[key]))) {
-      return null
-    }
-    return stats as NdviStatistics
-  } catch {
-    return null
-  }
-})
+const regionSnapshot = computed(() => getRegionSnapshot(task.value))
+const ndviStatistics = computed(() => readStatistics(task.value, resultFile.value))
 
 const formattedParams = computed(() => {
   if (!task.value?.params) {
@@ -343,62 +336,63 @@ const aiKeyFindings = computed(() => normalizeTextList(aiReport.value?.reportJso
 
 const aiSuggestions = computed(() => normalizeTextList(aiReport.value?.reportJson?.suggestions))
 
-onMounted(() => {
-  refreshAll()
+let alive = true, generation = 0, terminalReads = 0
+const { polling, refresh, stop } = useTaskRefresh(readResult)
+function refreshAll() { terminalReads = 0; refresh() }
+onMounted(async () => {
+  try { const user = await auth.loadCurrentUser(); if (alive && user) refreshAll() }
+  catch (error) { if (alive) showConnectionError(error) }
 })
-
-onBeforeUnmount(() => {
-  stopPolling()
+onBeforeUnmount(() => { alive = false; generation++; stop() })
+watch(() => [taskId.value, auth.userInfo?.userId], () => {
+  generation++; terminalReads = 0; task.value = null; resultFile.value = null
+  logs.value = []; aiReport.value = null; connectionError.value = ''; lastRead.value = ''
+  if (alive && auth.userInfo?.userId) refresh(); else stop()
 })
-
-watch(
-  () => [task.value?.status, resultFile.value?.status],
-  () => {
-    syncPolling()
-  },
-)
-
-async function refreshAll() {
-  await fetchTask()
-
-  const jobs: Promise<void>[] = [fetchLogs()]
-  if (task.value?.status === 'SUCCESS' || task.value?.outputObjectKey) {
-    jobs.push(fetchResultFile())
-  } else {
-    resultFile.value = null
-  }
-
-  await Promise.all(jobs)
-  syncPolling()
+watch(technicalOpen, async value => {
+  const id = taskId.value, epoch = generation
+  if (!value.includes('details') || !task.value) return
+  logLoading.value = true
+  try { const value = await listTaskLogsApi(id); if (alive && epoch === generation) logs.value = value }
+  catch { /* Main result remains available if optional logs cannot be read. */ }
+  finally { if (epoch === generation) logLoading.value = false }
+})
+function showConnectionError(error: unknown) {
+  expired.value = isUnauthorized(error)
+  connectionError.value = expired.value ? '登录已过期，已保留已读结果。请重新登录。'
+    : '连接中断，状态可能已更新。已保留上次结果，可重试读取。'
 }
-
-async function fetchTask() {
+async function readResult(): Promise<boolean> {
+  const id = taskId.value, epoch = generation, account = auth.userInfo?.userId
+  if (!account) return false
+  const current = () => alive && epoch === generation && auth.userInfo?.userId === account
   loading.value = true
   try {
-    task.value = await getTaskDetailApi(taskId.value)
-  } finally {
-    loading.value = false
-  }
+    const value = await getTaskDetailApi(id, true)
+    if (!current()) return false
+    task.value = value
+    if (value.status === 'SUCCESS') {
+      terminalReads++
+      const result = await getTaskResultFileApi(id, true)
+      if (!current()) return false
+      resultFile.value = result
+    }
+    connectionError.value = ''; expired.value = false
+    lastRead.value = new Date().toLocaleTimeString()
+    return isActiveStatus(value.status) || (value.status === 'SUCCESS' && terminalReads < 5
+      && (!ndviStatistics.value || !resultFile.value || ['PENDING', 'PENDING_PUBLISH', 'PUBLISHING'].includes(resultFile.value.status || '')))
+  } catch (error) {
+    if (!current()) return false
+    showConnectionError(error)
+    if (expired.value) return false
+    throw error
+  } finally { if (current()) loading.value = false }
 }
-
-async function fetchLogs() {
-  logLoading.value = true
-  try {
-    logs.value = await listTaskLogsApi(taskId.value)
-  } finally {
-    logLoading.value = false
-  }
-}
-
-async function fetchResultFile() {
-  resultLoading.value = true
-  try {
-    resultFile.value = await getTaskResultFileApi(taskId.value, true)
-  } catch {
-    resultFile.value = null
-  } finally {
-    resultLoading.value = false
-  }
+function relogin() { auth.logout(); void router.push({ path: '/login', query: { redirect: route.fullPath } }) }
+function returnOptions() {
+  if (!task.value) return
+  void router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId: task.value.imageId,
+    ...(regionSnapshot.value ? { monitoringRegionId: regionSnapshot.value.regionId } : {}) } })
 }
 
 async function downloadTaskResult() {
@@ -437,55 +431,9 @@ async function handleGenerateAiReport() {
   }
 }
 
-function syncPolling() {
-  const publishing = task.value?.status === 'SUCCESS'
-    && (!resultFile.value || ['PENDING_PUBLISH', 'PUBLISHING', 'PENDING'].includes(resultFile.value.status || ''))
-  if (task.value && (isActiveStatus(task.value.status) || publishing)) {
-    startPolling()
-    return
-  }
-  stopPolling()
-}
-
 function openResultLayerInMap() {
-  if (!resultFile.value?.imageId || !task.value?.taskType) {
-    return
-  }
-
-  router.push({
-    path: '/map',
-    query: {
-      imageId: String(resultFile.value.imageId),
-      taskType: task.value.taskType,
-    },
-  })
-}
-
-function startPolling() {
-  polling.value = true
-
-  if (pollingTimer.value) {
-    return
-  }
-
-  pollingTimer.value = window.setInterval(() => {
-    if (!loading.value && !resultLoading.value && !logLoading.value) {
-      refreshAll().catch(() => stopPolling())
-    }
-  }, 3000)
-}
-
-function stopPolling() {
-  polling.value = false
-
-  if (pollingTimer.value) {
-    window.clearInterval(pollingTimer.value)
-    pollingTimer.value = undefined
-  }
-}
-
-function isActiveStatus(status: TaskStatus) {
-  return status === 'PENDING' || status === 'RUNNING' || status === 'RETRYING'
+  if (!resultFile.value?.imageId || !task.value?.taskType) return
+  void router.push({ path: '/map', query: { taskId: task.value.id, imageId: resultFile.value.imageId, taskType: task.value.taskType } })
 }
 
 function taskTypeText(type: TaskType) {
@@ -495,18 +443,6 @@ function taskTypeText(type: TaskType) {
     CHANGE_DETECTION: '变化检测',
   }
   return map[type] || type
-}
-
-function taskStatusText(status: TaskStatus) {
-  const map: Record<TaskStatus, string> = {
-    PENDING: '等待中',
-    RUNNING: '运行中',
-    SUCCESS: '成功',
-    FAILED: '失败',
-    RETRYING: '重试中',
-    CANCELED: '已取消',
-  }
-  return map[status] || status
 }
 
 function taskStatusType(status: TaskStatus) {
@@ -582,3 +518,15 @@ function formatDateTime(value?: string) {
   return new Date(value).toLocaleString()
 }
 </script>
+
+<style scoped>
+.analysis-result { max-width: 1080px; margin: 0 auto; --el-color-primary: #175b47; }
+.result-summary { border-top: 3px solid #175b47; margin-bottom: 20px; }
+.result-state { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #175b47; }
+.result-state span,.result-note { color: #6a7a70; font-size: 13px; line-height: 1.8; }
+.statistics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 22px 0 10px; }
+.statistics-grid > div { display: flex; flex-direction: column; gap: 10px; border-left: 2px solid #d8e4dc; padding-left: 20px; }
+.statistics-grid span { color: #566d5d; font-size: 14px; }.statistics-grid strong { font-size: 44px; font-weight: 500; color: #173e2e; font-variant-numeric: tabular-nums; }
+.statistics-grid small { font-size: 13px; color: #718477; }.result-feedback { margin-bottom: 16px; }.failure { color: #9a4e20; }
+@media (max-width: 700px) { .statistics-grid { grid-template-columns: 1fr; }.result-state { align-items: flex-start; flex-direction: column; } }
+</style>

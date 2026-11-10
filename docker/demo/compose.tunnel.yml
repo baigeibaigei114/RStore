@@ -1,0 +1,24 @@
+name: rs-demo-edge
+
+services:
+  tunnel:
+    image: ${CLOUDFLARED_IMAGE:?set a verified image digest in tunnel.env}
+    restart: unless-stopped
+    mem_limit: 128m
+    user: "65532:65532"
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2
+      - --metrics
+      - 127.0.0.1:20241
+      - run
+      - --token-file
+      - /run/secrets/tunnel-token
+    volumes:
+      - /opt/ndvi-demo/tunnel-token:/run/secrets/tunnel-token:ro

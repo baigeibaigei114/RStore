@@ -61,6 +61,8 @@ Java启用`agent` profile并设置`AGENT_ENABLED=true`、`AGENT_BASE_URL`和同�
 
 ## 本地验证与边界
 
+可使用独立的 [Compose 验证配置](compose.verify.yml) 准备 pgvector 测试库。启动前通过环境设置 G2_POSTGRES_PASSWORD。该测试库使用临时数据目录。
+
 ```sh
 uv run pytest -q
 uv run ruff check app tests

@@ -1,7 +1,7 @@
 <template>
   <el-header class="app-header">
     <div class="header-left">
-      <el-button text :icon="appStore.sidebarCollapsed ? Expand : Fold" @click="appStore.toggleSidebar" />
+      <el-button text :icon="appStore.sidebarCollapsed ? Expand : Fold" :aria-label="appStore.sidebarCollapsed ? '展开导航' : '收起导航'" @click="appStore.toggleSidebar" />
       <div>
         <h1>{{ pageTitle }}</h1>
         <p>面向区域植被监测的遥感分析与报告平台</p>
@@ -9,7 +9,6 @@
     </div>
 
     <div class="header-actions">
-      <el-tag type="success" effect="plain">接口代理：/api</el-tag>
       <el-dropdown v-if="authStore.isLoggedIn" @command="handleCommand">
         <el-button text>
           {{ authStore.displayName }}

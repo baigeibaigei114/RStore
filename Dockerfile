@@ -32,6 +32,8 @@ RUN python3 -m venv "${VIRTUAL_ENV}" \
     && pip install --no-cache-dir -r /app/python-worker/requirements.txt
 
 COPY python-worker/scripts /app/python-worker/scripts
+COPY python-worker/ingestion /app/python-worker/ingestion
+COPY python-worker/utils /app/python-worker/utils
 
 RUN mkdir -p /app/data/geoserver-raster /tmp/rs-upload
 

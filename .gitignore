@@ -79,3 +79,17 @@ docs/
 /shared/**/*handoff.md
 /shared/work-items.yaml
 /shared/decision-log.md
+
+# Local secrets, caches and operational evidence
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+/.vite/
+/shared/deployment/
+/shared/product-closeout/
+/shared/ingestion/s[0-9]-*.md
+/shared/ingestion/auto-standardization-plan.md
+/shared/map-viewer-handoff.md
+/shared/readme-handoff.md

@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  */
 @Data
 public class RsTaskStatusUpdateDTO {
+    private Long slotFence;
     private String attemptId;
 
     /** 任务最新状态值，如 PROCESSING / COMPLETED / FAILED，对应 rs_task 表 status 列。不能为空。 */

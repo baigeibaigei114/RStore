@@ -11,6 +11,7 @@ import TaskCreateView from '@/views/TaskCreateView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
 import TaskListView from '@/views/TaskListView.vue'
 import AgentView from '@/views/AgentView.vue'
+import IngestionView from '@/views/IngestionView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -28,6 +29,7 @@ const router = createRouter({
       redirect: '/dashboard',
       children: [
         { path: 'agent', name: 'Agent', component: AgentView, meta: { title: 'NDVI助手', activeMenu: '/agent' } },
+        { path: 'ingestion', name: 'SafeIngestion', component: IngestionView, meta: { title: '产品入库', activeMenu: '/ingestion' } },
         {
           path: 'dashboard',
           name: 'Dashboard',

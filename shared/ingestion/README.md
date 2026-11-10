@@ -1,67 +1,45 @@
-# 第二步：标准化入库、准入与追溯
+# 影像入库
 
-先读 [输入契约](contract.md)。普通上传仍可保存和查看影像，但新 NDVI 提交需要输入契约校验通过。
-没有数据库迁移：版本化 admission 保存在影像 metadata_json，inputSnapshot 保存在任务 params。
-不把 SHA256/单位标签当作科学真实性证明；当前为文件与声明一致性检查。
+平台支持两种入库方式：上传已准备好的标准化 GeoTIFF，或从受支持的 Sentinel-2 L2A SAFE 产品包生成区域影像。Java 负责身份、状态、准入和资产登记；Python Worker 负责确定性的遥感处理。
 
-合法参考：[固定公开样本 v1](example-public-v1.json)，仅匹配已验收的 baseline.tif；
-错误参考：[未知版本样例](example-invalid.json)。不要将合法样例的摘要复制给其他影像。
+## 标准化 GeoTIFF
 
-## 如何使用
+在“影像上传”中选择 TIFF；需要用于 NDVI 时，选择“标准化影像包 · NDVI”，同时提交匹配的来源 JSON。详情页展示准入结果和波段信息，只有通过准入的影像才能提交新的 NDVI 分析。
 
-1. 使用 python-worker/scripts/prepare_ndvi_baseline.py 准备本地波段，真实模式必须提供带时区的 capture-time。
-2. 或用 shared/baseline/fetch_public_sample.py 下载固定公开样本。它复用 write_stack，自动输出 v1 来源 JSON。
-3. 前端“影像上传”选择“标准化影像包 · NDVI”，选 TIFF 和同名 JSON，填写名称。
-4. 详情页检查准入与来源。提交 NDVI 后，任务详情展示创建时的处理依据。
-5. 手动修改波段会使准入失效；重新上传正确包获得新的资产，不覆盖历史任务。
+格式与科学口径见[输入契约](contract.md)，参考[公开样本声明](example-public-v1.json)。修改波段映射会使原准入失效；应重新上传正确文件和声明，不覆盖已有任务的输入快照。来源声明和 SHA 校验不等于对卫星数据真实性的独立认证。
 
-人工 fixture 的 productType=SYNTHETIC，正式入口明确拒绝。
-旧基线脚本通过普通上传直接提交的端到端示例不再适用于新准入规则；计算级夹具测试继续保留。
+## SAFE 产品包
 
-### 升级已验收公开样本
+“产品入库”页面 `/ingestion` 的流程为：
 
-新生成样本不需要升级。仅已有、校准正确的固定样本可使用下面的显式迁移：
+1. 上传官方 SAFE ZIP，等待产品检查和定位预览。
+2. 绘制并保存监测区域，或选择本人已有区域，执行裁剪预检。
+3. 核对区域、固定像素窗口和影像名称，明确确认标准化。
+4. 跟踪作业；Worker生成反射率TIFF，Java校验实际文件后登记PRIVATE影像。
 
-```powershell
-conda run --no-capture-output -n my_gdal_env python python-worker/scripts/upgrade_baseline_manifest.py --input data/ndvi-baseline/poyang-20241129-baseline.tif --manifest data/ndvi-baseline/poyang-20241129-baseline.json --output data/ndvi-baseline/poyang-20241129-v1.json
-```
+目前仅接受PSD15 / PB05.13、官方紧凑目录结构、单产品/单granule的Sentinel-2 L2A。使用10m B02/B03/B04/B08和20m SCL，按原始网格与逐波段校准处理；JP2直接读取，PNG只作定位预览。ZIP上限2GiB，裁剪每边最多2048像素，不自动裁边、降采样或拼接。
 
-脚本校验固定摘要、产品 ID 和校准参数，不修改 TIFF、不覆盖旧 JSON、不猜测任意旧文件。
-本机已生成 poyang-20241129-v1.json，可直接与原 baseline.tif 一起上传。
+输出为四波段Float32 GeoTIFF，保持10m分辨率，NoData=-9999，red=3/nir=4，并保留来源与处理声明。区域必须完整落在产品内；区域内没有有效反射率时会提示限制，不能据此保证该区域NDVI可计算。
 
-## 运行与验证
+已登记影像可以通过既有详情/下载入口使用。作业历史在资产删除或准入变化后仍保留；该资产不能再被复用。失败标准化需要用户明确重试，原包到期后可重传同一ZIP再绑定重试；相同处理意图不会重复创建成功资产。此流程不自动调用Agent或提交NDVI。
 
-正常部署仍使用根目录 Dockerfile / docker compose 构建。必须同时更新后端 jar、
-后端容器中的 python-worker/scripts 和 Worker；只替换 jar 不够。
+标准化通过后先登记私有资产，地图发布独立显示状态。发布完成后可打开真彩色地图；发布失败可单独重试。创建 NDVI 任务时，选择已登记的影像和原监测区域后手动提交。
 
-本机已有运行时的联调备选（不是可移植生产构建）：
+## 启用与运行
 
-```powershell
-mvn -o -DskipTests package
-if ($LASTEXITCODE -ne 0) { throw 'package failed' }
-docker build --pull=false -f shared/baseline/Dockerfile.backend --build-arg RUNTIME_IMAGE=rs-ndvi-baseline-backend:local -t rs-ingestion-jar:local target
-if ($LASTEXITCODE -ne 0) { throw 'backend jar build failed' }
-docker build --pull=false -f shared/ingestion/Dockerfile.backend-scripts -t rs-ingestion-backend:local python-worker/scripts
-if ($LASTEXITCODE -ne 0) { throw 'backend scripts build failed' }
-docker build --pull=false -f shared/baseline/Dockerfile.worker --build-arg RUNTIME_IMAGE=rs-ndvi-baseline-worker:local -t rs-ingestion-worker:local python-worker
-if ($LASTEXITCODE -ne 0) { throw 'worker build failed' }
-docker compose -f docker-compose.yml -f shared/ingestion/compose.local.yml up -d --no-build --no-deps backend python-worker
-```
+SAFE流程默认关闭。启用前应核实目标数据库和备份，并执行新增升级脚本 `src/main/resources/db/upgrade/20261029_ingestion_workflow.sql`；它不会在应用启动时自动迁移。已有GeoTIFF上传仍使用原入口。
 
-凭据通过当前进程环境变量 BASELINE_USERNAME / BASELINE_PASSWORD 提供，不写入文件：
+同时更新后端、其Python解析脚本和所有Worker，再按已核实环境配置：
 
-```powershell
-conda run --no-capture-output -n my_gdal_env python shared/ingestion/verify_e2e.py --input data/ndvi-baseline/poyang-20241129-baseline.tif --manifest data/ndvi-baseline/poyang-20241129-v1.json --output-dir data/ndvi-baseline/e2e-ingestion-new
-```
+| 配置 | 用途 |
+| --- | --- |
+| `INGESTION_ENABLED=true` | Java与Worker启用入库协议及共享计算槽 |
+| `INGESTION_STANDARDIZATION_ENABLED=true` | Java接受标准化确认；还要求LOCAL验证运行时就绪及Worker声明`standardize-v1` |
+| `INGESTION_BUCKET_NAME` | 根Compose中供双方使用的独立私有桶，不能等于旧资产主桶；Worker单独运行时用`INGESTION_BUCKET` |
+| `INGESTION_TEMP_DIRECTORY` | Java可写临时目录；Worker单独运行时用`WORKER_TEMP_DIR` |
 
-脚本会创建两个资产和一个任务，最后修改标准化资产的波段配置以验证准入失效。
-新任务被阻止，旧任务快照保留；因此该测试资产结束时为 UNVERIFIED。输出目录不能已经存在。
-不调用 AI，不自动删除资产。IPv4 8080 曾有冲突，脚本默认使用本机 IPv6 后端。
+Worker和Java本地原生验证需要Linux运行时；使用根Dockerfile/Compose构建时包含相关模块。启用协议前先排空并确认旧Worker/旧原生进程停止，不混跑不支持共享槽的执行器。凭据通过部署环境安全注入，不写进来源JSON或仓库。
 
-## 不包含
+处理使用持久工作意图、尝试租约与共享COMPUTE槽。租约过期不代表进程已经停止；无法确认停止或事务结果时保留恢复状态，不直接释放名额。原包有效期按7天校验，已确认活动工作保留引用；磁盘、临时空间、资产配额和执行时间均有有界拒绝限制，应在启用目标上另行核实容量。
 
-- 旧资产在线重新认证、审批或自动转换。
-- 来源真实性认证、多产品适配、任意原始 DN 自动预处理。
-- 区域统计、多期对比、Agent、Worker 崩溃租约与大影像性能改造。
-- 新接口不创建 REJECTED 资产；失败包直接报错且不入库。
-- 浏览器视觉交互验收仍需手工执行，构建通过不等于浏览器验收。
+启用地图发布需设置 `INGESTION_PUBLICATION_ENABLED` 和 `INGESTION_MAP_BOUNDARY_VERIFIED`，并确认 GeoServer 处于内部网络，配置独立的发布账号、代理读账号和共享栅格卷。清理使用未开启版本控制的私有入库桶，存储确认对象已删除后才释放配额。清理账号需能查询桶版本状态、列出并中止未完成的分片上传，同时确认对象实际不存在。

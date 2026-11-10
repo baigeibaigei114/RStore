@@ -1,18 +1,66 @@
 <template>
-  <section>
+  <section class="image-catalog">
     <div class="page-title">
-      <span>影像资产</span>
-      <h2>影像列表</h2>
-      <p>按名称、传感器、云量和采集时间筛选影像，可进入详情查看元数据和访问控制状态。</p>
+      <span>我的影像</span>
+      <h2>选择要查看的影像</h2>
+      <p>按名称查找影像，打开详情后可开始区域分析。</p>
     </div>
 
-    <el-card class="ai-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>AI 智能检索</span>
-          <el-tag size="small" effect="plain">只解析，不自动执行</el-tag>
+    <el-card class="filter-card" shadow="never">
+      <el-form :model="queryForm" label-position="top">
+        <div class="basic-query">
+          <el-form-item label="影像名称">
+            <el-input v-model="queryForm.keyword" clearable placeholder="输入影像名称" @keyup.enter="submitSearch" />
+          </el-form-item>
+          <div class="query-actions">
+            <el-button type="primary" :icon="Search" :loading="loading" @click="submitSearch">查询</el-button>
+            <el-button :icon="Refresh" @click="resetSearch">重置</el-button>
+            <el-button :aria-expanded="moreFilters" aria-controls="image-advanced-filters" @click="moreFilters = !moreFilters">
+              {{ moreFilters ? '收起筛选' : '更多筛选' }}{{ selectedFilterCount ? `（已设置 ${selectedFilterCount} 项）` : '' }}
+            </el-button>
+            <el-button :icon="UploadFilled" @click="router.push('/images/upload')">上传影像</el-button>
+          </div>
         </div>
-      </template>
+        <el-row v-show="moreFilters" id="image-advanced-filters" :gutter="16">
+          <el-col :xs="24" :sm="12" :lg="6">
+            <el-form-item label="传感器">
+              <el-input v-model="queryForm.sensor" clearable placeholder="例如 Sentinel-2" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :lg="6">
+            <el-form-item label="最大云量">
+              <el-input-number
+                v-model="queryForm.maxCloudPercent"
+                :min="0"
+                :max="100"
+                :precision="2"
+                :step="5"
+                controls-position="right"
+                placeholder="0-100"
+                class="full-width"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="24" :lg="12">
+            <el-form-item label="采集时间">
+              <el-date-picker
+                v-model="queryForm.timeRange"
+                type="datetimerange"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+                value-format="YYYY-MM-DDTHH:mm:ssZ"
+                class="full-width"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+      </el-form>
+    </el-card>
+
+    <el-collapse class="optional-search">
+      <el-collapse-item title="用自然语言筛选（可选）" name="ai">
+      <p class="ai-explanation">将一句话整理成筛选条件，由你核对后再查询。</p>
 
       <el-input
         v-model="aiInput"
@@ -20,7 +68,7 @@
         :rows="3"
         maxlength="1000"
         show-word-limit
-        placeholder="例如：找上海黄浦区2024年云量小于20%的Sentinel-2影像，并计算NDVI"
+        placeholder="例如：查找 2024 年云量低于 20% 的 Sentinel-2 影像"
       />
 
       <div class="ai-actions">
@@ -57,77 +105,22 @@
       </div>
 
       <div v-if="aiParsed?.regionName" class="ai-region-note">
-        行政区“{{ aiParsed.regionName }}”已作为提示展示。当前影像列表仍走普通检索接口；如需严格行政区空间检索，请进入空间查询页选择行政区后检索。
+        已识别行政区“{{ aiParsed.regionName }}”。若要按行政区范围查找，请在空间查询中选择该区域。
       </div>
 
       <div v-if="aiParsed?.taskTypes?.length" class="ai-task-tags">
         <span>AI 建议后续任务</span>
         <el-tag v-for="type in aiParsed.taskTypes" :key="type" effect="plain">{{ taskTypeText(type) }}</el-tag>
       </div>
-    </el-card>
-
-    <el-card class="filter-card" shadow="never">
-      <el-form :model="queryForm" label-position="top">
-        <el-row :gutter="16">
-          <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="关键字">
-              <el-input v-model="queryForm.keyword" clearable placeholder="影像名称或编码" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="传感器">
-              <el-input v-model="queryForm.sensor" clearable placeholder="例如 Sentinel-2" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="最大云量">
-              <el-input-number
-                v-model="queryForm.maxCloudPercent"
-                :min="0"
-                :max="100"
-                :precision="2"
-                :step="5"
-                controls-position="right"
-                placeholder="0-100"
-                class="full-width"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="采集时间">
-              <el-date-picker
-                v-model="queryForm.timeRange"
-                type="datetimerange"
-                start-placeholder="开始时间"
-                end-placeholder="结束时间"
-                value-format="YYYY-MM-DDTHH:mm:ssZ"
-                class="full-width"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <div class="filter-actions">
-          <el-button :icon="Refresh" @click="resetSearch">重置</el-button>
-          <el-button type="primary" :icon="Search" @click="submitSearch">查询</el-button>
-          <el-button type="success" :icon="UploadFilled" @click="router.push('/images/upload')">
-            上传影像
-          </el-button>
-        </div>
-      </el-form>
-    </el-card>
+      </el-collapse-item>
+    </el-collapse>
 
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="imageList" row-key="id" empty-text="暂无影像数据">
-        <el-table-column prop="imageName" label="影像名称" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="sensorType" label="传感器" min-width="130" show-overflow-tooltip>
+        <el-table-column label="影像" min-width="260">
           <template #default="{ row }">
-            {{ row.sensorType || '未填写' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="尺寸" width="130">
-          <template #default="{ row }">
-            {{ formatSize(row.width, row.height) }}
+            <div class="image-identity"><strong>{{ row.imageName || '未命名影像' }}</strong>
+              <small>{{ row.sensorType || '未记录来源' }} · {{ row.visibility === 'PUBLIC' ? '公开' : '私有' }}</small></div>
           </template>
         </el-table-column>
         <el-table-column label="云量" width="100">
@@ -142,37 +135,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="可见性" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.visibility === 'PUBLIC' ? 'success' : 'info'" effect="plain">
-              {{ row.visibility === 'PUBLIC' ? '公开' : '私有' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="缩略图" width="120">
-          <template #default="{ row }">
-            <el-tag :type="thumbnailStatusType(row.thumbnailStatus)" effect="plain">
-              {{ thumbnailStatusText(row.thumbnailStatus) }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="采集时间" min-width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.acquisitionTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-            <el-button
-              link
-              type="danger"
-              :disabled="!canDeleteImage(row)"
-              :loading="deletingId === row.id"
-              @click="confirmDelete(row)"
-            >
-              删除
-            </el-button>
+            <el-button link type="primary" @click="openDetail(row)">查看影像</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -183,7 +153,7 @@
           v-model:page-size="pagination.pageSize"
           :page-sizes="[10, 20, 50]"
           :total="pagination.total"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, sizes, prev, pager, next"
           @size-change="fetchImages"
           @current-change="fetchImages"
         />
@@ -194,18 +164,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { parseAiQueryApi } from '@/api/ai'
-import { deleteImageApi, searchImagesApi } from '@/api/image'
+import { searchImagesApi } from '@/api/image'
 import type { AiQueryParseResult } from '@/types/ai'
 import type {
   ImageListItem,
   ImageSearchParams,
   ImageStatus,
-  ThumbnailStatus,
 } from '@/types/image'
 import type { TaskType } from '@/types/task'
 
@@ -218,7 +187,7 @@ interface QueryForm {
 
 const router = useRouter()
 const loading = ref(false)
-const deletingId = ref<number>()
+const moreFilters = ref(false)
 const aiInput = ref('')
 const aiParseLoading = ref(false)
 const aiParsed = ref<AiQueryParseResult | null>(null)
@@ -230,6 +199,9 @@ const queryForm = reactive<QueryForm>({
   maxCloudPercent: undefined,
   timeRange: [],
 })
+const selectedFilterCount = computed(() => Number(Boolean(queryForm.sensor.trim()))
+  + Number(queryForm.maxCloudPercent !== undefined && queryForm.maxCloudPercent !== null)
+  + Number(Boolean(queryForm.timeRange?.length)))
 
 const pagination = reactive({
   pageNum: 1,
@@ -302,52 +274,12 @@ function applyAiParsedResult(result: AiQueryParseResult) {
   queryForm.sensor = result.sensor || ''
   queryForm.maxCloudPercent = result.maxCloudPercent
   queryForm.timeRange = result.startTime && result.endTime ? [result.startTime, result.endTime] : []
+  moreFilters.value = true
   pagination.pageNum = 1
 }
 
 function openDetail(row: ImageListItem) {
   router.push(`/images/${row.id}`)
-}
-
-function canDeleteImage(row: ImageListItem) {
-  return row.status === 'READY' || row.status === 'FAILED'
-}
-
-async function confirmDelete(row: ImageListItem) {
-  if (!canDeleteImage(row)) {
-    ElMessage.warning('当前影像状态不允许删除')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确认删除影像“${row.imageName}”？删除后将从列表和空间检索中隐藏，历史任务记录仍会保留。`,
-      '删除影像',
-      {
-        type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
-
-  deletingId.value = row.id
-  try {
-    await deleteImageApi(row.id)
-    ElMessage.success('影像已删除')
-    fetchImages()
-  } finally {
-    deletingId.value = undefined
-  }
-}
-
-function formatSize(width?: number, height?: number) {
-  if (!width || !height) {
-    return '未知'
-  }
-  return `${width} × ${height}`
 }
 
 function formatCloud(value?: number) {
@@ -400,24 +332,21 @@ function imageStatusType(status: ImageStatus) {
   return 'info'
 }
 
-function thumbnailStatusText(status?: ThumbnailStatus) {
-  if (!status) {
-    return '无'
-  }
-  const map: Record<ThumbnailStatus, string> = {
-    PENDING: '等待中',
-    RUNNING: '生成中',
-    SUCCESS: '已生成',
-    FAILED: '失败',
-    SKIPPED: '已跳过',
-  }
-  return map[status] || status
-}
-
-function thumbnailStatusType(status?: ThumbnailStatus) {
-  if (status === 'SUCCESS') return 'success'
-  if (status === 'PENDING' || status === 'RUNNING') return 'warning'
-  if (status === 'FAILED') return 'danger'
-  return 'info'
-}
 </script>
+
+<style scoped>
+.image-catalog { max-width: 1160px; --el-color-primary: #176b52; }
+.basic-query { display: grid; grid-template-columns: minmax(200px, 1fr) auto; align-items: end; gap: 16px; }
+.basic-query .el-form-item { margin: 0; }
+.query-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.query-actions .el-button { margin: 0; }
+#image-advanced-filters { margin-top: 20px; }
+.optional-search { margin: 0 0 16px; padding: 0 20px; border: 1px solid #e4e7ed; border-radius: 8px; background: #fff; }
+.optional-search :deep(.el-collapse-item__header) { font-weight: 500; }
+.optional-search :deep(.el-collapse-item__wrap) { border-bottom: 0; }
+.ai-explanation { margin: 0 0 12px; color: #667085; }
+.image-identity strong, .image-identity small { display: block; overflow-wrap: anywhere; }
+.image-identity strong { font-weight: 600; }
+.image-identity small { color: #667085; font-size: 12px; }
+@media (max-width: 1000px) { .basic-query { grid-template-columns: 1fr; } }
+</style>

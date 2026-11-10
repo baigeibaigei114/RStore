@@ -1,0 +1,21 @@
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    GDAL_CACHEMAX=128 GDAL_NUM_THREADS=1 OPJ_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+
+RUN sed -i 's|http://deb.debian.org/debian-security|http://mirrors.tencentyun.com/debian-security|g; s|http://deb.debian.org/debian|http://mirrors.tencentyun.com/debian|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless gdal-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY python-worker/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --only-binary=:all: \
+    --index-url https://mirrors.tencentyun.com/pypi/simple -r /tmp/requirements.txt
+COPY python-worker /app/python-worker
+COPY app.jar /app/app.jar
+RUN mkdir -p /app/data/geoserver-raster /tmp/rs-upload
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

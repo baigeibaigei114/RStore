@@ -11,12 +11,12 @@ export interface MonitoringRegion {
   version: number
 }
 
-export function listMonitoringRegionsApi() {
-  return request.get<unknown, MonitoringRegion[]>('/monitoring-regions')
+export function listMonitoringRegionsApi(silentError = false) {
+  return request.get<unknown, MonitoringRegion[]>('/monitoring-regions', { silentError })
 }
 
-export function getMonitoringRegionApi(id: number) {
-  return request.get<unknown, MonitoringRegion>(`/monitoring-regions/${id}`)
+export function getMonitoringRegionApi(id: number, silentError = false) {
+  return request.get<unknown, MonitoringRegion>(`/monitoring-regions/${id}`, { silentError })
 }
 
 export function saveMonitoringRegionApi(name: string, geometry: RegionPolygon, id?: number) {

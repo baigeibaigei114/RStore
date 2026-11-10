@@ -17,6 +17,8 @@ RabbitMQ 消费者模块 -- 负责从 RabbitMQ 队列消费任务消息，并路
 """
 
 import json
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 import pika
@@ -55,6 +57,9 @@ class RabbitMqConsumer:
         self._settings = settings
         self._callback_client = callback_client
         self._processors = processors
+        self.ingestion_consumer = None
+        self._delivery_active = False
+        self._pending_deliveries = []
 
     def start(self) -> None:
         """建立 RabbitMQ 连接并启动消息消费循环（阻塞式）。
@@ -85,14 +90,22 @@ class RabbitMqConsumer:
         # basic_qos(prefetch_count=N) 限制消费者同时处理的消息数不超过 N。
         # 等价于 Java 中 channel.basicQos(N)，用于实现"公平分发"(fair dispatch)，
         # 防止某个消费者堆积过多未确认消息。
-        channel.basic_qos(prefetch_count=self._settings.prefetch_count)
+        if getattr(self._callback_client, "runtime_enabled", False) is True:
+            # Quorum queues reject global QoS. Defer nested deliveries while pumping IO.
+            channel.basic_qos(prefetch_count=1)
+            callback = self._serial_delivery(self._handle_message)
+        else:
+            channel.basic_qos(prefetch_count=self._settings.prefetch_count)
+            callback = self._handle_message
+        if self.ingestion_consumer is not None:
+            self.ingestion_consumer.register(channel, dispatch=self._serial_delivery)
 
         # basic_consume 注册回调函数（类似 Java 中 Consumer 接口的 handleDelivery 方法）。
         # on_message_callback 传入的 self._handle_message 是实例方法，
         # pika 会在收到消息时自动调用它。
         channel.basic_consume(
             queue=self._settings.queue,
-            on_message_callback=self._handle_message,
+            on_message_callback=callback,
         )
 
         print(
@@ -106,6 +119,23 @@ class RabbitMqConsumer:
         finally:
             if connection.is_open:
                 connection.close()
+
+    def _serial_delivery(self, handler):
+        def receive(*args):
+            if self._delivery_active:
+                if len(self._pending_deliveries) >= 2:
+                    raise LeaseLost("Bounded deferred delivery capacity exceeded")
+                self._pending_deliveries.append((handler, args))
+                return
+            self._delivery_active = True
+            try:
+                handler(*args)
+                while self._pending_deliveries:
+                    pending, arguments = self._pending_deliveries.pop(0)
+                    pending(*arguments)
+            finally:
+                self._delivery_active = False
+        return receive
 
     def _handle_message(self, channel, method, properties, body: bytes) -> None:
         """单条消息的处理回调。
@@ -137,6 +167,8 @@ class RabbitMqConsumer:
         # 等价于旧版 typing.Optional[dict[str, Any]]。
         message: dict[str, Any] | None = None
         attempt_id = None
+        termination = []
+        claimed_task_id = None
         try:
             # body 是 bytes 类型，先 decode 为 UTF-8 字符串，再用 json.loads 反序列化为 dict。
             # Python json.loads(s) 等价于 Java 中 ObjectMapper.readValue(s, Map.class)。
@@ -155,6 +187,14 @@ class RabbitMqConsumer:
             # 后端会通过数据库乐观锁或分布式锁保证只有一个 Worker 能抢占成功。
             claim_result = self._callback_client.claim_task(task_id)
             action = claim_result.get("action")
+            waiting_until = time.monotonic() + 1800
+            while action == "BUSY" and time.monotonic() < waiting_until:
+                channel.connection.process_data_events(time_limit=1)
+                time.sleep(1)
+                claim_result = self._callback_client.claim_task(task_id)
+                action = claim_result.get("action")
+            if action == "BUSY":
+                raise ValueError("Compute queue deadline exceeded")
 
             if action in {"ALREADY_FINISHED", "ALREADY_RUNNING"}:
                 # 任务已结束或已有其他 Worker 正在处理，当前消息都是重复投递，直接 ACK。
@@ -182,12 +222,22 @@ class RabbitMqConsumer:
                 raise LeaseLost("后端未返回租约协议，请同步升级后端与 Worker")
             # 队列中可能是旧输出键，执行路径只能使用本次抢占响应。
             message["outputObjectKey"] = output_key
-            result = execute_with_lease(
+            claimed_task_id = task_id
+            runner = execute_with_lease
+            runner_options = {}
+            runner_args = [lease_seconds]
+            if getattr(self._callback_client, "runtime_enabled", False) is True:
+                from workers.process_supervisor import execute_process_with_lease
+                runner = execute_process_with_lease
+                runner_args = []
+                remaining = (datetime.fromisoformat(claim_result["hardDeadline"].replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+                runner_options = {"deadline_seconds": min(900, max(0, remaining)), "stopped": termination.append}
+            result = runner(
                 lambda: processor.process(message),
                 lambda: self._callback_client.update_status(
                     task_id, "RUNNING", extra={"attemptId": attempt_id}),
                 lambda: channel.connection.process_data_events(time_limit=0.5),
-                lease_seconds,
+                *runner_args, **runner_options,
             )
             result["attemptId"] = attempt_id
 
@@ -236,6 +286,12 @@ class RabbitMqConsumer:
                 f"[worker-error] 任务处理失败 task_id={task_id} reason={exc}",
                 flush=True,
             )
+
+        finally:
+            if claimed_task_id is not None and getattr(self._callback_client, "runtime_enabled", False) is True:
+                # Native runner has joined the child before exposing a result or exception.
+                if termination:
+                    self._callback_client.report_stopped(claimed_task_id, termination[-1])
 
     def _fail_non_retryable(
         self,

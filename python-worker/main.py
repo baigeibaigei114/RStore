@@ -36,8 +36,6 @@ def main() -> None:
     直到 RabbitMQ 连接关闭或进程收到 SIGINT/SIGTERM 信号。
     """
     settings = load_settings()
-    # Python Path.mkdir(parents=True, exist_ok=True) 等价于 Java Files.createDirectories(path)
-    # 其中 parents=True 对应递归创建父目录，exist_ok=True 对应目录已存在时不抛异常。
     settings.worker.temp_dir.mkdir(parents=True, exist_ok=True)
 
     storage_client = MinioStorageClient(settings.minio)
@@ -54,6 +52,13 @@ def main() -> None:
     }
 
     consumer = RabbitMqConsumer(settings.rabbitmq, callback_client, processors)
+    if settings.worker.ingestion_enabled:
+        import os
+        if os.name != "posix":
+            raise RuntimeError("SAFE ingestion requires the supported Linux Worker")
+        callback_client.runtime_ready(capabilities=["standardize-v1"])
+        from ingestion.consumer import IngestionConsumer
+        consumer.ingestion_consumer = IngestionConsumer(settings, callback_client.executor_id)
     consumer.start()
 
 

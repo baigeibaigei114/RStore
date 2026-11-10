@@ -1,0 +1,9 @@
+# This locally validated base has the same pyproject.toml and uv.lock as the source snapshot.
+# Its image ID and export checksum are recorded in the release manifest.
+FROM ndvi-agent-service:g2
+USER root
+COPY app /app/app
+COPY knowledge /app/knowledge
+COPY sql /app/sql
+ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+USER 10001

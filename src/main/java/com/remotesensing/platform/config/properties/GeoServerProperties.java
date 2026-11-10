@@ -13,6 +13,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "geoserver")
 public class GeoServerProperties {
 
+    /** New private asset reads never use the legacy/admin identity. No default credentials. */
+    private String ingestionReadUsername;
+    private String ingestionReadPassword;
+    private String ingestionPublishUsername;
+    private String ingestionPublishPassword;
+
     /** GeoServer REST API 基础地址，默认本地 8081 端口。 */
     private String url = "http://localhost:8081/geoserver";
 

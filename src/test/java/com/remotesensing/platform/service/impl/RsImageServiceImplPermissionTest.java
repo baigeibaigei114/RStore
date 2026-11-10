@@ -209,6 +209,27 @@ class RsImageServiceImplPermissionTest {
     }
 
     @Test
+    void ingestionDownloadUsesRegisteredAssetAdapterAndLeavesLegacySignerClosed() {
+        RsImage image=image(7L,"user-a",Visibility.PRIVATE.dbValue(),"ingestion/artifacts/job/attempt/reflectance.tif",null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(7L,"user-a")).thenReturn(image);
+        var reader=org.mockito.Mockito.mock(com.remotesensing.platform.ingestion.workflow.IngestionAssetReadService.class);
+        var signed=new FilePresignedUrlVO(image.getObjectKey(),"http://storage/asset",1800);
+        when(reader.downloadUrl(image)).thenReturn(signed);service.setIngestionAssetReader(reader);
+        assertThat(service.getDownloadUrl(7L)).isSameAs(signed);
+        org.mockito.Mockito.verifyNoInteractions(minioService);
+    }
+
+    @Test
+    void ingestionDownloadFailsClosedWhenAdapterIsNotInstalled() {
+        RsImage image=image(7L,"user-a",Visibility.PRIVATE.dbValue(),"ingestion/artifacts/job/attempt/reflectance.tif",null);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(7L,"user-a")).thenReturn(image);
+        assertThatThrownBy(() -> service.getDownloadUrl(7L)).isInstanceOfSatisfying(BusinessException.class,p -> assertThat(p.getCode()).isEqualTo(503));
+        org.mockito.Mockito.verifyNoInteractions(minioService);
+    }
+
+    @Test
     @DisplayName("用户 B 不能获取用户 A PRIVATE 影像的原始下载 URL")
     void getDownloadUrlShouldRejectOtherUsersPrivateImage() {
         when(currentUserContext.getCurrentUserId()).thenReturn("user-b");
