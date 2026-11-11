@@ -30,6 +30,23 @@ export interface AiTaskReport {
   updatedAt?: string
 }
 
+export type ResultSection = 'NW' | 'NE' | 'SW' | 'SE'
+
+export interface TaskResultPartition {
+  id: ResultSection
+  mean: number | null
+  total: number
+  valid: number
+  locatable: boolean
+}
+
+export interface TaskResultEvidence {
+  fileId: string
+  version: string
+  section: ResultSection
+  geometry: object
+}
+
 export interface TaskResultAnswer {
   requestId: string
   resultVersion: string
@@ -42,6 +59,7 @@ export interface TaskResultAnswer {
     statement: string
     regionVersion: number
     evidence: { key: string; label: string; value: number; unit: 'decimal' | 'count' | 'ratio' }[]
+    partitions?: TaskResultPartition[]
   } | null
 }
 

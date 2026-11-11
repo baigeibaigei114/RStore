@@ -1,6 +1,7 @@
 package com.remotesensing.platform.resultanalysis;
 
 import static com.remotesensing.platform.agent.AgentJson.object;
+import static com.remotesensing.platform.agent.AgentJson.parse;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -36,8 +37,10 @@ class TaskResultAnswerServiceTest {
     private final TaskResultAnswerStore store = mock(TaskResultAnswerStore.class);
     private final AgentClient agent = mock(AgentClient.class);
     private final RateLimitService rate = mock(RateLimitService.class);
+    private final TaskResultSpatialEvidence spatial = mock(TaskResultSpatialEvidence.class);
     private final AgentProperties limits = new AgentProperties();
-    private final TaskResultAnswerService service = new TaskResultAnswerService(users, tasks, results, store, agent, limits, rate);
+    private final TaskResultAnswerService service =
+            new TaskResultAnswerService(users, tasks, results, store, agent, limits, rate, spatial);
     private final RsResultFile file = new RsResultFile();
 
     @BeforeEach
@@ -202,6 +205,71 @@ class TaskResultAnswerServiceTest {
         JsonNode answer = service.ask(TASK_ID, request).path("answer");
         assertEquals("CLARIFY", answer.path("kind").asText());
         assertTrue(answer.path("evidence").isEmpty());
+    }
+
+    @Test
+    void restoresTheHighestPartitionAndUsesItsOwnPixelCountForFollowUp() {
+        ObjectNode first = question("哪个分区均值最高？");
+        String version = first.path("resultVersion").asText();
+        JsonNode sections = parse("""
+                {"sections":[{"id":"NW","total":2,"valid":2,"mean":0.0},
+                {"id":"NE","total":2,"valid":2,"mean":-0.1},
+                {"id":"SW","total":2,"valid":0,"mean":null},
+                {"id":"SE","total":2,"valid":2,"mean":0.8,"geometry":{"type":"Polygon"}}]}
+                """);
+        when(spatial.extract(eq(OWNER), eq(TASK_ID), eq(version), eq(file), any())).thenReturn(sections);
+        var initial = complete(first, object().put("question", first.path("question").asText()), "TOP_SECTION");
+        assertEquals("SE", initial.path("answer").path("focusSection").asText());
+        assertEquals(0.8, initial.path("answer").path("partitions").get(0).path("mean").asDouble());
+        assertFalse(initial.toString().contains("geometry"));
+        var prior = new TaskResultAnswerStore.Turn(UUID.fromString(initial.path("requestId").asText()), version, 1,
+                first.path("question").asText(), "COMPLETE", initial.path("answer").toString(), null);
+        when(store.previousComplete(OWNER, TASK_ID, version, 1)).thenReturn(prior);
+
+        ObjectNode followUp = question("那一块有多少有效像素？").put("expectedTurn", 1);
+        var answer = complete(followUp, object().put("question", followUp.path("question").asText())
+                .put("previousSection", "SE"), "FOLLOW_UP_SECTION").path("answer");
+        assertEquals("SE", answer.path("focusSection").asText());
+        assertEquals(2, answer.path("partitions").get(0).path("valid").asInt());
+    }
+
+    @Test
+    void asksForASectionWhenOnlyAnOverallMeanWasPreviouslyDiscussed() {
+        ObjectNode followUp = question("那一块有多少有效像素？").put("expectedTurn", 1);
+        String version = followUp.path("resultVersion").asText();
+        when(store.previousComplete(OWNER, TASK_ID, version, 1)).thenReturn(new TaskResultAnswerStore.Turn(
+                UUID.randomUUID(), version, 1, "均值是多少？", "COMPLETE", "{\"kind\":\"MEAN\"}", null));
+        var answer = complete(followUp, object().put("question", followUp.path("question").asText())
+                .put("previousKind", "MEAN"), "FOLLOW_UP_SECTION").path("answer");
+        assertEquals("CLARIFY", answer.path("kind").asText());
+        verifyNoInteractions(spatial);
+    }
+
+    @Test
+    void blocksGeometryForAnOldVersionOrAnotherAccountBeforeAccessingStorage() {
+        String version = service.get(TASK_ID, null, null).path("resultVersion").asText();
+        file.setObjectKey("internal/other-result.tif");
+        assertEquals("RESULT_CHANGED", assertThrows(AgentFailure.class,
+                () -> service.evidence(TASK_ID, version, "NW")).errorCode);
+        when(users.getAuthenticatedUserId()).thenReturn("other");
+        assertEquals("TASK_NOT_FOUND", assertThrows(AgentFailure.class,
+                () -> service.evidence(TASK_ID, version, "NW")).errorCode);
+        verifyNoInteractions(spatial, agent);
+    }
+
+    private ObjectNode complete(ObjectNode request, ObjectNode prompt, String kind) {
+        String question = request.path("question").asText();
+        String version = request.path("resultVersion").asText();
+        int expectedTurn = request.path("expectedTurn").asInt();
+        UUID id = UUID.fromString(request.path("requestId").asText());
+        when(store.reserve(OWNER, TASK_ID, id, version, question, 90, expectedTurn)).thenReturn(true);
+        when(agent.post("result-answers", prompt, Duration.ofSeconds(30))).thenReturn(object().put("kind", kind));
+        doAnswer(invocation -> {
+            when(store.find(OWNER, TASK_ID, id)).thenReturn(new TaskResultAnswerStore.Turn(id, version,
+                    expectedTurn + 1, question, "COMPLETE", invocation.getArgument(3), null));
+            return null;
+        }).when(store).complete(eq(OWNER), eq(TASK_ID), eq(id), anyString());
+        return service.ask(TASK_ID, request);
     }
 
     private ObjectNode question(String text) {

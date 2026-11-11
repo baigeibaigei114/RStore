@@ -2,8 +2,10 @@ import request from '@/api/request'
 import type {
   AiQueryParseResult,
   AiTaskReport,
+  ResultSection,
   TaskResultAnswer,
   TaskResultAnswerState,
+  TaskResultEvidence,
   TaskResultQuestion,
 } from '@/types/ai'
 
@@ -22,5 +24,10 @@ export function getTaskResultAnswerApi(taskId: string, signal: AbortSignal, vers
 
 export function askTaskResultApi(taskId: string, question: TaskResultQuestion, signal: AbortSignal) {
   return request.post<unknown, TaskResultAnswer>(`/agent/task-results/${taskId}/answers`, question,
-    { signal, silentError: true, timeout: 45000 })
+    { signal, silentError: true, timeout: 70000 })
+}
+
+export function getTaskResultEvidenceApi(taskId: string, version: string, section: ResultSection, signal: AbortSignal) {
+  return request.get<unknown, TaskResultEvidence>(`/agent/task-results/${taskId}/answers/evidence`,
+    { params: { version, section }, signal, silentError: true, timeout: 12000 })
 }

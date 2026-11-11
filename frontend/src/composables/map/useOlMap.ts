@@ -2,6 +2,8 @@ import { onBeforeUnmount, ref, shallowRef } from 'vue'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import TileLayer from 'ol/layer/Tile'
+import TileState from 'ol/TileState'
+import type ImageTile from 'ol/ImageTile'
 import TileWMS from 'ol/source/TileWMS'
 import XYZ from 'ol/source/XYZ'
 import { defaults as defaultControls, FullScreen, ScaleLine } from 'ol/control'
@@ -30,6 +32,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
   const map = shallowRef<Map>()
   const baseLayer = shallowRef<TileLayer<XYZ>>()
   const wmsLayer = shallowRef<TileLayer<TileWMS>>()
+  const wmsFailed = ref(false)
   const pointerLonLat = ref<Coordinate | null>(null)
   const zoom = ref(options.zoom ?? 5)
   const ready = ref(false)
@@ -83,7 +86,8 @@ export function useOlMap(options: UseOlMapOptions = {}) {
       map.value.removeLayer(wmsLayer.value)
     }
 
-    wmsLayer.value = new TileLayer({
+    wmsFailed.value = false
+    const layer = new TileLayer({
       source: new TileWMS({
         url: options.url,
         params: {
@@ -96,20 +100,25 @@ export function useOlMap(options: UseOlMapOptions = {}) {
         serverType: 'geoserver',
         crossOrigin: 'anonymous',
         tileLoadFunction: (tile, src) => {
-          loadAuthorizedImageTile(tile, src, options.authToken)
+          loadAuthorizedImageTile(tile as ImageTile, src, options.authToken)
         },
       }),
       opacity: options.opacity ?? 1,
       zIndex: 10,
     })
 
-    map.value.addLayer(wmsLayer.value)
+    layer.getSource()?.on('tileloaderror', () => {
+      if (wmsLayer.value === layer) wmsFailed.value = true
+    })
+    wmsLayer.value = layer
+    map.value.addLayer(layer)
   }
 
   function removeWmsLayer() {
     if (map.value && wmsLayer.value) {
       map.value.removeLayer(wmsLayer.value)
       wmsLayer.value = undefined
+      wmsFailed.value = false
     }
   }
 
@@ -138,8 +147,8 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     ready.value = false
   }
 
-  function loadAuthorizedImageTile(tile: unknown, src: string, authToken?: string) {
-    const image = (tile as { getImage: () => HTMLImageElement }).getImage()
+  function loadAuthorizedImageTile(tile: ImageTile, src: string, authToken?: string) {
+    const image = tile.getImage() as HTMLImageElement
 
     if (!authToken) {
       image.src = src
@@ -164,7 +173,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
         image.src = objectUrl
       })
       .catch(() => {
-        image.src = ''
+        tile.setState(TileState.ERROR)
       })
   }
 
@@ -177,6 +186,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     pointerLonLat,
     zoom,
     ready,
+    wmsFailed,
     initMap,
     addWmsLayer,
     removeWmsLayer,

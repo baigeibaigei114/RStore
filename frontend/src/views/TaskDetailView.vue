@@ -36,7 +36,7 @@
     </div>
 
     <TaskResultAnswers v-if="task?.taskType === 'NDVI' && task.status === 'SUCCESS' && regionSnapshot && auth.isLoggedIn"
-      :key="answerViewKey" :task-id="taskId" />
+      :key="answerViewKey" :task-id="taskId" :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="16">

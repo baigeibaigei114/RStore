@@ -11,6 +11,8 @@ from tests.test_boundary import TOKEN, ModelDouble, headers
     ({"kind": "VALID_PIXELS"}, 200),
     ({"kind": "DELETE_TASK"}, 503),
     ({"kind": "MEAN", "value": 99}, 503),
+    ({"kind": "SECTION"}, 503),
+    ({"kind": "TOP_SECTION", "section": "NE"}, 503),
 ])
 def test_result_question_returns_only_a_valid_answer_kind(output, status):
     model = ModelDouble(output)
@@ -32,4 +34,15 @@ def test_follow_up_receives_only_the_previous_verified_topic():
         response = client.post("/internal/v1/result-answers", headers=headers(), json=body)
     assert response.status_code == 200
     assert response.json()["kind"] == "FOLLOW_UP"
+    assert model.last_payload == body
+
+
+def test_section_selection_returns_only_the_named_partition():
+    model = ModelDouble({"kind": "SECTION", "section": "SE"})
+    service = AgentService(None, None, model)
+    body = {"question": "右下呢？", "previousSection": "NW"}
+    with TestClient(create_app(Settings(internal_token=TOKEN), service)) as client:
+        response = client.post("/internal/v1/result-answers", headers=headers(), json=body)
+    assert response.status_code == 200
+    assert response.json()["section"] == "SE"
     assert model.last_payload == body

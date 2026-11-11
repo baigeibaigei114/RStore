@@ -26,7 +26,11 @@
             <el-button :icon="Aim" :disabled="!loadedLayer" :loading="locating" @click="locateLoadedLayer">定位结果</el-button>
             <el-button :icon="FullScreen" @click="resetView">全图</el-button>
           </div>
-          <div v-if="loadedLayer" class="current-result"><span>当前查看</span><strong>{{ mapResultTitle(loadedLayer) }}</strong><small>{{ mapResultDetail(loadedLayer) }}</small></div>
+          <div v-if="loadedLayer" class="current-result">
+            <span>当前查看</span><strong>{{ mapResultTitle(loadedLayer) }}</strong><small>{{ mapResultDetail(loadedLayer) }}</small>
+            <small v-if="evidenceStatus" role="status">{{ evidenceStatus }}</small>
+            <small v-if="wmsFailed" role="status">部分结果影像暂时无法显示。</small>
+          </div>
           <div v-else class="map-empty-hint"><el-icon><MapLocation /></el-icon><span>选择分析结果，或切换到区域开始圈定范围。</span></div>
         </div>
         <aside v-show="panelOpen" class="work-panel" :aria-label="modeTitle">
@@ -47,16 +51,23 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Aim, Close, DataAnalysis, FullScreen, MapLocation, Picture, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import Feature from 'ol/Feature'
 import WKT from 'ol/format/WKT'
+import GeoJSON from 'ol/format/GeoJSON'
+import VectorLayer from 'ol/layer/Vector'
+import VectorSource from 'ol/source/Vector'
+import { Fill, Stroke, Style } from 'ol/style'
 import MonitoringRegionPanel from '@/components/MonitoringRegionPanel.vue'
 import MapResultPanel from '@/components/map/MapResultPanel.vue'
 import MapAssetPanel from '@/components/map/MapAssetPanel.vue'
 import { getImageDetailApi } from '@/api/image'
+import { getTaskResultEvidenceApi } from '@/api/ai'
 import { getLayerProxyWmsUrl } from '@/api/layer'
 import { TOKEN_KEY } from '@/api/request'
 import { useOlMap } from '@/composables/map/useOlMap'
-import { positiveId } from '@/utils/regionAnalysis'
+import { isUnauthorized, positiveId } from '@/utils/regionAnalysis'
 import { mapResultDetail, mapResultTitle } from '@/utils/mapPresentation'
+import { readResultEvidence, sectionLabels } from '@/utils/resultEvidence'
 import type { LayerListItem } from '@/types/layer'
 
 type WorkMode = 'results' | 'regions' | 'images'
@@ -67,10 +78,15 @@ const route = useRoute(), router = useRouter()
 const routeImageId = computed(() => positiveId(route.query.imageId))
 const routeTaskId = computed(() => positiveId(route.query.taskId))
 const routeTaskType = computed(() => typeof route.query.taskType === 'string' && ['NDVI', 'NDWI', 'CHANGE_DETECTION'].includes(route.query.taskType) ? route.query.taskType : '')
+const routeEvidence = computed(() => readResultEvidence(route.query.resultVersion, route.query.section))
 const mapTarget = ref<HTMLElement>(), loadedLayer = ref<LayerListItem>(), locating = ref(false)
 const opacity = ref(100), baseMapVisible = ref(true)
-const { map, initMap, addWmsLayer, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView } = useOlMap({ center: [104, 35], zoom: 5 })
+const { map, initMap, addWmsLayer, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView, wmsFailed } = useOlMap({ center: [104, 35], zoom: 5 })
 let locationRequest = 0, resize: ResizeObserver | undefined
+const evidenceStatus = ref('')
+const evidenceSource = new VectorSource()
+const evidenceLayer = new VectorLayer({ source: evidenceSource, zIndex: 20,
+  style: new Style({ fill: new Fill({ color: '#ffbd343b' }), stroke: new Stroke({ color: '#ffb000', width: 3 }) }) })
 
 function openMode(next: WorkMode) { mode.value = next; panelOpen.value = true }
 function loadResult(result: LayerListItem) {
@@ -79,8 +95,46 @@ function loadResult(result: LayerListItem) {
   addWmsLayer({ url: getLayerProxyWmsUrl(result), layers: name, opacity: opacity.value / 100,
     authToken: localStorage.getItem(TOKEN_KEY) || undefined })
   loadedLayer.value = { ...result }
-  void locateLoadedLayer()
 }
+
+watch([loadedLayer, routeTaskId, routeEvidence, map], async ([result, taskId, requested, currentMap], _, onCleanup) => {
+  locationRequest++
+  locating.value = false
+  evidenceSource.clear()
+  evidenceStatus.value = ''
+  if (!result || !currentMap) return
+  if (!requested || !taskId || String(result.taskId) !== String(taskId)) {
+    void locateLoadedLayer()
+    return
+  }
+  const request = new AbortController()
+  onCleanup(() => request.abort())
+  const token = localStorage.getItem(TOKEN_KEY)
+  const active = () => !request.signal.aborted && token === localStorage.getItem(TOKEN_KEY)
+  evidenceStatus.value = '正在核对分区范围…'
+  try {
+    const data = await getTaskResultEvidenceApi(String(taskId), requested.version, requested.section, request.signal)
+    if (!active()) return
+    if (data.fileId !== String(result.id) || data.version !== requested.version || data.section !== requested.section)
+      throw new Error('Result evidence identity mismatch')
+    const geometry = new GeoJSON().readGeometry(data.geometry, { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' })
+    const extent = geometry.getExtent()
+    if (!['Polygon', 'MultiPolygon'].includes(geometry.getType()) || !extent.every(Number.isFinite) ||
+      extent[0] >= extent[2] || extent[1] >= extent[3]) throw new Error('Invalid result evidence extent')
+    evidenceSource.addFeature(new Feature(geometry))
+    currentMap.getView().fit(extent, { padding: [70, 40, 100, 40], maxZoom: 17, duration: 350 })
+    evidenceStatus.value = `已高亮${sectionLabels[requested.section]}分区`
+  } catch (error) {
+    if (!request.signal.aborted && isUnauthorized(error) && !localStorage.getItem(TOKEN_KEY)) {
+      clearResult()
+      ElMessage.warning('登录已失效，请重新登录后查看分区。')
+      return
+    }
+    if (!active()) return
+    evidenceStatus.value = '分区范围暂不可用，仍可查看任务结果图层。'
+    void locateLoadedLayer()
+  }
+})
 async function locateLoadedLayer() {
   const result = loadedLayer.value
   if (!result) return
@@ -101,11 +155,11 @@ watch(routeTaskId, (next, previous) => { if (next && next !== previous) clearRes
 function changeOpacity(value: number | number[]) { updateWmsOpacity((Array.isArray(value) ? value[0]! : value) / 100) }
 onMounted(() => {
   if (!mapTarget.value) return
-  initMap(mapTarget.value)
+  initMap(mapTarget.value).addLayer(evidenceLayer)
   resize = new ResizeObserver(() => map.value?.updateSize())
   resize.observe(mapTarget.value)
 })
-onBeforeUnmount(() => { locationRequest++; resize?.disconnect() })
+onBeforeUnmount(() => { locationRequest++; evidenceSource.clear(); resize?.disconnect() })
 </script>
 
 <style scoped>

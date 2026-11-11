@@ -73,26 +73,31 @@ def summarize_ndvi(values: np.ndarray, red_band: int, nir_band: int, region=None
     return metadata
 
 
+def read_result_pixels(dataset, red_band: int, nir_band: int, region=None):
+    tags = dataset.tags()
+    if (
+        dataset.count != 1
+        or tags.get(VERSION_TAG) != "1"
+        or tags.get("redBand") != str(red_band)
+        or tags.get("nirBand") != str(nir_band)
+    ):
+        raise ValueError("Existing NDVI output is not compatible with v1; create a new task")
+    values = dataset.read(1, masked=True).astype("float32").filled(np.nan)
+    mask = None
+    if region is not None:
+        if tags.get("region_snapshot_sha256") != snapshot_digest(region):
+            raise ValueError("Existing output does not match region snapshot")
+        mask = region_mask(dataset, region)
+        if np.isfinite(values[~mask]).any():
+            raise ValueError("Existing regional output has values outside region")
+    elif tags.get("region_snapshot_sha256"):
+        raise ValueError("Regional output cannot be reused by a rectangular task")
+    return values, mask
+
+
 def read_result_metadata(path: Path, red_band: int, nir_band: int, region=None) -> dict:
     with rasterio.open(path) as dataset:
-        tags = dataset.tags()
-        if (
-            dataset.count != 1
-            or tags.get(VERSION_TAG) != "1"
-            or tags.get("redBand") != str(red_band)
-            or tags.get("nirBand") != str(nir_band)
-        ):
-            raise ValueError("Existing NDVI output is not compatible with v1; create a new task")
-        values = dataset.read(1, masked=True).astype("float32").filled(np.nan)
-        mask = None
-        if region is not None:
-            if tags.get("region_snapshot_sha256") != snapshot_digest(region):
-                raise ValueError("Existing output does not match region snapshot")
-            mask = region_mask(dataset, region)
-            if np.isfinite(values[~mask]).any():
-                raise ValueError("Existing regional output has values outside region")
-        elif tags.get("region_snapshot_sha256"):
-            raise ValueError("Regional output cannot be reused by a rectangular task")
+        values, mask = read_result_pixels(dataset, red_band, nir_band, region)
         return summarize_ndvi(values, red_band, nir_band, region, mask)
 
 

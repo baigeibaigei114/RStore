@@ -30,4 +30,10 @@ public class TaskResultAnswerController {
     public Result<JsonNode> ask(@PathVariable long taskId, @RequestBody JsonNode body) {
         return Result.success(service.ask(taskId, body));
     }
+
+    @GetMapping("/evidence")
+    public Result<JsonNode> evidence(@PathVariable long taskId, @RequestParam String version,
+                                     @RequestParam String section) {
+        return Result.success(service.evidence(taskId, version, section));
+    }
 }

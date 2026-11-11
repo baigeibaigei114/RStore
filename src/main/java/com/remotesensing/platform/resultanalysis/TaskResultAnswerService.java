@@ -16,6 +16,7 @@ import com.remotesensing.platform.mapper.RsResultFileMapper;
 import com.remotesensing.platform.mapper.RsTaskMapper;
 import com.remotesensing.platform.service.RateLimitService;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -32,10 +33,11 @@ public class TaskResultAnswerService {
     private final AgentClient agent;
     private final AgentProperties limits;
     private final RateLimitService rate;
+    private final TaskResultSpatialEvidence spatial;
 
     TaskResultAnswerService(CurrentUserContext users, RsTaskMapper tasks, RsResultFileMapper results,
                             TaskResultAnswerStore store, AgentClient agent, AgentProperties limits,
-                            RateLimitService rate) {
+                            RateLimitService rate, TaskResultSpatialEvidence spatial) {
         this.users = users;
         this.tasks = tasks;
         this.results = results;
@@ -43,6 +45,7 @@ public class TaskResultAnswerService {
         this.agent = agent;
         this.limits = limits;
         this.rate = rate;
+        this.spatial = spatial;
     }
 
     public ObjectNode get(long taskId, String version, Integer beforeTurn) {
@@ -110,9 +113,10 @@ public class TaskResultAnswerService {
         // The durable reservation owns the only model call. There is no DB transaction around HTTP.
         try {
             rate.check("agent:" + owner, limits.getOwnerRateLimit(), Duration.ofSeconds(limits.getOwnerRateSeconds()));
-            Topic previous = previousTopic(owner, taskId, version, expectedTurn);
+            Previous previous = previousAnswer(owner, taskId, version, expectedTurn);
             ObjectNode prompt = object().put("question", question);
-            if (previous != null) prompt.put("previousKind", previous.name());
+            if (previous.topic() != null) prompt.put("previousKind", previous.topic().name());
+            if (previous.section() != null) prompt.put("previousSection", previous.section());
             JsonNode selection = agent.post("result-answers", prompt,
                     Duration.ofSeconds(limits.getRoundSeconds()));
             ObjectNode answer = answer(selection, snapshot, previous);
@@ -127,12 +131,25 @@ public class TaskResultAnswerService {
         return replay(store.find(owner, taskId, requestId), version, question, expectedTurn);
     }
 
-    private Topic previousTopic(String owner, long taskId, String version, int expectedTurn) {
-        if (expectedTurn == 0) return null;
-        TaskResultAnswerStore.Turn prior = store.previousComplete(owner, taskId, version, expectedTurn);
-        if (prior == null) return null;
-        Topic topic = Topic.valueOf(parse(prior.answer()).path("kind").asText());
-        return topic.metrics.isEmpty() ? null : topic;
+    public ObjectNode evidence(long taskId, String version, String section) {
+        require(version.matches("[a-f0-9]{64}") && TaskResultSpatialEvidence.SECTIONS.contains(section));
+        String owner = users.getAuthenticatedUserId();
+        Snapshot snapshot = snapshot(owner, taskId);
+        if (!version.equals(snapshot.version())) throw AgentFailure.conflict("RESULT_CHANGED");
+        JsonNode geometry = spatial.geometry(owner, taskId, version, section, snapshot.file());
+        if (!snapshot(owner, taskId).version().equals(version)) throw AgentFailure.conflict("RESULT_CHANGED");
+        return object().put("fileId", snapshot.file().getId().toString())
+                .put("version", version).put("section", section).set("geometry", geometry);
+    }
+
+    private Previous previousAnswer(String owner, long taskId, String version, int expectedTurn) {
+        TaskResultAnswerStore.Turn prior = expectedTurn == 0 ? null : store.previousComplete(owner, taskId, version, expectedTurn);
+        if (prior == null) return new Previous(null, null);
+        JsonNode answer = parse(prior.answer());
+        Topic topic = Topic.valueOf(answer.path("kind").asText());
+        String section = answer.path("focusSection").asText();
+        return new Previous(topic.metrics.isEmpty() || topic == Topic.SPATIAL_EVIDENCE_UNAVAILABLE ? null : topic,
+                TaskResultSpatialEvidence.SECTIONS.contains(section) ? section : null);
     }
 
     private RsTask ownedTask(String owner, long taskId) {
@@ -165,7 +182,7 @@ public class TaskResultAnswerService {
             ObjectNode identity = object().put("fileId", file.getId()).put("bucket", file.getMinioBucket())
                     .put("objectKey", file.getObjectKey()).put("checksum", file.getChecksum()).put("size", file.getFileSize());
             identity.set("metadata", metadata);
-            return new Snapshot(hash(identity), metadata);
+            return new Snapshot(hash(identity), metadata, file);
         } catch (BusinessException | IllegalStateException error) {
             throw new AgentFailure("STATISTICS_UNAVAILABLE", "没有可解读的区域统计", 409, false);
         }
@@ -184,19 +201,42 @@ public class TaskResultAnswerService {
         return response.set("answer", parse(turn.answer()));
     }
 
-    private ObjectNode answer(JsonNode selection, Snapshot snapshot, Topic previous) {
-        fields(selection, "requestId", "kind", "usage", "modelRequested", "modelReturned", "elapsedMs");
+    private ObjectNode answer(JsonNode selection, Snapshot snapshot, Previous previous) {
+        fields(selection, "requestId", "kind", "section", "usage", "modelRequested", "modelReturned", "elapsedMs");
         Topic topic;
+        String section = null;
         try {
             String kind = text(selection, "kind", 40);
-            if ("FOLLOW_UP".equals(kind)) {
-                topic = previous == Topic.MEAN || previous == Topic.VALID_RATIO || previous == Topic.COVERAGE
-                        ? previous : Topic.CLARIFY;
+            if ("SECTION".equals(kind)) {
+                section = text(selection, "section", 2);
+                require(TaskResultSpatialEvidence.SECTIONS.contains(section));
+            } else {
+                require(!selection.has("section"));
+            }
+            if ("FOLLOW_UP_SECTION".equals(kind)) {
+                section = previous.section();
+                topic = section == null ? Topic.CLARIFY : Topic.SECTION;
+            } else if ("FOLLOW_UP".equals(kind)) {
+                section = previous.section();
+                Topic priorTopic = previous.topic();
+                if (section != null) topic = Topic.SECTION;
+                else topic = priorTopic == Topic.MEAN || priorTopic == Topic.VALID_RATIO || priorTopic == Topic.COVERAGE
+                        ? priorTopic : Topic.CLARIFY;
             } else {
                 topic = Topic.valueOf(kind);
+                require(topic != Topic.SPATIAL_EVIDENCE_UNAVAILABLE);
             }
         } catch (IllegalArgumentException error) {
             throw new AgentFailure("MODEL_OUTPUT_INVALID", "未取得可核对的回答", 503, true);
+        }
+        JsonNode distribution = null;
+        if (topic == Topic.SPATIAL_OVERVIEW || topic == Topic.TOP_SECTION || topic == Topic.BOTTOM_SECTION || topic == Topic.SECTION) {
+            RsResultFile file = snapshot.file();
+            try {
+                distribution = spatial.extract(file.getOwnerId(), file.getTaskId(), snapshot.version(), file, snapshot.metadata());
+            } catch (AgentFailure error) {
+                topic = Topic.SPATIAL_EVIDENCE_UNAVAILABLE;
+            }
         }
         ObjectNode answer = object().put("kind", topic.name()).put("statement", topic.statement)
                 .put("regionVersion", snapshot.metadata().path("regionSnapshot").path("version").intValue());
@@ -206,10 +246,49 @@ public class TaskResultAnswerService {
                     : snapshot.metadata().path("statistics").path(metric.key);
             evidence.addObject().put("key", metric.key).put("label", metric.label).put("unit", metric.unit).set("value", value);
         }
+        if (distribution != null) addSpatialAnswer(answer, topic, section, distribution);
         return answer;
     }
 
-    private record Snapshot(String version, JsonNode metadata) {}
+    private void addSpatialAnswer(ObjectNode answer, Topic topic, String section, JsonNode distribution) {
+        if (topic == Topic.SPATIAL_OVERVIEW) {
+            var evidence = answer.withArray("evidence");
+            for (String key : List.of("p10", "p50", "p90")) {
+                String label = "p50".equals(key) ? "NDVI 中位数（P50）" : "NDVI " + key.toUpperCase(java.util.Locale.ROOT);
+                evidence.addObject().put("key", key).put("label", label).put("unit", "decimal")
+                        .set("value", distribution.path(key));
+            }
+        }
+        List<JsonNode> selected = new ArrayList<>();
+        for (JsonNode block : distribution.path("sections")) {
+            if (topic == Topic.SPATIAL_OVERVIEW || block.path("id").asText().equals(section)) {
+                selected.add(block);
+            } else if ((topic == Topic.TOP_SECTION || topic == Topic.BOTTOM_SECTION) && block.path("mean").isNumber()) {
+                double mean = block.path("mean").doubleValue();
+                double best = selected.isEmpty() ? mean : selected.get(0).path("mean").doubleValue();
+                if ((topic == Topic.TOP_SECTION && mean > best) || (topic == Topic.BOTTOM_SECTION && mean < best)) {
+                    selected.clear();
+                    selected.add(block);
+                } else if (mean == best) {
+                    selected.add(block);
+                }
+            }
+        }
+        if (selected.size() == 1 && topic != Topic.SPATIAL_OVERVIEW)
+            answer.put("focusSection", selected.get(0).path("id").asText());
+        else if (selected.size() > 1 && (topic == Topic.TOP_SECTION || topic == Topic.BOTTOM_SECTION))
+            answer.put("statement", topic.statement + "下列分区并列。");
+        var blocks = answer.putArray("partitions");
+        for (JsonNode block : selected) {
+            ObjectNode view = blocks.addObject().put("id", block.path("id").asText())
+                    .put("total", block.path("total").intValue()).put("valid", block.path("valid").intValue())
+                    .put("locatable", block.path("geometry").isObject());
+            view.set("mean", block.path("mean"));
+        }
+    }
+
+    private record Previous(Topic topic, String section) {}
+    private record Snapshot(String version, JsonNode metadata, RsResultFile file) {}
 
     private enum Metric {
         MEAN("mean", "区域 NDVI 均值", "decimal"), MIN("min", "最小值", "decimal"), MAX("max", "最大值", "decimal"),
@@ -236,8 +315,14 @@ public class TaskResultAnswerService {
         VALID_PIXELS("有效像素比例以区域内总像素为分母。", Metric.VALID, Metric.TOTAL, Metric.INVALID, Metric.RATIO),
         VALID_RATIO("有效像素比例以区域内总像素为分母。", Metric.VALID, Metric.TOTAL, Metric.RATIO),
         COVERAGE("影像范围覆盖率描述监测区域落在影像范围内的比例。", Metric.COVERAGE),
-        CLARIFY("请说明你指的是哪一项统计，例如均值、有效像素比例或数值范围。"),
-        NEEDS_SPATIAL_EVIDENCE("现有统计描述全区，需要像素分布或分区统计才能回答这个问题。"),
+        SPATIAL_OVERVIEW("按监测区域在结果影像中的像素范围四分。分位数和分区均值都使用有效像素。"),
+        TOP_SECTION("下列分区的有效像素 NDVI 均值最高。"),
+        BOTTOM_SECTION("下列分区的有效像素 NDVI 均值最低。"),
+        SECTION("以下是所选分区的区域像素数、有效像素数和有效像素 NDVI 均值。"),
+        SPATIAL_EVIDENCE_UNAVAILABLE("暂时无法核对这份结果的分区证据，以下是已核实的全区统计。",
+                Metric.MEAN, Metric.MIN, Metric.MAX, Metric.VALID, Metric.TOTAL, Metric.RATIO),
+        CLARIFY("请说明你指的是哪项统计或哪个分区。"),
+        NEEDS_SPATIAL_EVIDENCE("当前结果解读支持分位数和影像四分区。这个问题需要更细的空间证据。"),
         INSUFFICIENT_EVIDENCE("当前任务的 NDVI 统计无法支持这个问题。");
 
         final String statement;

@@ -153,16 +153,26 @@ class AnswerRequest(StrictModel):
 
 
 ResultTopic = Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "VALID_RATIO", "COVERAGE",
+                      "SPATIAL_OVERVIEW", "TOP_SECTION", "BOTTOM_SECTION", "SECTION",
                       "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+ResultSection = Literal["NW", "NE", "SW", "SE"]
 
 
 class ResultAnswerRequest(StrictModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
     previousKind: ResultTopic | None = None
+    previousSection: ResultSection | None = None
 
 
 class ResultAnswerSelection(StrictModel):
-    kind: ResultTopic | Literal["FOLLOW_UP", "CLARIFY"]
+    kind: ResultTopic | Literal["FOLLOW_UP", "FOLLOW_UP_SECTION", "CLARIFY"]
+    section: ResultSection | None = None
+
+    @model_validator(mode="after")
+    def require_named_section(self):
+        if (self.kind == "SECTION") != (self.section is not None):
+            raise ValueError("section is required only for SECTION")
+        return self
 
 
 class EvidenceQuote(StrictModel):

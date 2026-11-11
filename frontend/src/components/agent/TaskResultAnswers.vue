@@ -21,7 +21,7 @@
         <p v-else-if="entry.status === 'FAILED'">{{ entry.error || '本次解读未完成，可以重新提问。' }}</p>
         <template v-else-if="entry.answer">
           <p>{{ entry.answer.statement }}</p>
-          <details v-if="entry.answer.evidence.length" :open="entry.requestId === turn?.requestId">
+          <details v-if="entry.answer.evidence.length || entry.answer.partitions?.length" :open="entry.requestId === turn?.requestId">
             <summary>查看数据依据</summary>
             <p>本次任务 · 区域版本 {{ entry.answer.regionVersion }}</p>
             <dl>
@@ -30,6 +30,16 @@
                 <dd>{{ formatValue(item.value, item.unit) }}</dd>
               </div>
             </dl>
+            <ul v-if="entry.answer.partitions?.length" class="partitions">
+              <li v-for="part in entry.answer.partitions" :key="part.id">
+                <strong>{{ sectionLabels[part.id] }}分区</strong>
+                <span>均值 {{ part.mean == null ? '暂无有效像素' : formatValue(part.mean, 'decimal') }}</span>
+                <span>有效像素 {{ formatValue(part.valid, 'count') }} / {{ formatValue(part.total, 'count') }}</span>
+                <el-button v-if="part.locatable && mapReady && entry.resultVersion === state?.currentVersion" link type="primary"
+                  @click="openPartition(entry.resultVersion, part.id)">在地图高亮{{ sectionLabels[part.id] }}分区</el-button>
+                <small v-else>该分区的地图范围暂不可用</small>
+              </li>
+            </ul>
           </details>
         </template>
       </article>
@@ -56,13 +66,16 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { askTaskResultApi, getTaskResultAnswerApi } from '@/api/ai'
 import { ApiError } from '@/api/request'
-import type { TaskResultAnswer, TaskResultAnswerState, TaskResultQuestion } from '@/types/ai'
+import type { ResultSection, TaskResultAnswer, TaskResultAnswerState, TaskResultQuestion } from '@/types/ai'
 import { isUnauthorized } from '@/utils/regionAnalysis'
+import { sectionLabels } from '@/utils/resultEvidence'
 
-const props = defineProps<{ taskId: string }>()
-const examples = ['本次区域 NDVI 整体如何？', '有效像素比例是多少？', 'NDVI 最小值和最大值是多少？']
+const props = defineProps<{ taskId: string; mapReady: boolean }>()
+const router = useRouter()
+const examples = ['本次区域 NDVI 整体如何？', '有效像素比例是多少？', '哪个分区均值最高？', '四个分区的数值有什么差异？']
 const question = ref('')
 const state = ref<TaskResultAnswerState | null>(null)
 const turns = ref<TaskResultAnswer[]>([])
@@ -72,6 +85,10 @@ const pending = ref<TaskResultQuestion | null>(null)
 const feedback = ref('')
 const busy = ref(false)
 const lifetime = new AbortController()
+
+function openPartition(resultVersion: string, section: ResultSection) {
+  void router.push({ path: '/map', query: { taskId: props.taskId, resultVersion, section } })
+}
 
 function resolvePending(value?: TaskResultAnswer) {
   if (value && value.requestId === pending.value?.requestId && value.status !== 'RUNNING') {
@@ -179,4 +196,7 @@ label { display: block; margin-bottom: 6px; }
 .saved-answer summary { cursor: pointer; color: #175b47; }
 .saved-answer dl { display: flex; flex-wrap: wrap; gap: 12px 24px; }
 .saved-answer dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.partitions { display: grid; gap: 8px; margin: 12px 0; padding: 0; list-style: none; }
+.partitions li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 12px; border: 1px solid #dce6dd; border-radius: 6px; }
+.partitions small { color: #526458; }
 </style>
