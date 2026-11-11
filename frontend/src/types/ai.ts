@@ -38,6 +38,7 @@ export interface TaskResultPartition {
   total: number
   valid: number
   locatable: boolean
+  changed?: number
 }
 
 export interface TaskResultEvidence {
@@ -60,6 +61,7 @@ export interface TaskResultAnswer {
     regionVersion: number | null
     evidence: { key: string; label: string; value: number; unit: 'decimal' | 'count' | 'ratio' }[]
     partitions?: TaskResultPartition[]
+    sources?: { period: 'before' | 'after'; imageId?: string; name: string; captureTime: string }[]
   } | null
 }
 

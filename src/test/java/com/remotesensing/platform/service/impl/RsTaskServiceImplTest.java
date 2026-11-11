@@ -532,6 +532,23 @@ class RsTaskServiceImplTest {
     }
 
     @Test
+    @DisplayName("变化检测拒绝非有限阈值且不锁定影像")
+    void submitChangeDetectionShouldRejectNonFiniteThresholdBeforeCreatingATask() {
+        RsTaskSubmitDTO dto = new RsTaskSubmitDTO();
+        dto.setImageId(20L);
+        dto.setTaskType(RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION);
+        dto.setParams(Map.of("beforeImageId", 10L, "threshold", "NaN"));
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(imageMapper.selectAccessibleById(20L, "user-a")).thenReturn(readyImage(20L, "user-a", "raw/after.tif"));
+        when(imageMapper.selectAccessibleById(10L, "user-a")).thenReturn(readyImage(10L, "user-a", "raw/before.tif"));
+
+        assertThatThrownBy(() -> service.submit(dto)).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("变化阈值必须为有限的非负数");
+        verify(imageMapper, never()).markProcessingIfReady(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
+    @Test
     @DisplayName("变化检测不能使用无权访问的前一期影像")
     void submitChangeDetectionShouldRejectInaccessibleBeforeImage() {
         RsImage afterImage = readyImage(20L, "user-a", "raw/after.tif");

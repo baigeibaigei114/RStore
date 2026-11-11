@@ -6,6 +6,9 @@ export const taskStatusText = (status?: TaskStatus) => statusLabels[status || ''
 export const isActiveStatus = (status?: TaskStatus) => !!status && ['PENDING', 'RUNNING', 'RETRYING'].includes(status)
 
 export function failureMessage(message?: string, type?: TaskType): string {
+  if (type === 'CHANGE_DETECTION' && message?.includes('no common valid pixels')) {
+    return '两期影像没有共同有效像素。请核对所选波段和有效范围。'
+  }
   if (message?.includes('not fully covered')) return '监测区域没有完整落在影像范围内。请调整区域，或换一景覆盖该区域的影像。'
   if (message && /no valid.*pixel|no pixel.*center|zero.*pixel/i.test(message)) {
     if (type === 'NDWI') return '没有可用于 NDWI 的像素。请核对绿光和近红外波段，或选择另一景影像。'
@@ -31,7 +34,7 @@ function canonical(value: unknown): string {
 }
 
 export function readStatistics(task: TaskDetail | null, result: TaskResultFile | null): IndexStatistics | null {
-  if (!task || task.status !== 'SUCCESS' || !['NDVI', 'NDWI'].includes(task.taskType) ||
+  if (!task || task.status !== 'SUCCESS' || !['NDVI', 'NDWI', 'CHANGE_DETECTION'].includes(task.taskType) ||
     !result?.resultMetadata || result.taskId !== task.id) return null
   try {
     const metadata = JSON.parse(result.resultMetadata)
@@ -50,6 +53,22 @@ export function readStatistics(task: TaskDetail | null, result: TaskResultFile |
       || stats.min > stats.mean || stats.mean > stats.max
       || Math.abs(stats.validPixelRatio - stats.validPixelCount / stats.totalPixelCount) > 1e-9) return null
     return stats
+  } catch { return null }
+}
+
+export function readChangeSummary(task: TaskDetail | null, result: TaskResultFile | null) {
+  if (task?.taskType !== 'CHANGE_DETECTION' || !result?.resultMetadata) return null
+  const base = readStatistics(task, result)
+  if (!base) return null
+  try {
+    const metadata = JSON.parse(result.resultMetadata)
+    const { changedPixelCount: changed, unchangedPixelCount: unchanged, changeRatio: ratio } = metadata.statistics
+    const threshold = metadata.comparison?.threshold
+    if (metadata.grid?.alignment !== 'same_grid' || !Number.isSafeInteger(changed) || changed < 0 ||
+      !Number.isSafeInteger(unchanged) || unchanged < 0 || changed + unchanged !== base.validPixelCount ||
+      !Number.isFinite(ratio) || Math.abs(ratio - changed / base.validPixelCount) > 1e-9 ||
+      !Number.isFinite(threshold) || threshold < 0) return null
+    return { changed, valid: base.validPixelCount, total: base.totalPixelCount, ratio, threshold }
   } catch { return null }
 }
 

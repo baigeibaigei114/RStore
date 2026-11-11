@@ -281,6 +281,33 @@ class TaskResultAnswerServiceTest {
                 () -> service.ask(TASK_ID, request)).errorCode);
     }
 
+    @Test
+    void rendersAlignedChangeSourcesWithoutPassingThemToTheClassifier() {
+        RsTask task = tasks.selectByIdForOwner(TASK_ID, OWNER);
+        task.setTaskType("CHANGE_DETECTION");
+        task.setParams("""
+                {"beforeImageId":7,"afterImageId":8,"band":1,"threshold":0.5,
+                 "changeSourceSnapshot":{"width":4,"height":2,
+                    "before":{"name":"前期影像","captureTime":"2024-07-04T00:00:00Z"},
+                    "after":{"name":"后期影像","captureTime":"2024-11-29T00:00:00Z"}}}
+                """);
+        file.setResultMetadata("""
+                {"schemaVersion":1,"algorithm":"CHANGE_DETECTION","scope":"cropped_raster",
+                 "comparison":{"beforeImageId":7,"afterImageId":8,"band":1,"threshold":0.5},
+                 "grid":{"width":4,"height":2,"alignment":"same_grid"},
+                 "statistics":{"totalPixelCount":8,"validPixelCount":5,"invalidPixelCount":3,"validPixelRatio":0.625,
+                               "min":0,"max":1,"mean":0.4,"changedPixelCount":2,"unchangedPixelCount":3,"changeRatio":0.4}}
+                """);
+        String question = "两期来源和对齐范围是什么？";
+        var answer = complete(question(question), object().put("question", question)
+                .put("algorithm", "CHANGE_DETECTION"), "CHANGE_SCOPE").path("answer");
+        assertEquals("2024-07-04T00:00:00Z", answer.path("sources").get(0).path("captureTime").asText());
+        assertEquals("7", answer.path("sources").get(0).path("imageId").asText());
+        assertEquals("后期影像", answer.path("sources").get(1).path("name").asText());
+        assertEquals(5, answer.path("evidence").get(3).path("value").asInt());
+        assertFalse(answer.toString().contains("beforeImageId"));
+    }
+
     private ObjectNode complete(ObjectNode request, ObjectNode prompt, String kind) {
         String question = request.path("question").asText();
         String version = request.path("resultVersion").asText();

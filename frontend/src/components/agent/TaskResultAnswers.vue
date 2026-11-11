@@ -21,20 +21,33 @@
         <p v-else-if="entry.status === 'FAILED'">{{ entry.error || '本次解读未完成，可以重新提问。' }}</p>
         <template v-else-if="entry.answer">
           <p>{{ entry.answer.statement }}</p>
-          <details v-if="entry.answer.evidence.length || entry.answer.partitions?.length" :open="entry.requestId === turn?.requestId">
+          <details v-if="entry.answer.evidence.length || entry.answer.partitions?.length || entry.answer.sources?.length" :open="entry.requestId === turn?.requestId">
             <summary>查看数据依据</summary>
             <p>本次任务 · {{ entry.answer.regionVersion ? `区域版本 ${entry.answer.regionVersion}` : '整幅结果影像' }}</p>
             <dl>
               <div v-for="item in entry.answer.evidence" :key="item.key">
                 <dt>{{ item.label }}</dt>
-                <dd>{{ formatValue(item.value, item.unit) }}</dd>
+                <dd>{{ item.key === 'threshold' ? item.value : formatValue(item.value, item.unit) }}</dd>
+              </div>
+            </dl>
+            <dl v-if="entry.answer.sources?.length">
+              <div v-for="source in entry.answer.sources" :key="source.period">
+                <dt>{{ source.period === 'before' ? '对比前影像' : '对比后影像' }}</dt>
+                <dd>{{ formatSource(source) }}</dd>
               </div>
             </dl>
             <ul v-if="entry.answer.partitions?.length" class="partitions">
               <li v-for="part in entry.answer.partitions" :key="part.id">
                 <strong>{{ sectionLabels[part.id] }}分区</strong>
-                <span>均值 {{ part.mean == null ? '暂无有效像素' : formatValue(part.mean, 'decimal') }}</span>
-                <span>有效像素 {{ formatValue(part.valid, 'count') }} / {{ formatValue(part.total, 'count') }}</span>
+                <template v-if="algorithm === 'CHANGE_DETECTION'">
+                  <span>变化比例 {{ part.mean == null ? '暂无共同有效像素' : formatValue(part.mean, 'ratio') }}</span>
+                  <span v-if="part.changed !== undefined">变化像素 {{ formatValue(part.changed, 'count') }}</span>
+                  <span>共同有效像素 {{ formatValue(part.valid, 'count') }} / {{ formatValue(part.total, 'count') }}</span>
+                </template>
+                <template v-else>
+                  <span>均值 {{ part.mean == null ? '暂无有效像素' : formatValue(part.mean, 'decimal') }}</span>
+                  <span>有效像素 {{ formatValue(part.valid, 'count') }} / {{ formatValue(part.total, 'count') }}</span>
+                </template>
                 <el-button v-if="part.locatable && mapReady && entry.resultVersion === state?.currentVersion" link type="primary"
                   @click="openPartition(entry.resultVersion, part.id)">在地图高亮{{ sectionLabels[part.id] }}分区</el-button>
                 <small v-else>该分区的地图范围暂不可用</small>
@@ -52,7 +65,7 @@
       <label for="result-answer-question">你的问题</label>
       <el-input id="result-answer-question" v-model="question" maxlength="500"
         :disabled="busy || !!pending || turn?.status === 'RUNNING'"
-        :placeholder="`例如，本次 ${algorithm} 的均值和数值范围如何？`" />
+        :placeholder="algorithm === 'CHANGE_DETECTION' ? '例如，哪个分区变化比例最高？' : `例如，本次 ${algorithm} 的均值和数值范围如何？`" />
       <div class="result-answer-actions">
         <el-button v-if="!pending" type="primary" native-type="submit" :loading="busy"
           :disabled="!question.trim() || turn?.status === 'RUNNING'">提问</el-button>
@@ -73,9 +86,11 @@ import type { ResultSection, TaskResultAnswer, TaskResultAnswerState, TaskResult
 import { isUnauthorized } from '@/utils/regionAnalysis'
 import { sectionLabels } from '@/utils/resultEvidence'
 
-const props = defineProps<{ taskId: string; algorithm: 'NDVI' | 'NDWI'; mapReady: boolean }>()
+const props = defineProps<{ taskId: string; algorithm: 'NDVI' | 'NDWI' | 'CHANGE_DETECTION'; mapReady: boolean }>()
 const router = useRouter()
-const examples = computed(() => [`本次 ${props.algorithm} 整体如何？`, '有效像素比例是多少？', '哪个分区均值最高？', '四个分区的数值有什么差异？'])
+const examples = computed(() => props.algorithm === 'CHANGE_DETECTION'
+  ? ['变化比例是多少？', '两期影像来源和对齐范围是什么？', '用了什么阈值？', '四个分区的变化比例有什么差异？']
+  : [`本次 ${props.algorithm} 整体如何？`, '有效像素比例是多少？', '哪个分区均值最高？', '四个分区的数值有什么差异？'])
 const question = ref('')
 const state = ref<TaskResultAnswerState | null>(null)
 const turns = ref<TaskResultAnswer[]>([])
@@ -180,6 +195,12 @@ async function submit() {
 function formatValue(value: number, unit: string) {
   const formatted = (unit === 'ratio' ? value * 100 : value).toLocaleString('zh-CN', { maximumFractionDigits: 6 })
   return unit === 'ratio' ? `${formatted}%` : formatted
+}
+
+function formatSource(source: { name: string; imageId?: string; captureTime: string }) {
+  const name = source.name || (source.imageId ? `影像 ${source.imageId}` : '影像名称未记录')
+  const day = source.captureTime?.slice(0, 10)
+  return day && name.includes(day) ? name : `${name} · ${day || '采集时间未记录'}`
 }
 
 onMounted(() => refresh())

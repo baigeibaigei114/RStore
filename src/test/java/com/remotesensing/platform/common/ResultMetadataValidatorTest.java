@@ -30,4 +30,29 @@ class ResultMetadataValidatorTest {
         JsonNode wrongRatio = parse(NDWI.toString().replace("0.75", "0.50"));
         assertThrows(BusinessException.class, () -> ResultMetadataValidator.validate(wrongRatio, "NDWI", PARAMS));
     }
+
+    @Test
+    void validatesChangeAgainstBothSourceIdsGridAndTheCommonDenominator() {
+        String params = """
+                {"beforeImageId":7,"afterImageId":8,"band":1,"threshold":0.5,
+                 "changeSourceSnapshot":{"width":4,"height":2}}
+                """;
+        String metadata = """
+                {"schemaVersion":1,"algorithm":"CHANGE_DETECTION","scope":"cropped_raster",
+                 "comparison":{"beforeImageId":7,"afterImageId":8,"band":1,"threshold":0.5},
+                 "grid":{"width":4,"height":2,"alignment":"same_grid"},
+                 "statistics":{"totalPixelCount":8,"validPixelCount":5,"invalidPixelCount":3,"validPixelRatio":0.625,
+                               "min":0,"max":1,"mean":0.4,"changedPixelCount":2,"unchangedPixelCount":3,"changeRatio":0.4}}
+                """;
+        assertDoesNotThrow(() -> ResultMetadataValidator.validate(parse(metadata), "CHANGE_DETECTION", params));
+        assertDoesNotThrow(() -> ResultMetadataValidator.validate(null, "CHANGE_DETECTION", params));
+        for (String invalid : new String[]{
+                metadata.replace("\"beforeImageId\":7", "\"beforeImageId\":6"),
+                metadata.replace("\"threshold\":0.5", "\"threshold\":0.6"),
+                metadata.replace("\"width\":4", "\"width\":5"),
+                metadata.replace("\"changeRatio\":0.4", "\"changeRatio\":0.25")
+        }) {
+            assertThrows(BusinessException.class, () -> ResultMetadataValidator.validate(parse(invalid), "CHANGE_DETECTION", params));
+        }
+    }
 }

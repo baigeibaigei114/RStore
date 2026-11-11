@@ -109,9 +109,11 @@ python main.py
 | --- | --- |
 | `NDVI` | 默认 `redBand=3`、`nirBand=4`，公式为 `(NIR - RED) / (NIR + RED)` |
 | `NDWI` | 默认 `greenBand=2`、`nirBand=4`，公式为 `(GREEN - NIR) / (GREEN + NIR)` |
-| `CHANGE_DETECTION` | 已实现简化差值检测，默认 `band=1`、`threshold=0.2` |
+| `CHANGE_DETECTION` | 比较对齐网格中的两期共同有效像素。默认 `band=1`、`threshold=0.2`，绝对差值超过阈值时标记为变化 |
 
 NDVI 和 NDWI 计算均要求源波段像素有效，且分母绝对值大于 `1e-6`。新版 NDWI 结果保存掩膜和统计，供任务详情读取。
+
+新版变化掩膜用 0 表示未变化、1 表示变化、255 表示无数据。两期尺寸、坐标系和仿射变换相同且具有地理参考时，结果保留共同有效像素数、阈值及变化比例。未保存共同有效范围的旧掩膜仍可浏览。
 
 NDVI 处理流程：
 

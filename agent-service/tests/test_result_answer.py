@@ -57,3 +57,14 @@ def test_ndwi_classifier_receives_the_algorithm_without_source_data():
     assert response.status_code == 200
     assert response.json()["kind"] == "WATER_AREA_UNAVAILABLE"
     assert model.last_payload == body
+
+
+def test_change_classifier_only_selects_an_intent_from_the_current_question():
+    model = ModelDouble({"kind": "CHANGE_RATIO"})
+    service = AgentService(None, None, model)
+    body = {"question": "变化比例是多少？", "algorithm": "CHANGE_DETECTION"}
+    with TestClient(create_app(Settings(internal_token=TOKEN), service)) as client:
+        response = client.post("/internal/v1/result-answers", headers=headers(), json=body)
+    assert response.status_code == 200
+    assert response.json()["kind"] == "CHANGE_RATIO"
+    assert model.last_payload == body

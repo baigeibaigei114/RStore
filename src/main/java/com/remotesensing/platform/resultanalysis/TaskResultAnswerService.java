@@ -66,7 +66,7 @@ public class TaskResultAnswerService {
                 .put("canAsk", enabled && active != null && active.equals(selected)).put("hasEarlier", false);
         var turns = state.putArray("turns");
         var versions = state.putArray("historyVersions");
-        if (!enabled) message = "结果解读服务暂未启用";
+        if (!enabled && message == null) message = "结果解读服务暂未启用";
         if (message != null) state.put("message", message);
         try {
             List<String> known = store.versions(owner, taskId);
@@ -166,8 +166,9 @@ public class TaskResultAnswerService {
 
     private Snapshot snapshot(RsTask task, String owner, long taskId) {
         String algorithm = task.getTaskType();
-        if (!"SUCCESS".equals(task.getStatus()) || !("NDVI".equals(algorithm) || "NDWI".equals(algorithm)))
-            throw new AgentFailure("RESULT_UNAVAILABLE", "已完成的区域 NDVI 或 NDWI 任务可解读", 409, false);
+        if (!"SUCCESS".equals(task.getStatus()) || !("NDVI".equals(algorithm) || "NDWI".equals(algorithm)
+                || "CHANGE_DETECTION".equals(algorithm)))
+            throw new AgentFailure("RESULT_UNAVAILABLE", "任务计算完成后可解读", 409, false);
 
         RsResultFile file = results.selectByTaskId(taskId);
         if (file == null || !owner.equals(file.getOwnerId()) || !Objects.equals(file.getTaskId(), taskId)
@@ -185,10 +186,15 @@ public class TaskResultAnswerService {
             ObjectNode identity = object().put("fileId", file.getId()).put("bucket", file.getMinioBucket())
                     .put("objectKey", file.getObjectKey()).put("checksum", file.getChecksum()).put("size", file.getFileSize());
             identity.set("metadata", metadata);
-            return new Snapshot(hash(identity), metadata, file, algorithm);
+            JsonNode sources = "CHANGE_DETECTION".equals(algorithm) ? parse(task.getParams()).path("changeSourceSnapshot") : null;
+            if (sources != null) identity.set("sources", sources);
+            return new Snapshot(hash(identity), metadata, file, algorithm, sources);
         } catch (BusinessException | IllegalStateException error) {
-            String message = "NDWI".equals(algorithm) ? "这份 NDWI 结果缺少可核对的有效像素统计，仍可查看原图层"
-                    : "没有可解读的区域统计";
+            String message = switch (algorithm) {
+                case "NDWI" -> "这份 NDWI 结果缺少可核对的有效像素统计，仍可查看原图层";
+                case "CHANGE_DETECTION" -> "这份结果缺少可核对的两期对齐信息或共同有效像素分母，仍可查看原图层";
+                default -> "没有可解读的区域统计";
+            };
             throw new AgentFailure("STATISTICS_UNAVAILABLE", message, 409, false);
         }
     }
@@ -226,6 +232,7 @@ public class TaskResultAnswerService {
                 Topic priorTopic = previous.topic();
                 if (section != null) topic = Topic.SECTION;
                 else topic = priorTopic == Topic.MEAN || priorTopic == Topic.VALID_RATIO || priorTopic == Topic.COVERAGE
+                        || priorTopic == Topic.CHANGE_RATIO || priorTopic == Topic.CHANGE_THRESHOLD
                         ? priorTopic : Topic.CLARIFY;
             } else {
                 topic = Topic.valueOf(kind);
@@ -235,8 +242,19 @@ public class TaskResultAnswerService {
             throw new AgentFailure("MODEL_OUTPUT_INVALID", "未取得可核对的回答", 503, true);
         }
         String algorithm = snapshot.algorithm();
-        boolean wholeImage = "NDWI".equals(algorithm);
-        if ((wholeImage && topic == Topic.COVERAGE) || (!wholeImage && topic == Topic.WATER_AREA_UNAVAILABLE)) {
+        boolean ndwi = "NDWI".equals(algorithm);
+        boolean change = "CHANGE_DETECTION".equals(algorithm);
+        if (change) {
+            topic = switch (topic) {
+                case SUMMARY -> Topic.CHANGE_SUMMARY;
+                case MEAN, RANGE, COVERAGE -> Topic.INSUFFICIENT_EVIDENCE;
+                default -> topic;
+            };
+        } else if (topic == Topic.CHANGE_RATIO || topic == Topic.CHANGE_SUMMARY
+                || topic == Topic.CHANGE_THRESHOLD || topic == Topic.CHANGE_SCOPE) {
+            topic = Topic.INSUFFICIENT_EVIDENCE;
+        }
+        if ((ndwi && topic == Topic.COVERAGE) || (!ndwi && topic == Topic.WATER_AREA_UNAVAILABLE)) {
             topic = Topic.INSUFFICIENT_EVIDENCE;
         }
         JsonNode distribution = null;
@@ -252,25 +270,54 @@ public class TaskResultAnswerService {
                 statement(topic, algorithm));
         answer.set("regionVersion", snapshot.metadata().path("regionSnapshot").path("version"));
         var evidence = answer.putArray("evidence");
-        for (Metric metric : topic.metrics) {
-            JsonNode value = metric == Metric.COVERAGE ? snapshot.metadata().path(metric.key)
-                    : snapshot.metadata().path("statistics").path(metric.key);
-            String label = wholeImage ? metric.label.replace("区域 NDVI", "影像 NDWI").replace("区域内", "影像")
-                    : metric.label;
+        List<Metric> metrics = change && topic == Topic.SPATIAL_EVIDENCE_UNAVAILABLE
+                ? Topic.CHANGE_SUMMARY.metrics : topic.metrics;
+        for (Metric metric : metrics) {
+            JsonNode value = switch (metric) {
+                case COVERAGE -> snapshot.metadata().path(metric.key);
+                case THRESHOLD, BAND -> snapshot.metadata().path("comparison").path(metric.key);
+                case GRID_WIDTH, GRID_HEIGHT -> snapshot.metadata().path("grid").path(metric.key);
+                default -> snapshot.metadata().path("statistics").path(metric.key);
+            };
+            String label = metric.label;
+            if (ndwi) label = label.replace("区域 NDVI", "影像 NDWI").replace("区域内", "影像");
+            if (change) label = label.replace("区域内", "对齐网格").replace("有效像素", "共同有效像素");
             evidence.addObject().put("key", metric.key).put("label", label).put("unit", metric.unit).set("value", value);
+        }
+        if (topic == Topic.CHANGE_SCOPE || topic == Topic.CHANGE_SUMMARY) {
+            var sources = answer.putArray("sources");
+            for (String period : List.of("before", "after")) {
+                JsonNode source = snapshot.sources().path(period);
+                String imageId = snapshot.metadata().path("comparison").path(period + "ImageId").asText();
+                sources.addObject().put("period", period).put("imageId", imageId).put("name", source.path("name").asText(""))
+                        .put("captureTime", source.path("captureTime").asText(""));
+            }
         }
         if (distribution != null) addSpatialAnswer(answer, topic, section, distribution, algorithm);
         return answer;
     }
 
     private String statement(Topic topic, String algorithm) {
+        if ("CHANGE_DETECTION".equals(algorithm)) {
+            return switch (topic) {
+                case TOP_SECTION -> "下列分区在共同有效像素中的变化比例最高。";
+                case BOTTOM_SECTION -> "下列分区在共同有效像素中的变化比例最低。";
+                case SECTION -> "以下是这个分区的变化比例和共同有效像素数。";
+                case SPATIAL_OVERVIEW -> "按结果影像像素范围四分。各分区以自身的共同有效像素为分母。";
+                case VALID_PIXELS, VALID_RATIO -> "共同有效像素比例以对齐网格的全部像素为分母。";
+                case SPATIAL_EVIDENCE_UNAVAILABLE -> "暂时无法核对分区证据，以下是已核实的全图统计。";
+                case NEEDS_SPATIAL_EVIDENCE -> "当前结果解读支持影像四分区。这个问题需要更细的空间证据。";
+                case INSUFFICIENT_EVIDENCE -> "当前的两期波段差值结果无法支持这个问题。";
+                default -> topic.statement;
+            };
+        }
         String statement = topic.statement.replace("NDVI", algorithm);
         return "NDWI".equals(algorithm) ? statement.replace("按监测区域在结果影像中的像素范围四分", "按结果影像的像素范围四分")
                 .replace("区域内", "影像内").replace("全区统计", "全图统计").replace("区域均值", "影像均值") : statement;
     }
 
     private void addSpatialAnswer(ObjectNode answer, Topic topic, String section, JsonNode distribution, String algorithm) {
-        if (topic == Topic.SPATIAL_OVERVIEW) {
+        if (topic == Topic.SPATIAL_OVERVIEW && !"CHANGE_DETECTION".equals(algorithm)) {
             var evidence = answer.withArray("evidence");
             for (String key : List.of("p10", "p50", "p90")) {
                 String label = "p50".equals(key) ? algorithm + " 中位数（P50）"
@@ -304,17 +351,23 @@ public class TaskResultAnswerService {
                     .put("total", block.path("total").intValue()).put("valid", block.path("valid").intValue())
                     .put("locatable", block.path("geometry").isObject());
             view.set("mean", block.path("mean"));
+            if ("CHANGE_DETECTION".equals(algorithm) && block.path("mean").isNumber())
+                view.put("changed", Math.round(block.path("mean").doubleValue() * block.path("valid").intValue()));
         }
     }
 
     private record Previous(Topic topic, String section) {}
-    private record Snapshot(String version, JsonNode metadata, RsResultFile file, String algorithm) {}
+    private record Snapshot(String version, JsonNode metadata, RsResultFile file, String algorithm, JsonNode sources) {}
 
     private enum Metric {
         MEAN("mean", "区域 NDVI 均值", "decimal"), MIN("min", "最小值", "decimal"), MAX("max", "最大值", "decimal"),
         VALID("validPixelCount", "有效像素", "count"), TOTAL("totalPixelCount", "区域内总像素", "count"),
         INVALID("invalidPixelCount", "无效像素", "count"), RATIO("validPixelRatio", "有效像素比例", "ratio"),
-        COVERAGE("coverageRatio", "影像范围覆盖率", "ratio");
+        COVERAGE("coverageRatio", "影像范围覆盖率", "ratio"),
+        CHANGED("changedPixelCount", "变化像素", "count"), UNCHANGED("unchangedPixelCount", "未变化像素", "count"),
+        CHANGE_RATIO("changeRatio", "变化比例", "ratio"), THRESHOLD("threshold", "差值阈值", "decimal"),
+        BAND("band", "对比波段序号", "count"), GRID_WIDTH("width", "对齐网格宽度（像素）", "count"),
+        GRID_HEIGHT("height", "对齐网格高度（像素）", "count");
 
         final String key;
         final String label;
@@ -344,6 +397,14 @@ public class TaskResultAnswerService {
         CLARIFY("请说明你指的是哪项统计或哪个分区。"),
         NEEDS_SPATIAL_EVIDENCE("当前结果解读支持分位数和影像四分区。这个问题需要更细的空间证据。"),
         WATER_AREA_UNAVAILABLE("计算水体面积或覆盖率需要水体分类结果和对应的像素面积。本次任务提供 NDWI 指数。"),
+        CHANGE_SUMMARY("两期影像在同一像素网格逐像素对比。变化比例以共同有效像素为分母。",
+                Metric.TOTAL, Metric.VALID, Metric.CHANGED, Metric.UNCHANGED, Metric.CHANGE_RATIO, Metric.THRESHOLD),
+        CHANGE_RATIO("共同有效像素中，绝对差值大于阈值的像素计为变化。",
+                Metric.CHANGED, Metric.UNCHANGED, Metric.VALID, Metric.CHANGE_RATIO),
+        CHANGE_THRESHOLD("使用两期同一波段的绝对差值。差值大于阈值才计为变化。",
+                Metric.BAND, Metric.THRESHOLD),
+        CHANGE_SCOPE("两期尺寸、坐标系和仿射网格一致。下列统计来自两期共同有效像素。",
+                Metric.GRID_WIDTH, Metric.GRID_HEIGHT, Metric.TOTAL, Metric.VALID, Metric.RATIO),
         INSUFFICIENT_EVIDENCE("当前任务的 NDVI 统计无法支持这个问题。");
 
         final String statement;

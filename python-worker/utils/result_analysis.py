@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from utils.raster_utils import read_valid_band
+from utils.raster_utils import CHANGE_NODATA, read_valid_band
 
 VERSION_TAG = "result_analysis_version"
 
@@ -16,7 +16,14 @@ def read_index_result(dataset, algorithm: str, bands: dict):
     expected = index_result_tags(algorithm, bands)
     if dataset.count != 1 or any(tags.get(name) != value for name, value in expected.items()):
         raise ValueError("Result raster does not match its analysis metadata")
-    return read_valid_band(dataset, 1)
+    values = read_valid_band(dataset, 1)
+    if algorithm == "CHANGE_DETECTION":
+        if (dataset.dtypes[0] != "uint8" or dataset.nodata != CHANGE_NODATA
+                or dataset.crs is None or dataset.transform.is_degenerate):
+            raise ValueError("Change raster lacks a verifiable grid or NoData mask")
+        if np.any(np.isfinite(values) & (values != 0) & (values != 1)):
+            raise ValueError("Change raster contains unsupported pixel values")
+    return values
 
 
 def index_statistics(values) -> dict:

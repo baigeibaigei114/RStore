@@ -431,6 +431,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         // 该字段只能由服务器生成，防止客户端伪造追溯信息。
         taskParams.remove("inputSnapshot");
         taskParams.remove("regionSnapshot");
+        taskParams.remove("changeSourceSnapshot");
         if (submitDTO.getMonitoringRegionId() != null
                 && (submitDTO.getTaskType() != RemoteSensingTaskMessage.TaskType.NDVI
                     || submitDTO.getMonitoringRegionId() <= 0)) {
@@ -519,6 +520,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
 
         int band = optionalIntParam(params, "band", 1);
+        double threshold = changeThreshold(params.get("threshold"));
         validateChangeDetectionBand(beforeImage, afterImage, band);
         validateChangeDetectionCompatibility(beforeImage, afterImage);
 
@@ -533,6 +535,36 @@ public class RsTaskServiceImpl implements RsTaskService {
         params.put("beforeObjectKey", beforeImage.getObjectKey());
         params.put("afterObjectKey", afterImage.getObjectKey());
         params.put("band", band);
+        params.put("threshold", threshold);
+        Map<String, Object> sources = new LinkedHashMap<>();
+        sources.put("before", changeSource(beforeImage));
+        sources.put("after", changeSource(afterImage));
+        if (afterImage.getWidth() != null) sources.put("width", afterImage.getWidth());
+        if (afterImage.getHeight() != null) sources.put("height", afterImage.getHeight());
+        params.put("changeSourceSnapshot", sources);
+    }
+
+    private double changeThreshold(Object value) {
+        if (value == null) return 0.2;
+        double threshold = Double.NaN;
+        if (value instanceof Number number) threshold = number.doubleValue();
+        else if (value instanceof String text) {
+            try {
+                threshold = Double.parseDouble(text.strip());
+            } catch (NumberFormatException ignored) {
+                // Report the same business error for any unsupported threshold.
+            }
+        }
+        if (!Double.isFinite(threshold) || threshold < 0)
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化阈值必须为有限的非负数");
+        return threshold;
+    }
+
+    private Map<String, Object> changeSource(RsImage image) {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("name", image.getImageName());
+        if (image.getAcquisitionTime() != null) source.put("captureTime", image.getAcquisitionTime().toString());
+        return source;
     }
 
     /**

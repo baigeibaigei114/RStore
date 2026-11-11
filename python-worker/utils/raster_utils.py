@@ -20,6 +20,8 @@ import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 
+CHANGE_NODATA = 255
+
 
 def read_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
     """从 rasterio 数据集中读取指定波段，转换为 float32 类型。
@@ -49,10 +51,10 @@ def read_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
     return dataset.read(band_index).astype("float32")
 
 
-def read_valid_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
+def read_valid_band(dataset: rasterio.DatasetReader, band_index: int, dtype="float32") -> np.ndarray:
     """Keep both GDAL masks and the band's explicit NoData value."""
     source = dataset.read(band_index, masked=True)
-    values = source.astype("float32").filled(np.nan)
+    values = source.astype(dtype).filled(np.nan)
     nodata = dataset.nodatavals[band_index - 1]
     if nodata is not None:
         values[source.data == nodata] = np.nan
@@ -125,12 +127,12 @@ def write_mask_geotiff(
     与 write_single_band_geotiff 的区别：
       - 使用 uint8 类型（而非 float32），文件体积显著更小。
       - 使用 nearest 重采样（而非 average），保持二值边界清晰。
-      - nodata=0，因为 0 表示"未变化"，与"无效数据"在语义上一致。
+      - nodata=255。0 保留给共同有效但未变化的像素。
 
     Args:
         reference: 参考数据集。
         output_path: 输出 GeoTIFF 路径。
-        mask: 二值掩膜数组（0 和 1），形状与 reference 一致。
+        mask: 0 表示未变化，1 表示变化，255 表示无效。
     """
     # 掩膜只表达是否变化，使用 uint8 可以显著减小结果文件体积。
     # 一个 uint8 像元只占 1 字节，而 float32 占 4 字节。
@@ -139,7 +141,7 @@ def write_mask_geotiff(
         driver="GTiff",
         count=1,
         dtype="uint8",
-        nodata=0,
+        nodata=CHANGE_NODATA,
         compress="deflate",
     )
 

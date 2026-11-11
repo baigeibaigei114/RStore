@@ -10,7 +10,16 @@
     <el-button v-if="expired" @click="relogin">重新登录并返回原任务</el-button>
     <el-card shadow="never" class="result-summary">
       <div class="result-state"><strong>{{ taskStatusText(task?.status) }}</strong><span>最近成功读取：{{ lastRead || '尚未读取' }}</span></div>
-      <template v-if="indexStatistics">
+      <template v-if="changeSummary">
+        <div class="statistics-grid">
+          <div><span>变化比例</span><strong>{{ (changeSummary.ratio * 100).toFixed(2) }}<small>%</small></strong>
+            <small>{{ changeSummary.changed.toLocaleString() }} 个变化像素 / {{ changeSummary.valid.toLocaleString() }} 个共同有效像素</small></div>
+          <div><span>共同有效像素</span><strong>{{ changeSummary.valid.toLocaleString() }}</strong>
+            <small>对齐网格共 {{ changeSummary.total.toLocaleString() }} 个像素</small></div>
+        </div>
+        <p class="result-note">两期同一波段的绝对差值超过 {{ changeSummary.threshold }} 时计为变化。</p>
+      </template>
+      <template v-else-if="indexStatistics">
         <div class="statistics-grid"><div><span>{{ regionSnapshot ? '区域 ' : '' }}{{ task?.taskType }} 均值</span><strong>{{ indexStatistics.mean.toFixed(4) }}</strong><small>{{ regionSnapshot ? '仅统计区域内的有效像素' : '统计整幅结果影像的有效像素' }}</small></div>
           <div><span>有效像素比例</span><strong>{{ (indexStatistics.validPixelRatio * 100).toFixed(2) }}<small>%</small></strong><small>{{ indexStatistics.validPixelCount.toLocaleString() }} / {{ indexStatistics.totalPixelCount.toLocaleString() }} 个{{ regionSnapshot ? '区域内' : '影像' }}像素</small></div></div>
         <p v-if="task?.taskType === 'NDWI'" class="result-note">统计使用绿光和近红外波段共同有效且分母可用的像素。计算水体面积还需要分类结果。</p>
@@ -40,7 +49,7 @@
       :key="answerViewKey" :task-id="taskId" :algorithm="answerAlgorithm"
       :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
     <p v-else-if="task?.status === 'SUCCESS' && !legacyAgentWrites" class="result-note">
-      此结果可查看计算详情。问答目前适用于单期区域 NDVI 和 NDWI。
+      此结果可查看计算详情。NDVI 问答适用于已保存监测区域的任务。
     </p>
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
@@ -298,7 +307,7 @@ import type { TaskDetail, TaskLog, TaskResultFile, TaskStatus, TaskType } from '
 import { useAuthStore } from '@/stores/auth'
 import { useTaskRefresh } from '@/composables/useTaskRefresh'
 import { isUnauthorized } from '@/utils/regionAnalysis'
-import { failureMessage, isActiveStatus, readStatistics, regionSnapshot as getRegionSnapshot, taskStatusText } from '@/utils/taskPresentation'
+import { failureMessage, isActiveStatus, readChangeSummary, readStatistics, regionSnapshot as getRegionSnapshot, taskStatusText } from '@/utils/taskPresentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -319,9 +328,12 @@ const logs = ref<TaskLog[]>([])
 const taskId = computed(() => String(route.params.id))
 
 const regionSnapshot = computed(() => getRegionSnapshot(task.value))
-const indexStatistics = computed(() => readStatistics(task.value, resultFile.value))
-const answerAlgorithm = computed(() => task.value?.taskType === 'NDWI' ? 'NDWI'
-  : task.value?.taskType === 'NDVI' && regionSnapshot.value ? 'NDVI' : null)
+const indexStatistics = computed(() => task.value?.taskType === 'CHANGE_DETECTION' ? null : readStatistics(task.value, resultFile.value))
+const changeSummary = computed(() => readChangeSummary(task.value, resultFile.value))
+const answerAlgorithm = computed(() => {
+  const type = task.value?.taskType
+  return type === 'NDWI' || type === 'CHANGE_DETECTION' || (type === 'NDVI' && regionSnapshot.value) ? type : null
+})
 const answerViewKey = computed(() => {
   const file = resultFile.value
   return JSON.stringify([auth.userInfo?.userId, taskId.value, file?.id, file?.minioBucket, file?.objectKey,

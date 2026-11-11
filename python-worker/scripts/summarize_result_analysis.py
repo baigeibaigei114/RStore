@@ -24,13 +24,18 @@ def polygon(ring):
 
 def summarize(raster, metadata):
     region = metadata.get("regionSnapshot")
-    bands = metadata["bandMapping"]
+    algorithm = metadata["algorithm"]
+    bands = metadata["comparison"] if algorithm == "CHANGE_DETECTION" else metadata["bandMapping"]
     statistics = metadata["statistics"]
     with rasterio.open(raster, driver="GTiff") as dataset:
         if max(dataset.shape) > MAX_EDGE:
             raise ValueError("Raster exceeds the result evidence budget")
+        if algorithm == "CHANGE_DETECTION":
+            grid = metadata["grid"]
+            if dataset.shape != (grid["height"], grid["width"]):
+                raise ValueError("Change raster dimensions do not match the saved grid")
         if region is None:
-            values = read_index_result(dataset, metadata["algorithm"], bands)
+            values = read_index_result(dataset, algorithm, bands)
             area = np.ones(dataset.shape, dtype=bool)
         else:
             values, area = read_result_pixels(dataset, bands["redBand"], bands["nirBand"], region)
