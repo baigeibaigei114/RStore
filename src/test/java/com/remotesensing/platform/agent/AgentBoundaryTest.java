@@ -27,7 +27,9 @@ class AgentBoundaryTest {
         when(service.create(any())).thenReturn(AgentJson.object().put("executionId", UUID.randomUUID().toString()));
         when(service.answer(any())).thenAnswer(i -> AgentJson.object().put("summary", "安全测试回答"));
         when(service.confirm(anyString(),any())).thenAnswer(i -> AgentJson.object().put("taskId", "synthetic-task"));
-        mvc = MockMvcBuilders.standaloneSetup(new AgentController(service,users,mock(RateLimitService.class),new AgentProperties()))
+        AgentProperties properties = new AgentProperties();
+        properties.setLegacyWritesEnabled(true);
+        mvc = MockMvcBuilders.standaloneSetup(new AgentController(service,users,mock(RateLimitService.class),properties))
                 .setControllerAdvice(new AgentAdvice()).addFilters(new AgentBoundary(users)).build();
     }
     @Test void devHeaderAndWorkerHeaderCannotAuthenticateAgent() throws Exception {

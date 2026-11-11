@@ -97,7 +97,9 @@ class AgentBoundaryServletTest {
             return service;
         }
         @Bean AgentController controller(AgentService service, CurrentUserContext users) {
-            return new AgentController(service,users,mock(RateLimitService.class),new AgentProperties());
+            AgentProperties properties = new AgentProperties();
+            properties.setLegacyWritesEnabled(true);
+            return new AgentController(service,users,mock(RateLimitService.class),properties);
         }
         @Bean AgentAdvice advice() { return new AgentAdvice(); }
     }

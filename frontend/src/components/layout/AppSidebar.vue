@@ -52,6 +52,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const route = useRoute()
 const appStore = useAppStore()
@@ -66,7 +67,7 @@ const advancedItems = [
   { path: '/map', title: '地图与区域', icon: MapLocation },
   { path: '/images/upload', title: '影像上传', icon: UploadFilled },
   { path: '/ingestion', title: '产品入库', icon: UploadFilled },
-  { path: '/agent', title: 'NDVI助手', icon: ChatDotRound },
+  ...(legacyAgentWrites ? [{ path: '/agent', title: 'NDVI助手', icon: ChatDotRound }] : []),
   { path: '/spatial-query', title: '空间查询', icon: Location },
   { path: '/tasks/create', title: '其他分析任务', icon: Plus },
 ]

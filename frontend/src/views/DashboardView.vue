@@ -22,11 +22,12 @@
       <el-button v-if="recentError && !expired" :loading="loading" @click="load">重试读取</el-button></div>
     </section>
     <el-alert v-if="expired" title="登录已过期，请重新登录后继续。" type="warning" :closable="false"><el-button @click="relogin">重新登录并返回</el-button></el-alert>
-    <footer class="desk-footer"><span>进阶操作</span><router-link to="/images">影像资产</router-link><router-link to="/map">地图与画区</router-link><router-link to="/ingestion">SAFE 入库</router-link><router-link to="/agent">NDVI 助手</router-link></footer>
+    <footer class="desk-footer"><span>进阶操作</span><router-link to="/images">影像资产</router-link><router-link to="/map">地图与画区</router-link><router-link to="/ingestion">SAFE 入库</router-link><router-link to="/agent">{{ legacyAgentWrites ? 'NDVI 助手' : '历史解读' }}</router-link></footer>
   </section>
 </template>
 
 <script setup lang="ts">
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getImageDetailApi, searchImagesApi } from '@/api/image'

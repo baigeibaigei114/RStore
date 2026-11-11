@@ -1,11 +1,17 @@
 <template>
   <section class="agent-workspace">
-    <header class="workspace-heading"><div><span class="eyebrow">VEGETATION FIELDNOTES / 01</span><h2>NDVI 助手<span>从问题，到有依据的分析。</span></h2></div><span class="scope-badge">单期 · 已保存区域</span></header>
+    <header class="workspace-heading">
+      <div>
+        <h2 v-if="legacyAgentWrites">NDVI 助手<span>从问题，到有依据的分析。</span></h2>
+        <h2 v-else>历史解读<span>查看以前保存的分析和依据。</span></h2>
+      </div>
+      <span class="scope-badge">{{ legacyAgentWrites ? '单期 · 已保存区域' : '只读' }}</span>
+    </header>
     <div class="workspace-grid">
       <aside class="session-rail" aria-label="我的分析记录">
-        <button class="new-analysis" :disabled="!!busy || !!pending" type="button" @click="newAnalysis">＋ 新建分析</button>
+        <button v-if="legacyAgentWrites" class="new-analysis" :disabled="!!busy || !!pending" type="button" @click="newAnalysis">＋ 新建分析</button>
         <div class="rail-heading"><span>我的分析记录</span><button type="button" :disabled="!!busy" @click="loadHistory()">刷新</button></div>
-        <p v-if="!history.length" class="rail-empty">分析执行后会保存在这里，刷新后可继续查看。</p>
+        <p v-if="!history.length" class="rail-empty">{{ legacyAgentWrites ? '分析执行后会保存在这里，刷新后可继续查看。' : '暂无旧助手记录。' }}</p>
         <button v-for="item in history" :key="item.executionId" type="button" class="session-item" :class="{ selected: selectedId === item.executionId }" :disabled="!!busy" @click="openExecution(item.executionId)">
           <strong>{{ item.draft?.regionName || (item.task ? `任务 ${item.task.taskId}` : '区域分析') }}</strong><span>{{ statusText(item.status) }}</span><small>{{ item.executionId.slice(0, 8) }}</small>
         </button>
@@ -13,23 +19,29 @@
         <div class="rail-note"><span class="leaf-mark">◒</span><p>只解释这一期、这个区域。<br>不凭单期均值判断作物健康。</p></div>
       </aside>
 
-      <main class="analysis-sheet" aria-label="NDVI助手工作区">
-        <div class="mode-switch" role="group" aria-label="助手模式"><button type="button" :aria-pressed="mode === 'analysis'" :disabled="!!busy" @click="mode = 'analysis'">区域分析</button><button type="button" :aria-pressed="mode === 'knowledge'" :disabled="!!busy" @click="mode = 'knowledge'">方法问答</button></div>
-        <div v-if="pending" class="pending-notice" role="status"><strong>有一个请求的结果尚未确认</strong><p>请先查询原状态，或使用原请求继续。刷新页面不会重新发送。</p><button v-if="pending.kind !== 'create'" type="button" :disabled="!!busy" @click="openExecution(pending.executionId)">查询原执行</button><button type="button" :disabled="!!busy" @click="repeatPending">继续原请求</button></div>
+      <main class="analysis-sheet" :aria-label="legacyAgentWrites ? 'NDVI助手工作区' : '历史解读详情'">
+        <div v-if="legacyAgentWrites" class="mode-switch" role="group" aria-label="助手模式"><button type="button" :aria-pressed="mode === 'analysis'" :disabled="!!busy" @click="mode = 'analysis'">区域分析</button><button type="button" :aria-pressed="mode === 'knowledge'" :disabled="!!busy" @click="mode = 'knowledge'">方法问答</button></div>
+        <div v-if="legacyAgentWrites && pending" class="pending-notice" role="status"><strong>有一个请求的结果尚未确认</strong><p>请先查询原状态，或使用原请求继续。刷新页面不会重新发送。</p><button v-if="pending.kind !== 'create'" type="button" :disabled="!!busy" @click="openExecution(pending.executionId)">查询原执行</button><button type="button" :disabled="!!busy" @click="repeatPending">继续原请求</button></div>
         <p v-if="error" class="request-error" role="alert">{{ error }}</p>
         <p v-if="busy" class="working" role="status">{{ busy }}<span class="working-dot"> ···</span></p>
 
-        <template v-if="mode === 'knowledge'">
+        <template v-if="legacyAgentWrites && mode === 'knowledge'">
           <div class="section-title"><span>METHOD NOTES</span><h3>先理解指标，再读结果。</h3><p>询问计算方法、有效像素、区域口径与解释限制。</p></div>
           <form class="intent-form" @submit.prevent="askQuestion"><label for="knowledge-question">你的问题</label><textarea id="knowledge-question" v-model="question" maxlength="2000" rows="3" :disabled="!!busy" placeholder="有效像素比例和植被覆盖率有什么区别？" /><div class="form-footer"><span>仅查询公开方法资料</span><button type="submit" class="primary" :disabled="!!busy || !question.trim()">提问并查看依据 ↗</button></div></form>
           <AgentEvidence v-if="answer" :result="answer" />
         </template>
 
-        <template v-else-if="!execution">
+        <template v-else-if="!execution && legacyAgentWrites">
           <div class="section-title welcome"><div class="field-symbol" aria-hidden="true"><i v-for="n in 16" :key="n" /></div><span>START WITH A REGION</span><h3>你想了解哪个区域？</h3><p>描述需求，选择可用影像与已保存区域。<br>核对草稿后，再提交一次计算。</p></div>
           <form class="intent-form" @submit.prevent="createExecution"><label for="analysis-goal">分析需求</label><textarea id="analysis-goal" v-model="goal" maxlength="2000" rows="4" :disabled="!!busy || !!pending" placeholder="查找我可用的标准化影像和已保存区域，分析单期 NDVI。" /><div class="form-footer"><span>提交前会展示影像、区域和参数</span><button type="submit" class="primary" :disabled="!!busy || !!pending || !goal.trim()">整理分析需求 ↗</button></div></form>
           <div class="workflow-guide"><span><b>01</b> 选择影像与区域</span><span><b>02</b> 核对并确认计算</span><span><b>03</b> 查看统计与依据</span></div>
         </template>
+
+        <div v-else-if="!execution" class="section-title">
+          <h3>选择一条历史记录</h3>
+          <p>可以在这里查阅旧分析。新任务从工作台手动提交，计算完成后在任务详情提问。</p>
+          <RouterLink to="/tasks/create?mode=region-ndvi">开始区域分析</RouterLink>
+        </div>
 
         <template v-else>
           <div class="execution-heading"><div><span class="eyebrow">ANALYSIS RECORD</span><h3>{{ statusText(execution.status) }}</h3></div><button type="button" :disabled="!!busy || reading" @click="refresh(true)">查询最新状态</button></div>
@@ -37,7 +49,7 @@
           <p v-if="pollPaused" class="muted">自动刷新已暂停。可手动查询最新状态。</p>
           <p v-if="execution.question" class="agent-question">{{ execution.question }}</p>
           <p v-if="execution.unsupportedReason" class="state-note">{{ execution.unsupportedReason }}</p>
-          <div v-if="execution.error" class="state-error" role="alert"><strong>{{ execution.error.message }}</strong><small>{{ execution.error.errorCode }}</small><button v-if="execution.error.retryable" type="button" :disabled="!!busy || !!pending" @click="retryExecution">显式重试本次操作</button><p v-if="execution.task && execution.error.retryable">已关联任务 {{ execution.task.taskId }}，重试解释不会重新计算。</p><p v-else-if="execution.task?.status === 'FAILED'">计算失败时不生成成功解释，可从任务详情查看原因。</p></div>
+          <div v-if="execution.error" class="state-error" role="alert"><strong>{{ execution.error.message }}</strong><small v-if="legacyAgentWrites">{{ execution.error.errorCode }}</small><button v-if="legacyAgentWrites && execution.error.retryable" type="button" :disabled="!!busy || !!pending" @click="retryExecution">显式重试本次操作</button><p v-if="legacyAgentWrites && execution.task && execution.error.retryable">已关联任务 {{ execution.task.taskId }}，重试解释不会重新计算。</p><p v-else-if="execution.task?.status === 'FAILED'">可从任务详情查看计算失败的原因。</p></div>
 
           <form v-if="canMessage" class="selection-form" @submit.prevent="sendMessage">
             <div v-if="execution.imageCandidates.length || execution.regionCandidates.length" class="candidate-grid">
@@ -48,14 +60,14 @@
             <label for="analysis-extra">补充需求</label><textarea id="analysis-extra" v-model="extra" maxlength="2000" rows="2" :disabled="!!busy || !!pending" placeholder="可补充影像名称、时间或区域名称，或直接从列表选择。" /><button type="submit" :disabled="!!busy || !!pending || (!extra.trim() && !selectedImage && !selectedRegion)">提交选择 / 补充</button>
           </form>
 
-          <section v-if="execution.draft" class="draft-card" aria-label="待确认计算草稿"><div class="draft-label">PLEASE REVIEW / 请核对本次计算</div><dl><div><dt>影像</dt><dd>{{ execution.draft.imageName }}</dd></div><div><dt>采集日期</dt><dd>{{ date(execution.draft.captureTime) }}</dd></div><div><dt>监测区域</dt><dd>{{ execution.draft.regionName }} · 版本 {{ execution.draft.regionVersion }}</dd></div><div><dt>计算类型</dt><dd>单期区域 NDVI · 红光波段 {{ execution.draft.params.redBand }} / 近红外波段 {{ execution.draft.params.nirBand }}</dd></div></dl><p>有效至 {{ dateTime(execution.draft.expiresAt) }}。确认后将创建一个计算任务。</p><button type="button" class="primary" :disabled="!!busy || !!pending" @click="confirmDraft">确认并提交计算</button></section>
-          <p v-if="execution.status === 'EXPIRED'" class="state-note">草稿已过期或资源已变化。请补充需求，重新整理后确认。</p>
-          <p v-if="execution.status === 'CANCELED'" class="state-note">此次未提交的分析已取消，可新建需求。</p>
+          <section v-if="execution.draft" class="draft-card" aria-label="计算草稿"><div class="draft-label">{{ legacyAgentWrites ? '请核对本次计算' : '已保存草稿' }}</div><dl><div><dt>影像</dt><dd>{{ execution.draft.imageName }}</dd></div><div><dt>采集日期</dt><dd>{{ date(execution.draft.captureTime) }}</dd></div><div><dt>监测区域</dt><dd>{{ execution.draft.regionName }} · 版本 {{ execution.draft.regionVersion }}</dd></div><div><dt>计算类型</dt><dd>单期区域 NDVI · 红光波段 {{ execution.draft.params.redBand }} / 近红外波段 {{ execution.draft.params.nirBand }}</dd></div></dl><p v-if="legacyAgentWrites">有效至 {{ dateTime(execution.draft.expiresAt) }}。确认后将创建一个计算任务。</p><button v-if="legacyAgentWrites" type="button" class="primary" :disabled="!!busy || !!pending" @click="confirmDraft">确认并提交计算</button></section>
+          <p v-if="legacyAgentWrites && execution.status === 'EXPIRED'" class="state-note">草稿已过期或资源已变化。请补充需求，重新整理后确认。</p>
+          <p v-if="!legacyAgentWrites && !execution.task" class="state-note">这条记录尚未提交计算。<RouterLink to="/tasks/create?mode=region-ndvi">开始区域分析</RouterLink></p>
 
           <section v-if="execution.task" class="task-card" aria-label="已关联计算任务"><div><strong>任务 {{ execution.task.taskId }}</strong><span>{{ execution.task.status }} · {{ execution.task.progress }}%</span></div><progress :value="execution.task.progress" max="100" /><RouterLink :to="`/tasks/${execution.task.taskId}`">查看任务详情 ↗</RouterLink><p v-if="execution.status === 'WAITING_TASK'">正在等待遥感计算。查询进度不会调用模型。</p></section>
           <section v-if="rawMetrics && !execution.explanation" aria-label="计算已保存的指标"><h4>已保存的区域统计</h4><AgentMetrics :statistics="rawMetrics.statistics" :coverage-ratio="rawMetrics.coverageRatio" /><p class="muted">指标来自任务 {{ execution.task?.taskId }}，方法解释尚未生成。</p></section>
           <p v-if="metricsError && !execution.explanation" class="muted" role="status">{{ metricsError }}</p>
-          <button v-if="execution.status === 'READY_TO_EXPLAIN'" type="button" class="primary explain-button" :disabled="!!busy || !!pending" @click="explain">生成带引用的方法解释 ↗</button>
+          <button v-if="legacyAgentWrites && execution.status === 'READY_TO_EXPLAIN'" type="button" class="primary explain-button" :disabled="!!busy || !!pending" @click="explain">生成带引用的方法解释 ↗</button>
           <AgentEvidence v-if="execution.explanation" :result="execution.explanation" />
           <p class="budget-note">已使用 {{ execution.budget.modelCalls }} 次模型调用 · {{ execution.budget.toolCalls }} 次工具查询</p>
           <AgentSteps :steps="steps" />
@@ -79,6 +91,7 @@ import { canApplyView, PendingActionStore, RequestEpoch, resolvedByQuery, should
 import AgentEvidence from '@/components/agent/AgentEvidence.vue'
 import AgentMetrics from '@/components/agent/AgentMetrics.vue'
 import AgentSteps from '@/components/agent/AgentSteps.vue'
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const mode = ref<'analysis' | 'knowledge'>('analysis'), goal = ref(''), question = ref(''), extra = ref('')
@@ -92,10 +105,14 @@ const epoch = new RequestEpoch()
 let store: PendingActionStore | null = null, timer: ReturnType<typeof setTimeout> | undefined, polls = 0
 let reads: AbortController | null = null, writes: AbortController | null = null
 let historyVersion = 0
-const canMessage = computed(() => !!execution.value && !execution.value.task && ['NEEDS_INPUT', 'WAITING_CONFIRMATION', 'EXPIRED'].includes(execution.value.status))
-const canCancel = computed(() => !!execution.value && !execution.value.task && !['UNSUPPORTED', 'CANCELED'].includes(execution.value.status))
+const canMessage = computed(() => legacyAgentWrites && !!execution.value && !execution.value.task && ['NEEDS_INPUT', 'WAITING_CONFIRMATION', 'EXPIRED'].includes(execution.value.status))
+const canCancel = computed(() => legacyAgentWrites && !!execution.value && !execution.value.task && !['UNSUPPORTED', 'CANCELED'].includes(execution.value.status))
 const statuses: Record<AgentStatus, string> = { RUNNING: '正在整理需求', NEEDS_INPUT: '等待选择或补充', WAITING_CONFIRMATION: '请确认计算草稿', EXPIRED: '草稿已失效', WAITING_TASK: '计算任务已提交', READY_TO_EXPLAIN: '计算成功，等待解释', EXPLAINING: '正在生成方法解释', SUCCEEDED: '分析与解释已保存', INSUFFICIENT_EVIDENCE: '指标已保存，解释依据不足', FAILED: '本次操作未完成', UNSUPPORTED: '暂不支持此类需求', CANCELED: '分析已取消' }
-function statusText(status: AgentStatus) { return statuses[status] || status }
+function statusText(status: AgentStatus) {
+  if (!legacyAgentWrites && status === 'READY_TO_EXPLAIN') return '计算已完成'
+  if (!legacyAgentWrites && status === 'WAITING_CONFIRMATION') return '草稿未提交'
+  return statuses[status] || status
+}
 function date(value?: string | null) { if (!value) return '未标注'; const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? '未标注' : parsed.toLocaleDateString('zh-CN') }
 function dateTime(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? '未标注' : parsed.toLocaleString('zh-CN') }
 function stopPoll() { clearTimeout(timer); timer = undefined }
@@ -168,7 +185,7 @@ async function refresh(manual = false) {
   finally { if (epoch.accepts(token) && reads === controller) reading.value = false }
 }
 async function perform(action: PendingAction) {
-  if (busy.value || !store || !ownerId.value) return
+  if (!legacyAgentWrites || busy.value || !store || !ownerId.value) return
   const token = epoch.current(); error.value = ''; stopPoll(); reads?.abort(); reads = null; reading.value = false
   try { store.save(action); pending.value = action } catch { error.value = '无法保存此次请求，请检查浏览器会话存储后再提交'; return }
   busy.value = action.kind === 'confirm' ? '正在提交计算' : '正在处理分析请求'; writes = new AbortController()
@@ -201,7 +218,7 @@ function retryExecution() { if (execution.value && !pending.value) void perform(
 function cancelExecution() { if (execution.value && !pending.value) void perform({ kind: 'cancel', executionId: execution.value.executionId, body: { expectedVersion: execution.value.version } }) }
 async function repeatPending() { const saved = pending.value; if (!saved || busy.value) return; if (saved.kind !== 'create' && saved.executionId !== selectedId.value) { await router.replace({ path: '/agent', query: { executionId: saved.executionId } }); await nextTick() } mode.value = 'analysis'; await perform(saved) }
 async function askQuestion() {
-  if (busy.value || !question.value.trim()) return
+  if (!legacyAgentWrites || busy.value || !question.value.trim()) return
   const token = epoch.current(); error.value = ''; busy.value = '正在查询方法资料'; writes = new AbortController(); answer.value = null; stopPoll()
   try { const value = await answerAgentQuestion(question.value.trim(), writes.signal); if (epoch.accepts(token)) answer.value = value }
   catch (cause) { failure(cause, token) }
@@ -215,7 +232,7 @@ watch(() => [auth.userInfo?.userId, route.query.executionId] as const, ([owner, 
   resetContext(); const accountChanged = user !== ownerId.value; ownerId.value = user; selectedId.value = id
   execution.value = null; steps.value = []; rawMetrics.value = null; metricsError.value = ''; selectedImage.value = ''; selectedRegion.value = ''; extra.value = ''; error.value = ''
   if (accountChanged) { answer.value = null; history.value = []; historyPage.value = 1; historyTotal.value = 0; goal.value = ''; question.value = '' }
-  try { store = user ? new PendingActionStore(sessionStorage, user) : null; pending.value = store?.read() || null }
+  try { store = legacyAgentWrites && user ? new PendingActionStore(sessionStorage, user) : null; pending.value = store?.read() || null }
   catch { store = null; pending.value = null; error.value = '无法访问会话存储，暂不能提交新请求；仍可查询已有分析。' }
   if (requested && !id) error.value = '执行标识无效，请从左侧选择分析记录'
   if (user) { void loadHistory(); if (id) void refresh(false) }

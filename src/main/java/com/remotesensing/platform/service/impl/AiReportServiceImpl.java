@@ -138,6 +138,18 @@ public class AiReportServiceImpl implements AiReportService {
      *
      * <p>校验链：任务存在 -> SUCCESS 状态 -> 结果文件有统计元数据 -> 检查历史报告。
      */
+    @Override
+    public AiReportVO getSavedFromTask(Long taskId) {
+        String owner = currentUserContext.getAuthenticatedUserId();
+        RsTask task = taskMapper.selectByIdForOwner(taskId, owner);
+        if (task == null || !owner.equals(task.getOwnerId())) {
+            throw new BusinessException(404, "任务不存在或不可访问");
+        }
+        RsAnalysisReport report = analysisReportMapper.selectByTaskOwnerAndType(
+                reportQuery(task, resolveReportType(task.getTaskType())));
+        return report == null ? null : toVO(report, parseReportJson(report.getReportJson()));
+    }
+
     private ReportContext loadReportContext(Long taskId, String currentUserId) {
         RsTask task = taskMapper.selectByIdForOwner(taskId, currentUserId);
         if (task == null) {
@@ -153,11 +165,7 @@ public class AiReportServiceImpl implements AiReportService {
         }
 
         String reportType = resolveReportType(task.getTaskType());
-        RsAnalysisReport query = new RsAnalysisReport();
-        query.setTaskId(task.getId());
-        query.setOwnerId(task.getOwnerId());
-        query.setReportType(reportType);
-        RsAnalysisReport existingReport = analysisReportMapper.selectByTaskOwnerAndType(query);
+        RsAnalysisReport existingReport = analysisReportMapper.selectByTaskOwnerAndType(reportQuery(task, reportType));
         RsImage image = task.getImageId() == null ? null : imageMapper.selectById(task.getImageId());
         return new ReportContext(task, resultFile, image, reportType, existingReport);
     }
@@ -169,7 +177,7 @@ public class AiReportServiceImpl implements AiReportService {
      * 同时通过第一阶段的历史报告检查。在写入事务内再次查询，确保不会重复插入。
      */
     private AiReportVO saveReport(ReportContext context, Map<String, Object> reportJson) {
-        RsAnalysisReport latestReport = analysisReportMapper.selectByTaskOwnerAndType(reportQuery(context));
+        RsAnalysisReport latestReport = analysisReportMapper.selectByTaskOwnerAndType(reportQuery(context.task(), context.reportType()));
         if (latestReport != null) {
             return toVO(latestReport, parseReportJson(latestReport.getReportJson()));
         }
@@ -185,11 +193,11 @@ public class AiReportServiceImpl implements AiReportService {
         return toVO(report, reportJson);
     }
 
-    private RsAnalysisReport reportQuery(ReportContext context) {
+    private RsAnalysisReport reportQuery(RsTask task, String reportType) {
         RsAnalysisReport query = new RsAnalysisReport();
-        query.setTaskId(context.task().getId());
-        query.setOwnerId(context.task().getOwnerId());
-        query.setReportType(context.reportType());
+        query.setTaskId(task.getId());
+        query.setOwnerId(task.getOwnerId());
+        query.setReportType(reportType);
         return query;
     }
 

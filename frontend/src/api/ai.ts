@@ -13,8 +13,12 @@ export function parseAiQueryApi(text: string) {
   return request.post<unknown, AiQueryParseResult>('/ai/query/parse', { text })
 }
 
-export function generateTaskReportApi(taskId: number | string, silentError = false) {
-  return request.post<unknown, AiTaskReport>(`/ai/reports/from-task/${taskId}`, undefined, { silentError })
+export function generateTaskReportApi(taskId: number | string, silentError = false, signal?: AbortSignal) {
+  return request.post<unknown, AiTaskReport>(`/ai/reports/from-task/${taskId}`, undefined, { silentError, signal })
+}
+
+export function getSavedTaskReportApi(taskId: number | string, signal: AbortSignal) {
+  return request.get<unknown, AiTaskReport | null>(`/ai/reports/from-task/${taskId}`, { signal, silentError: true })
 }
 
 export function getTaskResultAnswerApi(taskId: string, signal: AbortSignal, version?: string, beforeTurn?: number) {

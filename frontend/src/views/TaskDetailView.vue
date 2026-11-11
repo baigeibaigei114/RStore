@@ -37,6 +37,9 @@
 
     <TaskResultAnswers v-if="task?.taskType === 'NDVI' && task.status === 'SUCCESS' && regionSnapshot && auth.isLoggedIn"
       :key="answerViewKey" :task-id="taskId" :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
+    <p v-else-if="task?.status === 'SUCCESS' && !legacyAgentWrites" class="result-note">
+      此结果可查看计算详情。问答目前适用于已保存监测区域的单期 NDVI。
+    </p>
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="16">
@@ -86,8 +89,8 @@
         <el-card class="detail-card" shadow="never">
           <template #header>
             <div class="card-header">
-              <span>AI 分析报告</span>
-              <el-tag :type="task?.status === 'SUCCESS' ? 'success' : 'info'" effect="plain">
+              <span>{{ legacyAgentWrites ? 'AI 分析报告' : '历史分析报告' }}</span>
+              <el-tag v-if="legacyAgentWrites" :type="task?.status === 'SUCCESS' ? 'success' : 'info'" effect="plain">
                 {{ task?.status === 'SUCCESS' ? '可生成' : '等待任务成功' }}
               </el-tag>
             </div>
@@ -97,12 +100,11 @@
             <el-button
               type="primary"
               :loading="aiReportLoading"
-              :disabled="task?.status !== 'SUCCESS'"
-              @click="handleGenerateAiReport"
+              :disabled="legacyAgentWrites ? task?.status !== 'SUCCESS' : !task"
+              @click="loadAiReport"
             >
-              生成 AI 报告
+              {{ legacyAgentWrites ? '生成 AI 报告' : '查看历史报告' }}
             </el-button>
-            <span>AI 只生成报告，不会修改任务或结果文件。</span>
           </div>
 
           <template v-if="aiReport">
@@ -136,7 +138,8 @@
             </div>
           </template>
 
-          <el-empty v-else description="暂无 AI 报告，成功任务可手动生成" />
+          <el-empty v-else-if="legacyAgentWrites || aiReportChecked"
+            :description="legacyAgentWrites ? '暂无 AI 报告，成功任务可手动生成' : '此任务没有已保存的报告'" />
         </el-card>
 
         <InputProvenance v-if="task?.taskType === 'NDVI'" :raw="task.params" snapshot />
@@ -280,7 +283,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { generateTaskReportApi } from '@/api/ai'
+import { generateTaskReportApi, getSavedTaskReportApi } from '@/api/ai'
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 import {
   getTaskDetailApi,
   getTaskResultDownloadUrlApi,
@@ -301,6 +305,7 @@ const logLoading = ref(false)
 const resultDownloadLoading = ref(false)
 const resultLoading = ref(false)
 const aiReportLoading = ref(false)
+const aiReportChecked = ref(false)
 const auth = useAuthStore()
 const connectionError = ref(''), expired = ref(false), lastRead = ref('')
 const technicalOpen = ref<string[]>([])
@@ -345,16 +350,19 @@ const aiKeyFindings = computed(() => normalizeTextList(aiReport.value?.reportJso
 const aiSuggestions = computed(() => normalizeTextList(aiReport.value?.reportJson?.suggestions))
 
 let alive = true, generation = 0, terminalReads = 0
+let reportRead: AbortController | undefined
 const { polling, refresh, stop } = useTaskRefresh(readResult)
 function refreshAll() { terminalReads = 0; refresh() }
 onMounted(async () => {
   try { const user = await auth.loadCurrentUser(); if (alive && user) refreshAll() }
   catch (error) { if (alive) showConnectionError(error) }
 })
-onBeforeUnmount(() => { alive = false; generation++; stop() })
+onBeforeUnmount(() => { alive = false; generation++; reportRead?.abort(); stop() })
 watch(() => [taskId.value, auth.userInfo?.userId], () => {
+  reportRead?.abort()
   generation++; terminalReads = 0; task.value = null; resultFile.value = null
-  logs.value = []; aiReport.value = null; connectionError.value = ''; lastRead.value = ''
+  logs.value = []; aiReport.value = null; aiReportChecked.value = false; aiReportLoading.value = false
+  connectionError.value = ''; lastRead.value = ''
   if (alive && auth.userInfo?.userId) refresh(); else stop()
 })
 watch(technicalOpen, async value => {
@@ -417,17 +425,28 @@ async function downloadTaskResult() {
   }
 }
 
-async function handleGenerateAiReport() {
-  if (task.value?.status !== 'SUCCESS') {
+async function loadAiReport() {
+  if (!task.value || aiReportLoading.value) return
+  if (legacyAgentWrites && task.value?.status !== 'SUCCESS') {
     ElMessage.warning('任务成功后才能生成 AI 报告')
     return
   }
 
+  const requestedTask = taskId.value, epoch = generation
+  const request = new AbortController()
+  reportRead = request
+  const stillCurrent = () => alive && generation === epoch && !request.signal.aborted
   aiReportLoading.value = true
   try {
-    aiReport.value = await generateTaskReportApi(taskId.value, true)
-    ElMessage.success('AI 报告已生成')
+    const report = legacyAgentWrites ? await generateTaskReportApi(requestedTask, true, request.signal)
+      : await getSavedTaskReportApi(requestedTask, request.signal)
+    if (!stillCurrent()) return
+    aiReport.value = report
+    aiReportChecked.value = true
+    if (legacyAgentWrites) ElMessage.success('AI 报告已生成')
   } catch (error) {
+    if (!stillCurrent()) return
+    if (isUnauthorized(error)) { showConnectionError(error); return }
     const message = error instanceof Error ? error.message : 'AI 服务暂不可用，请稍后重试'
     if (message.includes('统计元数据')) {
       ElMessage.warning('该任务缺少统计元数据，暂无法生成报告')
@@ -435,7 +454,8 @@ async function handleGenerateAiReport() {
       ElMessage.error(message || 'AI 服务暂不可用，请稍后重试')
     }
   } finally {
-    aiReportLoading.value = false
+    if (reportRead === request) reportRead = undefined
+    if (stillCurrent()) aiReportLoading.value = false
   }
 }
 

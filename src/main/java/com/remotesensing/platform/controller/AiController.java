@@ -1,6 +1,8 @@
 package com.remotesensing.platform.controller;
 
+import com.remotesensing.platform.agent.AgentProperties;
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.dto.AiQueryParseRequestDTO;
@@ -12,6 +14,7 @@ import com.remotesensing.platform.vo.AiReportVO;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,17 +36,20 @@ public class AiController {
     private final RateLimitService rateLimitService;
     private final RateLimitProperties rateLimitProperties;
     private final CurrentUserContext currentUserContext;
+    private final AgentProperties agentProperties;
 
     public AiController(AiQueryParseService aiQueryParseService,
                         AiReportService aiReportService,
                         RateLimitService rateLimitService,
                         RateLimitProperties rateLimitProperties,
-                        CurrentUserContext currentUserContext) {
+                        CurrentUserContext currentUserContext,
+                        AgentProperties agentProperties) {
         this.aiQueryParseService = aiQueryParseService;
         this.aiReportService = aiReportService;
         this.rateLimitService = rateLimitService;
         this.rateLimitProperties = rateLimitProperties;
         this.currentUserContext = currentUserContext;
+        this.agentProperties = agentProperties;
     }
 
     /**
@@ -73,8 +79,16 @@ public class AiController {
      */
     @PostMapping("/reports/from-task/{taskId}")
     public Result<AiReportVO> generateReportFromTask(@PathVariable Long taskId) {
+        if (!agentProperties.isLegacyWritesEnabled()) {
+            return Result.fail(ResultCode.FORBIDDEN.getCode(), "旧报告已改为历史查看，请从任务详情解读结果");
+        }
         checkAiReportRateLimit();
         return Result.success(aiReportService.generateFromTask(taskId));
+    }
+
+    @GetMapping("/reports/from-task/{taskId}")
+    public Result<AiReportVO> getSavedReport(@PathVariable Long taskId) {
+        return Result.success(aiReportService.getSavedFromTask(taskId));
     }
 
     /**

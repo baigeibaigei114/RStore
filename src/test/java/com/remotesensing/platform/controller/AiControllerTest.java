@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.remotesensing.platform.agent.AgentProperties;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
@@ -48,6 +49,9 @@ class AiControllerTest {
 
     @MockBean
     private AiReportService aiReportService;
+
+    @MockBean
+    private AgentProperties agentProperties;
 
     @Autowired
     private RateLimitService rateLimitService;
@@ -90,6 +94,7 @@ class AiControllerTest {
     @Test
     @DisplayName("任务报告生成接口返回报告")
     void generateReportShouldReturnReport() throws Exception {
+        when(agentProperties.isLegacyWritesEnabled()).thenReturn(true);
         AiReportVO report = new AiReportVO();
         report.setId(1L);
         report.setTaskId(10L);

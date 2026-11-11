@@ -73,7 +73,7 @@
 
       <div class="ai-actions">
         <el-button :loading="aiParseLoading" :icon="Search" @click="handleAiParse">解析条件</el-button>
-        <el-button type="primary" @click="router.push('/agent')">打开NDVI助手</el-button>
+        <el-button v-if="legacyAgentWrites" type="primary" @click="router.push('/agent')">打开NDVI助手</el-button>
       </div>
 
       <el-alert
@@ -164,6 +164,7 @@
 </template>
 
 <script setup lang="ts">
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
