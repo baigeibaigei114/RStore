@@ -10,14 +10,15 @@
     <el-button v-if="expired" @click="relogin">重新登录并返回原任务</el-button>
     <el-card shadow="never" class="result-summary">
       <div class="result-state"><strong>{{ taskStatusText(task?.status) }}</strong><span>最近成功读取：{{ lastRead || '尚未读取' }}</span></div>
-      <template v-if="ndviStatistics">
-        <div class="statistics-grid"><div><span>{{ regionSnapshot ? '区域 NDVI 均值' : 'NDVI 均值' }}</span><strong>{{ ndviStatistics.mean.toFixed(4) }}</strong><small>{{ regionSnapshot ? '仅统计区域内的有效像素' : '统计整幅裁剪矩形内有效像素' }}</small></div>
-          <div><span>有效像素比例</span><strong>{{ (ndviStatistics.validPixelRatio * 100).toFixed(2) }}<small>%</small></strong><small>{{ ndviStatistics.validPixelCount.toLocaleString() }} / {{ ndviStatistics.totalPixelCount.toLocaleString() }} 个区域内像素</small></div></div>
-        <p class="result-note">有效像素比例不是植被覆盖率；单期 NDVI 不能直接判断作物健康或预测产量。</p>
+      <template v-if="indexStatistics">
+        <div class="statistics-grid"><div><span>{{ regionSnapshot ? '区域 ' : '' }}{{ task?.taskType }} 均值</span><strong>{{ indexStatistics.mean.toFixed(4) }}</strong><small>{{ regionSnapshot ? '仅统计区域内的有效像素' : '统计整幅结果影像的有效像素' }}</small></div>
+          <div><span>有效像素比例</span><strong>{{ (indexStatistics.validPixelRatio * 100).toFixed(2) }}<small>%</small></strong><small>{{ indexStatistics.validPixelCount.toLocaleString() }} / {{ indexStatistics.totalPixelCount.toLocaleString() }} 个{{ regionSnapshot ? '区域内' : '影像' }}像素</small></div></div>
+        <p v-if="task?.taskType === 'NDWI'" class="result-note">统计使用绿光和近红外波段共同有效且分母可用的像素。计算水体面积还需要分类结果。</p>
+        <p v-else class="result-note">有效像素比例不是植被覆盖率；单期 NDVI 不能直接判断作物健康或预测产量。</p>
       </template>
       <p v-else-if="task?.status === 'SUCCESS'">计算已完成，暂未取得可用统计。已保留任务，可刷新结果。</p>
       <p v-else-if="isActiveStatus(task?.status)">任务已受理，你可以离开此页，稍后从最近分析、任务列表或原链接继续查看。</p>
-      <div v-if="task?.status === 'FAILED' || task?.status === 'CANCELED'" class="failure"><p>{{ task.status === 'CANCELED' ? '本次任务已取消。可带回原选项，核对后重新发起分析。' : failureMessage(task.errorMessage) }}</p><el-button @click="returnOptions">带回原选项重新核对</el-button></div>
+      <div v-if="task?.status === 'FAILED' || task?.status === 'CANCELED'" class="failure"><p>{{ task.status === 'CANCELED' ? '本次任务已取消。可以重新发起分析。' : failureMessage(task.errorMessage, task.taskType) }}</p><el-button @click="returnOptions">{{ task.taskType === 'NDVI' ? '带回原选项重新核对' : '重新选择分析选项' }}</el-button></div>
       <p v-if="task?.status === 'SUCCESS'" class="result-note">地图：{{ resultFile?.status === 'PUBLISHED' ? '已就绪' : ['FAILED', 'PUBLISH_FAILED'].includes(resultFile?.status || '') ? '发布失败，计算结果仍可查看' : '尚未就绪，统计可独立查看' }}</p>
     </el-card>
 
@@ -35,10 +36,11 @@
       </el-button>
     </div>
 
-    <TaskResultAnswers v-if="task?.taskType === 'NDVI' && task.status === 'SUCCESS' && regionSnapshot && auth.isLoggedIn"
-      :key="answerViewKey" :task-id="taskId" :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
+    <TaskResultAnswers v-if="answerAlgorithm && task?.status === 'SUCCESS' && auth.isLoggedIn"
+      :key="answerViewKey" :task-id="taskId" :algorithm="answerAlgorithm"
+      :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
     <p v-else-if="task?.status === 'SUCCESS' && !legacyAgentWrites" class="result-note">
-      此结果可查看计算详情。问答目前适用于已保存监测区域的单期 NDVI。
+      此结果可查看计算详情。问答目前适用于单期区域 NDVI 和 NDWI。
     </p>
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
@@ -143,27 +145,27 @@
         </el-card>
 
         <InputProvenance v-if="task?.taskType === 'NDVI'" :raw="task.params" snapshot />
-        <el-card v-if="task?.taskType === 'NDVI'" class="detail-card" shadow="never">
-          <template #header>NDVI 计算统计</template>
-          <template v-if="ndviStatistics">
-            <p>范围：{{ regionSnapshot ? '监测区域内像素（像素中心归属）' : '输入影像的裁剪矩形' }}；无效像素不参与最小值、最大值和均值统计。</p>
+        <el-card v-if="task?.taskType === 'NDVI' || task?.taskType === 'NDWI'" class="detail-card" shadow="never">
+          <template #header>{{ task.taskType }} 计算统计</template>
+          <template v-if="indexStatistics">
+            <p>{{ regionSnapshot ? '统计范围是监测区域（以像素中心归属）。' : '统计范围是整幅结果影像。' }}最小值、最大值和均值均使用有效像素。</p>
             <el-alert v-if="regionSnapshot" type="info" :closable="false"
               :title="`${regionSnapshot.name} · v${regionSnapshot.version} · 整区覆盖；有效比例不是植被覆盖率`" />
             <el-alert
-              v-if="ndviStatistics.min < -1 || ndviStatistics.max > 1"
-              title="数值超出常见 NDVI 范围，请核对输入反射率、偏移和质量掩膜；不要直接据此判断植被情况。"
+              v-if="indexStatistics.min < -1 || indexStatistics.max > 1"
+              :title="`数值超出常见 ${task.taskType} 范围，请核对输入反射率、偏移和质量掩膜。`"
               type="warning"
               :closable="false"
               show-icon
             />
             <el-descriptions :column="2" border>
-              <el-descriptions-item label="总像素">{{ ndviStatistics.totalPixelCount }}</el-descriptions-item>
-              <el-descriptions-item label="有效像素">{{ ndviStatistics.validPixelCount }}</el-descriptions-item>
-              <el-descriptions-item label="无效像素">{{ ndviStatistics.invalidPixelCount }}</el-descriptions-item>
-              <el-descriptions-item label="有效比例">{{ (ndviStatistics.validPixelRatio * 100).toFixed(2) }}%</el-descriptions-item>
-              <el-descriptions-item label="最小值">{{ ndviStatistics.min.toFixed(6) }}</el-descriptions-item>
-              <el-descriptions-item label="最大值">{{ ndviStatistics.max.toFixed(6) }}</el-descriptions-item>
-              <el-descriptions-item label="平均值">{{ ndviStatistics.mean.toFixed(6) }}</el-descriptions-item>
+              <el-descriptions-item label="总像素">{{ indexStatistics.totalPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="有效像素">{{ indexStatistics.validPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="无效像素">{{ indexStatistics.invalidPixelCount }}</el-descriptions-item>
+              <el-descriptions-item label="有效比例">{{ (indexStatistics.validPixelRatio * 100).toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="最小值">{{ indexStatistics.min.toFixed(6) }}</el-descriptions-item>
+              <el-descriptions-item label="最大值">{{ indexStatistics.max.toFixed(6) }}</el-descriptions-item>
+              <el-descriptions-item label="平均值">{{ indexStatistics.mean.toFixed(6) }}</el-descriptions-item>
             </el-descriptions>
           </template>
           <el-empty v-else description="尚无可用统计；旧任务可能未生成统计，不能将缺失值视为 0" />
@@ -317,7 +319,9 @@ const logs = ref<TaskLog[]>([])
 const taskId = computed(() => String(route.params.id))
 
 const regionSnapshot = computed(() => getRegionSnapshot(task.value))
-const ndviStatistics = computed(() => readStatistics(task.value, resultFile.value))
+const indexStatistics = computed(() => readStatistics(task.value, resultFile.value))
+const answerAlgorithm = computed(() => task.value?.taskType === 'NDWI' ? 'NDWI'
+  : task.value?.taskType === 'NDVI' && regionSnapshot.value ? 'NDVI' : null)
 const answerViewKey = computed(() => {
   const file = resultFile.value
   return JSON.stringify([auth.userInfo?.userId, taskId.value, file?.id, file?.minioBucket, file?.objectKey,
@@ -396,7 +400,7 @@ async function readResult(): Promise<boolean> {
     connectionError.value = ''; expired.value = false
     lastRead.value = new Date().toLocaleTimeString()
     return isActiveStatus(value.status) || (value.status === 'SUCCESS' && terminalReads < 5
-      && (!ndviStatistics.value || !resultFile.value || ['PENDING', 'PENDING_PUBLISH', 'PUBLISHING'].includes(resultFile.value.status || '')))
+      && (!resultFile.value || ['PENDING', 'PENDING_PUBLISH', 'PUBLISHING'].includes(resultFile.value.status || '')))
   } catch (error) {
     if (!current()) return false
     showConnectionError(error)
@@ -407,6 +411,7 @@ async function readResult(): Promise<boolean> {
 function relogin() { auth.logout(); void router.push({ path: '/login', query: { redirect: route.fullPath } }) }
 function returnOptions() {
   if (!task.value) return
+  if (task.value.taskType !== 'NDVI') { void router.push('/tasks/create'); return }
   void router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId: task.value.imageId,
     ...(regionSnapshot.value ? { monitoringRegionId: regionSnapshot.value.regionId } : {}) } })
 }

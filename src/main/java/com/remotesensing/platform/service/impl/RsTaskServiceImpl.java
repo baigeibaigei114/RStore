@@ -3,7 +3,7 @@ package com.remotesensing.platform.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remotesensing.platform.common.CurrentUserContext;
-import com.remotesensing.platform.common.NdviMetadataValidator;
+import com.remotesensing.platform.common.ResultMetadataValidator;
 import com.remotesensing.platform.common.InputAdmission;
 import com.remotesensing.platform.common.TaskSubmissionIntent;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -739,9 +739,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
         validateSuccessOutputObjectKey(task, updateDTO, targetStatus);
         if (targetStatus == TaskStatus.SUCCESS) {
-            NdviMetadataValidator.validate(
-                    updateDTO.getResultMetadata(), task.getTaskType());
-            NdviMetadataValidator.validateTaskRegion(updateDTO.getResultMetadata(), task.getParams());
+            ResultMetadataValidator.validate(updateDTO.getResultMetadata(), task.getTaskType(), task.getParams());
         }
         if (targetStatus == TaskStatus.FAILED && isBlank(errorMessage)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "FAILED 状态必须提供 errorMessage");

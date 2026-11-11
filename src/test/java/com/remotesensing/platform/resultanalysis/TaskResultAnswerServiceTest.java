@@ -257,6 +257,30 @@ class TaskResultAnswerServiceTest {
         verifyNoInteractions(spatial, agent);
     }
 
+    @Test
+    void readsNdwiWithoutARegionAndRefusesWaterAreaWithoutClassification() {
+        RsTask task = tasks.selectByIdForOwner(TASK_ID, OWNER);
+        task.setTaskType("NDWI");
+        task.setParams("{\"greenBand\":2,\"nirBand\":4}");
+        file.setResultMetadata("""
+                {"schemaVersion":1,"scope":"cropped_raster","algorithm":"NDWI","bandMapping":{"greenBand":2,"nirBand":4},
+                 "statistics":{"totalPixelCount":8,"validPixelCount":6,"invalidPixelCount":2,
+                               "validPixelRatio":0.75,"min":-0.5,"max":0.5,"mean":0}}
+                """);
+        ObjectNode request = question("水体面积是多少？");
+        var answer = complete(request, object().put("question", "水体面积是多少？").put("algorithm", "NDWI"),
+                "WATER_AREA_UNAVAILABLE").path("answer");
+        assertTrue(answer.path("regionVersion").isNull());
+        assertTrue(answer.path("statement").asText().contains("需要水体分类"));
+        assertTrue(answer.path("evidence").isEmpty());
+        verifyNoInteractions(spatial);
+
+        file.setResultMetadata(null);
+        assertFalse(service.get(TASK_ID, null, null).path("canAsk").asBoolean());
+        assertEquals("STATISTICS_UNAVAILABLE", assertThrows(AgentFailure.class,
+                () -> service.ask(TASK_ID, request)).errorCode);
+    }
+
     private ObjectNode complete(ObjectNode request, ObjectNode prompt, String kind) {
         String question = request.path("question").asText();
         String version = request.path("resultVersion").asText();

@@ -8,7 +8,7 @@ import com.remotesensing.platform.agent.AgentClient;
 import com.remotesensing.platform.agent.AgentFailure;
 import com.remotesensing.platform.agent.AgentProperties;
 import com.remotesensing.platform.common.CurrentUserContext;
-import com.remotesensing.platform.common.NdviMetadataValidator;
+import com.remotesensing.platform.common.ResultMetadataValidator;
 import com.remotesensing.platform.entity.RsResultFile;
 import com.remotesensing.platform.entity.RsTask;
 import com.remotesensing.platform.exception.BusinessException;
@@ -115,6 +115,7 @@ public class TaskResultAnswerService {
             rate.check("agent:" + owner, limits.getOwnerRateLimit(), Duration.ofSeconds(limits.getOwnerRateSeconds()));
             Previous previous = previousAnswer(owner, taskId, version, expectedTurn);
             ObjectNode prompt = object().put("question", question);
+            if (!"NDVI".equals(snapshot.algorithm())) prompt.put("algorithm", snapshot.algorithm());
             if (previous.topic() != null) prompt.put("previousKind", previous.topic().name());
             if (previous.section() != null) prompt.put("previousSection", previous.section());
             JsonNode selection = agent.post("result-answers", prompt,
@@ -164,8 +165,9 @@ public class TaskResultAnswerService {
     }
 
     private Snapshot snapshot(RsTask task, String owner, long taskId) {
-        if (!"SUCCESS".equals(task.getStatus()) || !"NDVI".equals(task.getTaskType()))
-            throw new AgentFailure("RESULT_UNAVAILABLE", "区域 NDVI 任务成功后可解读", 409, false);
+        String algorithm = task.getTaskType();
+        if (!"SUCCESS".equals(task.getStatus()) || !("NDVI".equals(algorithm) || "NDWI".equals(algorithm)))
+            throw new AgentFailure("RESULT_UNAVAILABLE", "已完成的区域 NDVI 或 NDWI 任务可解读", 409, false);
 
         RsResultFile file = results.selectByTaskId(taskId);
         if (file == null || !owner.equals(file.getOwnerId()) || !Objects.equals(file.getTaskId(), taskId)
@@ -173,18 +175,21 @@ public class TaskResultAnswerService {
             throw new AgentFailure("RESULT_UNAVAILABLE", "没有可核对的任务结果", 409, false);
         try {
             JsonNode metadata = parse(file.getResultMetadata());
-            if (metadata.path("schemaVersion").asInt() != 2) throw input();
-            NdviMetadataValidator.validate(metadata, task.getTaskType());
-            NdviMetadataValidator.validateTaskRegion(metadata, task.getParams());
-            JsonNode region = metadata.path("regionSnapshot");
-            require(region.path("version").isIntegralNumber() && region.path("version").canConvertToInt()
-                    && region.path("version").intValue() > 0);
+            require(metadata.isObject());
+            ResultMetadataValidator.validate(metadata, algorithm, task.getParams());
+            if ("NDVI".equals(algorithm)) {
+                JsonNode region = metadata.path("regionSnapshot");
+                require(region.path("version").isIntegralNumber() && region.path("version").canConvertToInt()
+                        && region.path("version").intValue() > 0);
+            }
             ObjectNode identity = object().put("fileId", file.getId()).put("bucket", file.getMinioBucket())
                     .put("objectKey", file.getObjectKey()).put("checksum", file.getChecksum()).put("size", file.getFileSize());
             identity.set("metadata", metadata);
-            return new Snapshot(hash(identity), metadata, file);
+            return new Snapshot(hash(identity), metadata, file, algorithm);
         } catch (BusinessException | IllegalStateException error) {
-            throw new AgentFailure("STATISTICS_UNAVAILABLE", "没有可解读的区域统计", 409, false);
+            String message = "NDWI".equals(algorithm) ? "这份 NDWI 结果缺少可核对的有效像素统计，仍可查看原图层"
+                    : "没有可解读的区域统计";
+            throw new AgentFailure("STATISTICS_UNAVAILABLE", message, 409, false);
         }
     }
 
@@ -229,6 +234,11 @@ public class TaskResultAnswerService {
         } catch (IllegalArgumentException error) {
             throw new AgentFailure("MODEL_OUTPUT_INVALID", "未取得可核对的回答", 503, true);
         }
+        String algorithm = snapshot.algorithm();
+        boolean wholeImage = "NDWI".equals(algorithm);
+        if ((wholeImage && topic == Topic.COVERAGE) || (!wholeImage && topic == Topic.WATER_AREA_UNAVAILABLE)) {
+            topic = Topic.INSUFFICIENT_EVIDENCE;
+        }
         JsonNode distribution = null;
         if (topic == Topic.SPATIAL_OVERVIEW || topic == Topic.TOP_SECTION || topic == Topic.BOTTOM_SECTION || topic == Topic.SECTION) {
             RsResultFile file = snapshot.file();
@@ -238,23 +248,33 @@ public class TaskResultAnswerService {
                 topic = Topic.SPATIAL_EVIDENCE_UNAVAILABLE;
             }
         }
-        ObjectNode answer = object().put("kind", topic.name()).put("statement", topic.statement)
-                .put("regionVersion", snapshot.metadata().path("regionSnapshot").path("version").intValue());
+        ObjectNode answer = object().put("kind", topic.name()).put("statement",
+                statement(topic, algorithm));
+        answer.set("regionVersion", snapshot.metadata().path("regionSnapshot").path("version"));
         var evidence = answer.putArray("evidence");
         for (Metric metric : topic.metrics) {
             JsonNode value = metric == Metric.COVERAGE ? snapshot.metadata().path(metric.key)
                     : snapshot.metadata().path("statistics").path(metric.key);
-            evidence.addObject().put("key", metric.key).put("label", metric.label).put("unit", metric.unit).set("value", value);
+            String label = wholeImage ? metric.label.replace("区域 NDVI", "影像 NDWI").replace("区域内", "影像")
+                    : metric.label;
+            evidence.addObject().put("key", metric.key).put("label", label).put("unit", metric.unit).set("value", value);
         }
-        if (distribution != null) addSpatialAnswer(answer, topic, section, distribution);
+        if (distribution != null) addSpatialAnswer(answer, topic, section, distribution, algorithm);
         return answer;
     }
 
-    private void addSpatialAnswer(ObjectNode answer, Topic topic, String section, JsonNode distribution) {
+    private String statement(Topic topic, String algorithm) {
+        String statement = topic.statement.replace("NDVI", algorithm);
+        return "NDWI".equals(algorithm) ? statement.replace("按监测区域在结果影像中的像素范围四分", "按结果影像的像素范围四分")
+                .replace("区域内", "影像内").replace("全区统计", "全图统计").replace("区域均值", "影像均值") : statement;
+    }
+
+    private void addSpatialAnswer(ObjectNode answer, Topic topic, String section, JsonNode distribution, String algorithm) {
         if (topic == Topic.SPATIAL_OVERVIEW) {
             var evidence = answer.withArray("evidence");
             for (String key : List.of("p10", "p50", "p90")) {
-                String label = "p50".equals(key) ? "NDVI 中位数（P50）" : "NDVI " + key.toUpperCase(java.util.Locale.ROOT);
+                String label = "p50".equals(key) ? algorithm + " 中位数（P50）"
+                        : algorithm + " " + key.toUpperCase(java.util.Locale.ROOT);
                 evidence.addObject().put("key", key).put("label", label).put("unit", "decimal")
                         .set("value", distribution.path(key));
             }
@@ -277,7 +297,7 @@ public class TaskResultAnswerService {
         if (selected.size() == 1 && topic != Topic.SPATIAL_OVERVIEW)
             answer.put("focusSection", selected.get(0).path("id").asText());
         else if (selected.size() > 1 && (topic == Topic.TOP_SECTION || topic == Topic.BOTTOM_SECTION))
-            answer.put("statement", topic.statement + "下列分区并列。");
+            answer.put("statement", statement(topic, algorithm) + "下列分区并列。");
         var blocks = answer.putArray("partitions");
         for (JsonNode block : selected) {
             ObjectNode view = blocks.addObject().put("id", block.path("id").asText())
@@ -288,7 +308,7 @@ public class TaskResultAnswerService {
     }
 
     private record Previous(Topic topic, String section) {}
-    private record Snapshot(String version, JsonNode metadata, RsResultFile file) {}
+    private record Snapshot(String version, JsonNode metadata, RsResultFile file, String algorithm) {}
 
     private enum Metric {
         MEAN("mean", "区域 NDVI 均值", "decimal"), MIN("min", "最小值", "decimal"), MAX("max", "最大值", "decimal"),
@@ -323,6 +343,7 @@ public class TaskResultAnswerService {
                 Metric.MEAN, Metric.MIN, Metric.MAX, Metric.VALID, Metric.TOTAL, Metric.RATIO),
         CLARIFY("请说明你指的是哪项统计或哪个分区。"),
         NEEDS_SPATIAL_EVIDENCE("当前结果解读支持分位数和影像四分区。这个问题需要更细的空间证据。"),
+        WATER_AREA_UNAVAILABLE("计算水体面积或覆盖率需要水体分类结果和对应的像素面积。本次任务提供 NDWI 指数。"),
         INSUFFICIENT_EVIDENCE("当前任务的 NDVI 统计无法支持这个问题。");
 
         final String statement;

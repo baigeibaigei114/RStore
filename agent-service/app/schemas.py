@@ -154,12 +154,13 @@ class AnswerRequest(StrictModel):
 
 ResultTopic = Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "VALID_RATIO", "COVERAGE",
                       "SPATIAL_OVERVIEW", "TOP_SECTION", "BOTTOM_SECTION", "SECTION",
-                      "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+                      "NEEDS_SPATIAL_EVIDENCE", "INSUFFICIENT_EVIDENCE", "WATER_AREA_UNAVAILABLE"]
 ResultSection = Literal["NW", "NE", "SW", "SE"]
 
 
 class ResultAnswerRequest(StrictModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    algorithm: Literal["NDVI", "NDWI"] | None = None
     previousKind: ResultTopic | None = None
     previousSection: ResultSection | None = None
 

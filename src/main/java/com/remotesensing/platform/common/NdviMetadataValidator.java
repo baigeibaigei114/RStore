@@ -31,7 +31,10 @@ public final class NdviMetadataValidator {
         long nir = integer(bands, "nirBand");
         require(red > 0 && nir > 0 && red <= Integer.MAX_VALUE && nir <= Integer.MAX_VALUE
                 && red != nir, "波段映射无效");
-        JsonNode stats = metadata.path("statistics");
+        validateStatistics(metadata.path("statistics"));
+    }
+
+    static void validateStatistics(JsonNode stats) {
         long total = integer(stats, "totalPixelCount");
         long valid = integer(stats, "validPixelCount");
         long invalid = integer(stats, "invalidPixelCount");

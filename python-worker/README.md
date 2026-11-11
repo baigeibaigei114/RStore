@@ -107,9 +107,11 @@ python main.py
 
 | 任务类型 | 状态 |
 | --- | --- |
-| `NDVI` | 已实现基础计算流程，默认 `redBand=3`、`nirBand=4`，公式为 `(NIR - RED) / (NIR + RED + 1e-6)` |
-| `NDWI` | 已实现基础计算流程，默认 `greenBand=2`、`nirBand=4`，公式为 `(GREEN - NIR) / (GREEN + NIR + 1e-6)` |
+| `NDVI` | 默认 `redBand=3`、`nirBand=4`，公式为 `(NIR - RED) / (NIR + RED)` |
+| `NDWI` | 默认 `greenBand=2`、`nirBand=4`，公式为 `(GREEN - NIR) / (GREEN + NIR)` |
 | `CHANGE_DETECTION` | 已实现简化差值检测，默认 `band=1`、`threshold=0.2` |
+
+NDVI 和 NDWI 计算均要求源波段像素有效，且分母绝对值大于 `1e-6`。新版 NDWI 结果保存掩膜和统计，供任务详情读取。
 
 NDVI 处理流程：
 

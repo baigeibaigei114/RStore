@@ -46,3 +46,14 @@ def test_section_selection_returns_only_the_named_partition():
     assert response.status_code == 200
     assert response.json()["section"] == "SE"
     assert model.last_payload == body
+
+
+def test_ndwi_classifier_receives_the_algorithm_without_source_data():
+    model = ModelDouble({"kind": "WATER_AREA_UNAVAILABLE"})
+    service = AgentService(None, None, model)
+    body = {"question": "水体面积是多少？", "algorithm": "NDWI"}
+    with TestClient(create_app(Settings(internal_token=TOKEN), service)) as client:
+        response = client.post("/internal/v1/result-answers", headers=headers(), json=body)
+    assert response.status_code == 200
+    assert response.json()["kind"] == "WATER_AREA_UNAVAILABLE"
+    assert model.last_payload == body

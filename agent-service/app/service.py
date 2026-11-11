@@ -135,10 +135,12 @@ class AgentService:
 
     def result_answer(self, request):
         check_sensitive(request.question)
-        prompt = """分类用户关于当前单期区域 NDVI 结果的问题，只返回 JSON 对象，使用 kind 字段。
+        prompt = """分类用户关于当前单期指数结果的问题，只返回 JSON 对象，使用 kind 字段。
+algorithm 指明当前任务是 NDVI 或 NDWI，缺省时为区域 NDVI。NDWI 统计范围是整幅结果影像。
 SUMMARY：整体统计概览。MEAN：区域均值。RANGE：最小或最大值及数值范围。
 VALID_PIXELS：总像素、有效或无效像素数。VALID_RATIO：有效像素比例及其分子和分母。
-COVERAGE：影像范围覆盖率。
+COVERAGE：区域 NDVI 的影像范围覆盖率。
+WATER_AREA_UNAVAILABLE：NDWI 用户询问水体面积、水体覆盖率或要求计算水体像素数。指数值没有分类与面积依据。
 同时询问多项基础统计时选择覆盖这些统计的 SUMMARY。
 SPATIAL_OVERVIEW：分布、分位数、四分区对比。TOP_SECTION：哪个分区均值最高。BOTTOM_SECTION：哪个分区均值最低。
 SECTION：指定一个分区，例如「右下有多少有效像素」，额外返回 section。左上用 NW，右上用 NE，左下用 SW，右下用 SE。

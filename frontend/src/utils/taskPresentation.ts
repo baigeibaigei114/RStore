@@ -1,17 +1,20 @@
-import type { TaskDetail, TaskResultFile, TaskStatus } from '@/types/task'
+import type { TaskDetail, TaskResultFile, TaskStatus, TaskType } from '@/types/task'
 
 const statusLabels: Record<string, string> = { PENDING: '等待处理', RUNNING: '正在计算',
   RETRYING: '正在自动重试', SUCCESS: '计算完成', FAILED: '计算失败', CANCELED: '已取消' }
 export const taskStatusText = (status?: TaskStatus) => statusLabels[status || ''] || '正在读取状态'
 export const isActiveStatus = (status?: TaskStatus) => !!status && ['PENDING', 'RUNNING', 'RETRYING'].includes(status)
 
-export function failureMessage(message?: string): string {
+export function failureMessage(message?: string, type?: TaskType): string {
   if (message?.includes('not fully covered')) return '监测区域没有完整落在影像范围内。请调整区域，或换一景覆盖该区域的影像。'
-  if (message && /no valid.*pixel|no pixel.*center|zero.*pixel/i.test(message)) return '所选区域没有可用于 NDVI 的有效像素。请调整区域或换一景影像。'
+  if (message && /no valid.*pixel|no pixel.*center|zero.*pixel/i.test(message)) {
+    if (type === 'NDWI') return '没有可用于 NDWI 的像素。请核对绿光和近红外波段，或选择另一景影像。'
+    return '所选区域没有可用于 NDVI 的有效像素。请调整区域或换一景影像。'
+  }
   return '本次计算未能完成。请先核对影像和区域；具体原因可在技术详情中查看。'
 }
 
-export interface NdviStatistics {
+export interface IndexStatistics {
   totalPixelCount: number; validPixelCount: number; invalidPixelCount: number
   validPixelRatio: number; min: number; max: number; mean: number
 }
@@ -27,13 +30,14 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-export function readStatistics(task: TaskDetail | null, result: TaskResultFile | null): NdviStatistics | null {
-  if (!task || task.status !== 'SUCCESS' || task.taskType !== 'NDVI' || !result?.resultMetadata || result.taskId !== task.id) return null
+export function readStatistics(task: TaskDetail | null, result: TaskResultFile | null): IndexStatistics | null {
+  if (!task || task.status !== 'SUCCESS' || !['NDVI', 'NDWI'].includes(task.taskType) ||
+    !result?.resultMetadata || result.taskId !== task.id) return null
   try {
     const metadata = JSON.parse(result.resultMetadata)
-    const stats = metadata.statistics as NdviStatistics
-    const region = regionSnapshot(task)
-    if (metadata.algorithm !== 'NDVI'
+    const stats = metadata.statistics as IndexStatistics
+    const region = task.taskType === 'NDVI' ? regionSnapshot(task) : null
+    if (metadata.algorithm !== task.taskType
       || (region ? metadata.schemaVersion !== 2 || metadata.scope !== 'monitoring_region'
         || canonical(metadata.regionSnapshot) !== canonical(region)
         : metadata.schemaVersion !== 1 || metadata.scope !== 'cropped_raster')) return null

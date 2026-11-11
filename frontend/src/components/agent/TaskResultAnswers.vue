@@ -23,7 +23,7 @@
           <p>{{ entry.answer.statement }}</p>
           <details v-if="entry.answer.evidence.length || entry.answer.partitions?.length" :open="entry.requestId === turn?.requestId">
             <summary>查看数据依据</summary>
-            <p>本次任务 · 区域版本 {{ entry.answer.regionVersion }}</p>
+            <p>本次任务 · {{ entry.answer.regionVersion ? `区域版本 ${entry.answer.regionVersion}` : '整幅结果影像' }}</p>
             <dl>
               <div v-for="item in entry.answer.evidence" :key="item.key">
                 <dt>{{ item.label }}</dt>
@@ -52,7 +52,7 @@
       <label for="result-answer-question">你的问题</label>
       <el-input id="result-answer-question" v-model="question" maxlength="500"
         :disabled="busy || !!pending || turn?.status === 'RUNNING'"
-        placeholder="例如，本次区域 NDVI 的均值和数值范围如何？" />
+        :placeholder="`例如，本次 ${algorithm} 的均值和数值范围如何？`" />
       <div class="result-answer-actions">
         <el-button v-if="!pending" type="primary" native-type="submit" :loading="busy"
           :disabled="!question.trim() || turn?.status === 'RUNNING'">提问</el-button>
@@ -73,9 +73,9 @@ import type { ResultSection, TaskResultAnswer, TaskResultAnswerState, TaskResult
 import { isUnauthorized } from '@/utils/regionAnalysis'
 import { sectionLabels } from '@/utils/resultEvidence'
 
-const props = defineProps<{ taskId: string; mapReady: boolean }>()
+const props = defineProps<{ taskId: string; algorithm: 'NDVI' | 'NDWI'; mapReady: boolean }>()
 const router = useRouter()
-const examples = ['本次区域 NDVI 整体如何？', '有效像素比例是多少？', '哪个分区均值最高？', '四个分区的数值有什么差异？']
+const examples = computed(() => [`本次 ${props.algorithm} 整体如何？`, '有效像素比例是多少？', '哪个分区均值最高？', '四个分区的数值有什么差异？'])
 const question = ref('')
 const state = ref<TaskResultAnswerState | null>(null)
 const turns = ref<TaskResultAnswer[]>([])

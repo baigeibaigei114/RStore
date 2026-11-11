@@ -57,7 +57,7 @@ export interface TaskResultAnswer {
   answer: {
     kind: string
     statement: string
-    regionVersion: number
+    regionVersion: number | null
     evidence: { key: string; label: string; value: number; unit: 'decimal' | 'count' | 'ratio' }[]
     partitions?: TaskResultPartition[]
   } | null

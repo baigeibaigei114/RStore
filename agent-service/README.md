@@ -43,6 +43,8 @@ uv sync --frozen
 
 任务结果解读上线后，`/agent` 保留为只读历史。任务详情从现有报告表读取旧报告。尚未创建该表的环境需要执行 `src/main/resources/db/upgrade/20260526_ai_report.sql`。上线前使用真实模型核对手动区域 NDVI、连续追问和地图高亮。若需要暂时恢复旧入口，在后端 `agent` profile 设置 `AGENT_LEGACY_WRITES_ENABLED=true`，并以 `VITE_AGENT_LEGACY_WRITES_ENABLED=true` 重新构建前端。两个设置默认关闭，历史读取不依赖此开关。
 
+NDWI 解读使用整幅结果影像的共同有效像素。先升级接收新统计的 Java 后端，再升级 Worker。旧 NDWI 结果缺少源波段掩膜证据时保留地图和文件；水体面积还需要分类结果和面积口径。
+
 不要重建业务库或清理历史表。知识库使用PostgreSQL 16/PostGIS/pgvector，显式执行`agent-service/sql/001_knowledge.sql`，独立配置最小权限的索引写角色与运行只读角色；迁移不包含生产凭据。
 确认配置及模型就绪后，在agent-service目录显式同步：
 

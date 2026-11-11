@@ -49,28 +49,28 @@ def read_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
     return dataset.read(band_index).astype("float32")
 
 
+def read_valid_band(dataset: rasterio.DatasetReader, band_index: int) -> np.ndarray:
+    """Keep both GDAL masks and the band's explicit NoData value."""
+    source = dataset.read(band_index, masked=True)
+    values = source.astype("float32").filled(np.nan)
+    nodata = dataset.nodatavals[band_index - 1]
+    if nodata is not None:
+        values[source.data == nodata] = np.nan
+    return values
+
+
 def normalized_difference(
     first: np.ndarray, second: np.ndarray, epsilon: float = 1e-6
 ) -> np.ndarray:
-    """计算归一化差值：(first - second) / (first + second + epsilon)。
-
-    这是 NDVI、NDWI、NDBI 等遥感指数的通用计算公式，
-    区别仅在于使用的波段组合不同。
-
-    Args:
-        first: 被减数波段数据（如 NDVI 中的 NIR 波段）。
-        second: 减数波段数据（如 NDVI 中的 RED 波段）。
-        epsilon: 避免除零的小量，默认 1e-6。分母加上 epsilon 后，
-                 不会对计算结果（通常值域 [-1, 1]）产生实际影响。
-
-    Returns:
-        归一化差值数组，dtype=float32，形状与输入一致。
-
-    注意：NumPy 的向量化运算等价于 Java 中双重 for 循环逐像元计算，
-    但 C 语言实现让性能接近原生代码。这是 Python 在遥感领域胜过 Java 的关键原因之一。
-    """
-    denominator = first + second + epsilon
-    return ((first - second) / denominator).astype("float32")
+    """Compute the index where both bands and the denominator are usable."""
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        denominator = first + second
+        valid = (np.isfinite(first) & np.isfinite(second) & np.isfinite(denominator)
+                 & (np.abs(denominator) > epsilon))
+        values = np.full(first.shape, np.nan, dtype="float32")
+        np.divide(first - second, denominator, out=values, where=valid)
+    values[~np.isfinite(values)] = np.nan
+    return values
 
 
 def write_single_band_geotiff(

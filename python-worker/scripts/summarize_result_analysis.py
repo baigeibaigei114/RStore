@@ -1,4 +1,4 @@
-"""Read bounded evidence from an existing, admitted regional NDVI GeoTIFF."""
+"""Read bounded evidence from a saved, mask-aware result GeoTIFF."""
 
 import json
 import math
@@ -12,6 +12,7 @@ from rasterio.warp import transform
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.ndvi_baseline import read_result_pixels
+from utils.result_analysis import read_index_result
 
 
 MAX_EDGE = 2048
@@ -22,13 +23,17 @@ def polygon(ring):
 
 
 def summarize(raster, metadata):
-    region = metadata["regionSnapshot"]
+    region = metadata.get("regionSnapshot")
     bands = metadata["bandMapping"]
     statistics = metadata["statistics"]
     with rasterio.open(raster, driver="GTiff") as dataset:
         if max(dataset.shape) > MAX_EDGE:
             raise ValueError("Raster exceeds the result evidence budget")
-        values, area = read_result_pixels(dataset, bands["redBand"], bands["nirBand"], region)
+        if region is None:
+            values = read_index_result(dataset, metadata["algorithm"], bands)
+            area = np.ones(dataset.shape, dtype=bool)
+        else:
+            values, area = read_result_pixels(dataset, bands["redBand"], bands["nirBand"], region)
         valid = area & np.isfinite(values)
         pixels = values[valid]
         if int(area.sum()) != statistics["totalPixelCount"] or pixels.size != statistics["validPixelCount"]:
@@ -44,12 +49,16 @@ def summarize(raster, metadata):
         row_edges = (r0, (r0 + r1) / 2, r1)
         col_edges = (c0, (c0 + c1) / 2, c1)
         p10, p50, p90 = np.percentile(pixels, [10, 50, 90], method="linear")
-        srid = dataset.crs.to_epsg()
+        srid = dataset.crs.to_epsg() if dataset.crs is not None else None
         projected = None
-        if srid:
+        if srid and region is not None:
             ring = region["geometry"]["coordinates"][0]
             xs, ys = transform("EPSG:4326", dataset.crs, [p[0] for p in ring], [p[1] for p in ring])
             projected = polygon(list(zip(xs, ys)))
+        elif srid:
+            corners = [(0, dataset.height), (dataset.width, dataset.height),
+                       (dataset.width, 0), (0, 0), (0, dataset.height)]
+            projected = polygon([dataset.transform * corner for corner in corners])
         sections = []
         for section, row, col in (("NW", 0, 0), ("NE", 0, 1), ("SW", 1, 0), ("SE", 1, 1)):
             top, bottom = row_edges[row:row + 2]
