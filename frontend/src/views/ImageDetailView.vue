@@ -1,23 +1,16 @@
 <template>
-  <section>
+  <section class="image-detail">
     <div class="page-title">
       <span>影像详情</span>
-      <h2>{{ image?.imageName || `影像 ID：${imageId}` }}</h2>
-      <p>查看影像元数据、对象存储路径、缩略图、空间范围和公开私有状态。</p>
+      <h2>{{ image?.imageName || '读取影像详情' }}</h2>
+      <p>查看这景影像的采集信息，选择监测区域继续分析。</p>
     </div>
 
     <div class="detail-actions">
+      <el-button type="primary" :disabled="!image" @click="router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId } })">分析这景影像</el-button>
       <el-button @click="router.push('/images')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="fetchDetail">刷新</el-button>
-      <el-button
-        type="danger"
-        :loading="deleteLoading"
-        :disabled="!image || !canDeleteImage"
-        @click="confirmDelete"
-      >
-        删除影像
-      </el-button>
-      <el-button type="primary" :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
+      <el-button :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
         下载原始影像
       </el-button>
     </div>
@@ -25,9 +18,8 @@
     <el-skeleton v-if="loading && !image" :rows="8" animated />
 
     <template v-else-if="image">
-      <InputProvenance :raw="image.metadataJson" />
-      <el-row :gutter="16">
-        <el-col :xs="24" :lg="8">
+      <div class="image-overview">
+
           <el-card class="detail-card" shadow="never">
             <template #header>
               <div class="card-header">
@@ -47,68 +39,29 @@
             />
             <el-empty v-else description="暂无缩略图" />
 
-            <div v-if="image.thumbnailErrorMessage" class="error-text">
-              {{ image.thumbnailErrorMessage }}
-            </div>
+            <p v-if="image.thumbnailErrorMessage" class="preview-note">暂时没有可用预览，影像信息仍可查看。</p>
           </el-card>
 
-          <el-card class="detail-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>访问控制</span>
-                <el-tag :type="image.visibility === 'PUBLIC' ? 'success' : 'info'" effect="plain">
-                  {{ visibilityText(image.visibility) }}
-                </el-tag>
-              </div>
-            </template>
+        <el-card class="detail-card overview-summary" shadow="never">
+          <template #header><div class="card-header"><span>影像概览</span><el-tag :type="imageStatusType(image.status)" effect="plain">{{ imageStatusText(image.status) }}</el-tag></div></template>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="传感器">{{ image.sensorType || '未记录' }}</el-descriptions-item>
+            <el-descriptions-item label="采集时间">{{ formatDateTime(image.acquisitionTime) }}</el-descriptions-item>
+            <el-descriptions-item label="云量">{{ formatCloud(image.cloudPercent) }}</el-descriptions-item>
+            <el-descriptions-item label="分辨率">{{ formatResolution(image.resolutionMeter) }}</el-descriptions-item>
+            <el-descriptions-item label="尺寸">{{ formatSize(image.width, image.height) }}</el-descriptions-item>
+            <el-descriptions-item label="文件大小">{{ formatFileSize(image.fileSize) }}</el-descriptions-item>
+            <el-descriptions-item label="可见性">{{ visibilityText(image.visibility) }}</el-descriptions-item>
+            <el-descriptions-item label="格式">{{ image.fileFormat || '未记录' }}</el-descriptions-item>
+          </el-descriptions>
+          <p class="preview-note">选择一个已保存的监测区域继续分析。提交前会核对影像和区域是否可用。</p>
+        </el-card>
+      </div>
+      <el-collapse v-model="detailPanels" class="advanced-panels">
+        <el-collapse-item title="来源与技术详情" name="technical">
+          <InputProvenance :raw="image.metadataJson" />
+          <p v-if="image.thumbnailErrorMessage" class="error-text">缩略图原始错误：{{ image.thumbnailErrorMessage }}</p>
 
-            <div class="visibility-row">
-              <span>公开状态</span>
-              <el-switch
-                v-model="visibilityValue"
-                active-value="PUBLIC"
-                inactive-value="PRIVATE"
-                active-text="公开"
-                inactive-text="私有"
-                :loading="visibilitySaving"
-                @change="handleVisibilityChange"
-              />
-            </div>
-          </el-card>
-
-          <el-card class="detail-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>波段配置</span>
-                <el-tag effect="plain">{{ image.bandMappingSource || 'UNKNOWN' }}</el-tag>
-              </div>
-            </template>
-
-            <el-form label-position="top">
-              <el-form-item label="红光波段">
-                <el-input-number v-model="bandMappingForm.redBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
-              </el-form-item>
-              <el-form-item label="绿光波段">
-                <el-input-number v-model="bandMappingForm.greenBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
-              </el-form-item>
-              <el-form-item label="蓝光波段">
-                <el-input-number v-model="bandMappingForm.blueBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
-              </el-form-item>
-              <el-form-item label="近红外波段">
-                <el-input-number v-model="bandMappingForm.nirBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
-              </el-form-item>
-            </el-form>
-
-            <div class="visibility-row">
-              <span>可用任务：{{ supportedTaskText }}</span>
-            </div>
-            <el-button type="primary" :loading="bandMappingSaving" @click="saveBandMapping">
-              保存为用户确认配置
-            </el-button>
-          </el-card>
-        </el-col>
-
-        <el-col :xs="24" :lg="16">
           <el-card class="detail-card" shadow="never">
             <template #header>基础元数据</template>
             <el-descriptions :column="2" border>
@@ -161,8 +114,75 @@
             <template #header>原始元数据</template>
             <pre class="code-block">{{ formattedMetadata }}</pre>
           </el-card>
-        </el-col>
-      </el-row>
+        </el-collapse-item>
+        <el-collapse-item title="影像设置" name="settings">
+          <p class="preview-note">仅在确认数据来源后修改波段；修改后需要重新核对分析准入。</p>
+          <el-card class="detail-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span>访问控制</span>
+                <el-tag :type="image.visibility === 'PUBLIC' ? 'success' : 'info'" effect="plain">
+                  {{ visibilityText(image.visibility) }}
+                </el-tag>
+              </div>
+            </template>
+
+            <div class="visibility-row">
+              <span>公开状态</span>
+              <el-switch
+                v-model="visibilityValue"
+                active-value="PUBLIC"
+                inactive-value="PRIVATE"
+                active-text="公开"
+                inactive-text="私有"
+                :loading="visibilitySaving"
+                @change="handleVisibilityChange"
+              />
+            </div>
+          </el-card>
+
+          <el-card class="detail-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span>波段配置</span>
+              </div>
+            </template>
+
+            <el-form label-position="top">
+              <el-form-item label="红光波段">
+                <el-input-number v-model="bandMappingForm.redBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="绿光波段">
+                <el-input-number v-model="bandMappingForm.greenBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="蓝光波段">
+                <el-input-number v-model="bandMappingForm.blueBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+              <el-form-item label="近红外波段">
+                <el-input-number v-model="bandMappingForm.nirBand" :min="1" :max="image.bandCount || undefined" controls-position="right" class="full-width" />
+              </el-form-item>
+            </el-form>
+
+            <div class="visibility-row">
+              <span>可用任务：{{ supportedTaskText }}</span>
+            </div>
+            <el-button type="primary" :loading="bandMappingSaving" @click="saveBandMapping">
+              保存为用户确认配置
+            </el-button>
+          </el-card>
+          <el-card class="detail-card" shadow="never"><template #header>删除影像</template>
+            <p class="preview-note">删除后影像将从列表和空间检索中隐藏，历史任务仍会保留。</p>
+      <el-button
+        type="danger"
+        :loading="deleteLoading"
+        :disabled="!image || !canDeleteImage"
+        @click="confirmDelete"
+      >
+        删除影像
+      </el-button>
+          </el-card>
+        </el-collapse-item>
+      </el-collapse>
     </template>
 
     <el-card v-else class="placeholder-card" shadow="never">
@@ -199,6 +219,7 @@ const visibilitySaving = ref(false)
 const bandMappingSaving = ref(false)
 const image = ref<ImageDetail | null>(null)
 const thumbnailUrl = ref('')
+const detailPanels = ref<string[]>([])
 const visibilityValue = ref<ImageVisibility>('PRIVATE')
 const bandMappingForm = reactive<ImageBandMappingUpdateParams>({})
 
@@ -445,3 +466,16 @@ function formatDateTime(value?: string) {
   return new Date(value).toLocaleString()
 }
 </script>
+
+<style scoped>
+.image-detail { max-width: 1160px; --el-color-primary: #176b52; }
+.detail-actions { justify-content: flex-start; flex-wrap: wrap; margin: 0 0 20px; }
+.detail-actions .el-button { margin: 0; }
+.image-overview { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; }
+.image-overview > .detail-card { min-width: 0; }
+.preview-note { color: #667085; font-size: 13px; line-height: 1.8; }
+.advanced-panels { padding: 0 20px; border: 1px solid #e4e7ed; border-radius: 8px; background: #fff; }
+.advanced-panels :deep(.el-collapse-item__header) { font-size: 14px; font-weight: 500; }
+.advanced-panels :deep(.el-collapse-item__wrap) { border-bottom: 0; }
+@media (max-width: 900px) { .image-overview { grid-template-columns: 1fr; } }
+</style>

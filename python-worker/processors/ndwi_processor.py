@@ -4,8 +4,7 @@ NDWI（归一化水体指数）处理器模块。
 职责：
   - 从任务消息中提取 GREEN 和 NIR 波段编号。
   - 委托基类 SpectralIndexProcessor 执行归一化差值计算。
-  - NDWI 公式：(GREEN - NIR) / (GREEN + NIR + EPSILON)，值域 [-1, 1]。
-    正值通常表示水体，负值表示植被或裸地。
+  - NDWI 公式：(GREEN - NIR) / (GREEN + NIR)，统计只使用两波段均有效的像素。
 
 设计要点：
   - 与 NdviProcessor 结构对称，使用相同的委托模式。
@@ -50,14 +49,11 @@ class NdwiProcessor:
             结果字典（透传基类返回值，包含 outputBucket / outputObjectKey 及波段编号）。
 
         NDWI 公式详解：
-          NDWI = (GREEN - NIR) / (GREEN + NIR + 1e-6)
-          - 水体：GREEN > NIR（水体在绿光反射较强），NDWI 为正值
-          - 植被：NIR > GREEN（植被在近红外反射较强），NDWI 为负值
+          NDWI = (GREEN - NIR) / (GREEN + NIR)
         """
         params = message.get("params") or {}
         green_band = int(params.get("greenBand", 2))
         nir_band = int(params.get("nirBand", 4))
-        # NDWI = (GREEN - NIR) / (GREEN + NIR + 1e-6)
         return self._processor.process_index(
             message,
             # first_band 是被减数（GREEN），second_band 是减数（NIR），

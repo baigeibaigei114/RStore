@@ -1,0 +1,20 @@
+# Isolated G2 database. No mount or connection to the existing rs-postgres volume.
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres.Dockerfile
+    image: ndvi-agent-pg16-vector:verify
+    environment:
+      POSTGRES_DB: ndvi_agent_g2
+      POSTGRES_USER: g2_admin
+      POSTGRES_PASSWORD: ${G2_POSTGRES_PASSWORD:?provide a disposable test password}
+    ports:
+      - "127.0.0.1:15436:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U g2_admin -d ndvi_agent_g2"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.agent")
 public class AgentProperties {
     private boolean enabled = false;
+    private boolean legacyWritesEnabled = false;
     private String baseUrl = "http://agent-service:8000";
     private String internalToken = "";
     private String model = "deepseek-v4-flash";

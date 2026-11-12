@@ -1,6 +1,11 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import type { ApiResult } from '@/types/api'
+import { authFailureMessage, createAuthNoticeGate } from '@/utils/authFeedback'
+import { normalizeApiBaseUrl, resolveApiEndpoint } from '@/utils/apiEndpoint'
+
+export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
+export const apiEndpoint = (path?: string) => resolveApiEndpoint(API_BASE_URL, path)
 
 /**
  * 存储在 localStorage 中的访问令牌键名
@@ -33,9 +38,10 @@ interface RequestConfig extends InternalAxiosRequestConfig {
  * 所有 API 请求均通过此实例发送，统一处理令牌和错误提示
  */
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   timeout: 30000,
 })
+const allowAuthNotice = createAuthNoticeGate()
 
 /**
  * 请求拦截器：从 localStorage 读取令牌并自动附加到请求头
@@ -72,8 +78,9 @@ request.interceptors.response.use(
     // 后端统一使用 Result<T>，业务层只需要拿到 data。
     if (body && typeof body.code === 'number') {
       if (body.code !== 200) {
-        const message = body.message || '请求失败'
-        if (!config.silentError) {
+        if (body.code === 401) localStorage.removeItem(TOKEN_KEY)
+        const message = body.code === 401 ? authFailureMessage(config.url) : body.message || '请求失败'
+        if (body.code === 401 ? allowAuthNotice(config.url, config.silentError) : !config.silentError) {
           ElMessage.error(message)
         }
         return Promise.reject(new ApiError(body.code, message))
@@ -89,8 +96,8 @@ request.interceptors.response.use(
 
     if (error.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
-      if (!config?.silentError) {
-        ElMessage.error('登录已失效，请重新登录')
+      if (allowAuthNotice(config?.url, config?.silentError)) {
+        ElMessage.error(authFailureMessage(config?.url))
       }
       return Promise.reject(error)
     }

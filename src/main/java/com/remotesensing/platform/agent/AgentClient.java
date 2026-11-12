@@ -26,7 +26,7 @@ public class AgentClient {
     public JsonNode post(String operation, JsonNode body, Duration remaining) {
         if (!properties.isEnabled() || properties.getInternalToken().length() < 32)
             throw new AgentFailure("MODEL_UNAVAILABLE", "Agent服务未启用或未配置", 503, true);
-        if (!Set.of("decisions", "answers", "explanations").contains(operation)) throw AgentJson.input();
+        if (!Set.of("decisions", "answers", "explanations", "result-answers").contains(operation)) throw AgentJson.input();
         byte[] input = body.toString().getBytes(StandardCharsets.UTF_8);
         if (input.length > 65536) throw new AgentFailure("MODEL_INPUT_TOO_LARGE", "内部请求超过预算", 400, false);
         if (remaining.isNegative() || remaining.isZero())

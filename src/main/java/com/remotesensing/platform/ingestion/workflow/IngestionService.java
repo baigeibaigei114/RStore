@@ -172,6 +172,7 @@ public class IngestionService {
             JsonNode old=receipts.path(key.toString());
             if(!old.isMissingNode()) { require(old.path("hash").asText().equals(hash),409,"REQUEST_KEY_CONFLICT"); return (ObjectNode)old.path("response"); }
             if(p.path("version").asLong()!=version) throw new IngestionProblem(409,"STATE_CONFLICT",p.path("version").asLong());
+            require(p.path("expires_at").isNull() || IngestionStore.time(p,"expires_at").isAfter(db.now()),410,"RAW_EXPIRED");
             require("FAILED".equals(p.path("status").asText()),409,"STATE_CONFLICT");
             boolean inspect="AVAILABLE".equals(p.path("raw_state").asText());
             String status;

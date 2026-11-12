@@ -18,8 +18,8 @@ import type {
  * @param params - 搜索条件，包含 keyword/sensor/maxCloudPercent/startTime/endTime/bbox/分页参数
  * @returns Promise<PageResult<ImageListItem>> - 分页的影像摘要列表
  */
-export function searchImagesApi(params: ImageSearchParams) {
-  return request.get<unknown, PageResult<ImageListItem>>('/images/search', { params })
+export function searchImagesApi(params: ImageSearchParams, silentError = false) {
+  return request.get<unknown, PageResult<ImageListItem>>('/images/search', { params, silentError })
 }
 
 /**
@@ -38,8 +38,8 @@ export function searchImagesByRegionApi(params: ImageRegionSearchParams) {
  * @param id - 影像 ID（数字或字符串）
  * @returns Promise<ImageDetail> - 影像完整详情
  */
-export function getImageDetailApi(id: number | string) {
-  return request.get<unknown, ImageDetail>(`/images/${id}`)
+export function getImageDetailApi(id: number | string, silentError = false) {
+  return request.get<unknown, ImageDetail>(`/images/${id}`, { silentError })
 }
 
 /**

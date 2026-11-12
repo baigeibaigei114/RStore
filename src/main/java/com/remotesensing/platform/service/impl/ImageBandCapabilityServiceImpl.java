@@ -255,7 +255,8 @@ public class ImageBandCapabilityServiceImpl implements ImageBandCapabilityServic
         if (mapping.containsKey("red") && mapping.containsKey("nir")) {
             taskTypes.add(TaskType.NDVI.name());
         }
-        if (mapping.containsKey("green") && mapping.containsKey("nir")) {
+        if (mapping.containsKey("green") && mapping.containsKey("nir")
+                && !mapping.get("green").equals(mapping.get("nir"))) {
             taskTypes.add(TaskType.NDWI.name());
         }
         return new ArrayList<>(taskTypes);
@@ -286,6 +287,7 @@ public class ImageBandCapabilityServiceImpl implements ImageBandCapabilityServic
                     paramName + " 与可信波段映射不一致，期望值为 " + mappedBand
             );
         }
+        params.put(paramName, mappedBand);
     }
 
     /**

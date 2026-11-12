@@ -18,7 +18,11 @@ public class AgentController {
     public AgentController(AgentService service, CurrentUserContext users, RateLimitService rate, AgentProperties limits) {
         this.service = service; this.users = users; this.rate = rate; this.limits = limits;
     }
-    private void write() { rate.check("agent:" + users.getAuthenticatedUserId(), limits.getOwnerRateLimit(), Duration.ofSeconds(limits.getOwnerRateSeconds())); }
+    private void write() {
+        if (!limits.isLegacyWritesEnabled())
+            throw new AgentFailure("LEGACY_AGENT_READ_ONLY", "旧助手已改为历史记录，请从任务详情解读结果", 403, false);
+        rate.check("agent:" + users.getAuthenticatedUserId(), limits.getOwnerRateLimit(), Duration.ofSeconds(limits.getOwnerRateSeconds()));
+    }
     private Result<JsonNode> result(HttpServletRequest request, JsonNode data) {
         if (data.isObject()) ((ObjectNode) data).put("requestId", request.getAttribute(AgentBoundary.REQUEST_ID).toString());
         else data = AgentJson.object().put("requestId", request.getAttribute(AgentBoundary.REQUEST_ID).toString()).set("steps", data);

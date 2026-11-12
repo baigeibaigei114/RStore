@@ -1,5 +1,6 @@
 <template>
-  <section>
+  <RegionAnalysisForm v-if="regionMode" />
+  <section v-else>
     <div class="page-title">
       <span>创建任务</span>
       <h2>提交智能解译任务</h2>
@@ -145,6 +146,8 @@ import { getMonitoringRegionApi, listMonitoringRegionsApi, type MonitoringRegion
 import { searchImagesApi, getImageDetailApi } from '@/api/image'
 import { createTaskApi } from '@/api/task'
 import { createSubmissionIntent } from '@/utils/submissionIntent'
+import RegionAnalysisForm from '@/components/analysis/RegionAnalysisForm.vue'
+import { hasNdviAdmission, ndviPayload } from '@/utils/regionAnalysis'
 import type { ImageListItem } from '@/types/image'
 import type { TaskSubmitParams, TaskType } from '@/types/task'
 
@@ -161,6 +164,7 @@ interface TaskCreateForm {
 
 const router = useRouter()
 const route = useRoute()
+const regionMode = computed(() => route.query.mode === 'region-ndvi')
 const monitoringRegionId = ref<number>()
 const monitoringRegions = ref<MonitoringRegion[]>([])
 const regionLoading = ref(true)
@@ -215,8 +219,7 @@ watch(() => form.imageId, async (id, _, onCleanup) => {
   if (!id) return
   try {
     const detail = await getImageDetailApi(id)
-    const admission = JSON.parse(detail.metadataJson || '{}').admission
-    if (!stale) ndviAdmitted.value = admission?.status === 'PASSED' && admission?.validatorVersion === 'input-v1'
+    if (!stale) ndviAdmitted.value = hasNdviAdmission(detail)
   } catch {
     if (!stale) ndviAdmitted.value = false
   } finally {
@@ -250,9 +253,9 @@ watch(selectedImage, () => {
 })
 
 onMounted(() => {
-  loadReadyImages()
-  loadRegions()
+  if (!regionMode.value) { loadReadyImages(); loadRegions() }
 })
+watch(regionMode, value => { if (!value) { loadReadyImages(); loadRegions() } })
 
 async function loadRegions() {
   try {
@@ -386,15 +389,7 @@ function buildPayload(strict: boolean): TaskSubmitParams | null {
   }
 
   if (form.taskType === 'NDVI') {
-    return {
-      imageId: form.imageId,
-      monitoringRegionId: monitoringRegionId.value,
-      taskType: form.taskType,
-      params: {
-        redBand: form.redBand,
-        nirBand: form.nirBand,
-      },
-    }
+    return ndviPayload(form.imageId, form.redBand, form.nirBand, monitoringRegionId.value)
   }
 
   if (form.taskType === 'NDWI') {

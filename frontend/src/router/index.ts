@@ -13,6 +13,7 @@ import TaskListView from '@/views/TaskListView.vue'
 import AgentView from '@/views/AgentView.vue'
 import IngestionView from '@/views/IngestionView.vue'
 import { useAuthStore } from '@/stores/auth'
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -28,7 +29,9 @@ const router = createRouter({
       component: AppLayout,
       redirect: '/dashboard',
       children: [
-        { path: 'agent', name: 'Agent', component: AgentView, meta: { title: 'NDVI助手', activeMenu: '/agent' } },
+        { path: 'agent', name: 'Agent', component: AgentView, meta: {
+          title: legacyAgentWrites ? 'NDVI助手' : '历史解读', activeMenu: legacyAgentWrites ? '/agent' : '/tasks',
+        } },
         { path: 'ingestion', name: 'SafeIngestion', component: IngestionView, meta: { title: '产品入库', activeMenu: '/ingestion' } },
         {
           path: 'dashboard',

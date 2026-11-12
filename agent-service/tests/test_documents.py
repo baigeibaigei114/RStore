@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.config import ROOT
 from app.errors import AgentError
 from app.knowledge.documents import load_documents
 
@@ -28,6 +29,13 @@ def test_frontmatter_and_empty_body_are_validated(tmp_path):
     source.write_text(document().replace("NDVI方法正文。", ""), encoding="utf-8")
     with pytest.raises(AgentError):
         load_documents(manifest, tmp_path)
+
+
+def test_builtin_evidence_uses_public_rule_names():
+    documents = load_documents(ROOT / "knowledge/manifest.json")
+    for doc in documents:
+        for heading, _, body in doc.sections:
+            assert "shared/" not in heading + body, doc.source_id
 
 
 @pytest.mark.parametrize("title,heading", [("标" * 256, "章节"), ("标题", "章" * 501)])

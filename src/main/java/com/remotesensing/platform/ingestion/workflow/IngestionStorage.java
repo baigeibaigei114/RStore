@@ -1,17 +1,28 @@
 package com.remotesensing.platform.ingestion.workflow;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.collect.ImmutableMultimap;
 import com.remotesensing.platform.config.properties.MinioProperties;
 import com.remotesensing.platform.config.properties.IngestionProperties;
 import com.remotesensing.platform.ingestion.api.IngestionProblem;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import io.minio.*;
+import io.minio.errors.ErrorResponseException;
+import io.minio.http.Method;
+import io.minio.messages.VersioningConfiguration;
 import java.io.*;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
 import okhttp3.OkHttpClient;
 import org.springframework.stereotype.Service;
+import org.w3c.dom.Element;
 
 /** Private ingestion objects use the configured server endpoint and fixed server-generated keys. */
 @Service
@@ -41,15 +52,17 @@ public class IngestionStorage {
         catch (Exception error) { throw new IngestionProblem(503,"SERVICE_UNAVAILABLE"); }
     }
     private MinioClient client(long seconds) {
+        return MinioClient.builder().endpoint(config.getEndpoint()).credentials(config.getAccessKey(),config.getSecretKey())
+                .httpClient(deadlineHttp(seconds)).build();
+    }
+    private OkHttpClient deadlineHttp(long seconds) {
         long absoluteDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(Math.max(1,seconds));
-        OkHttpClient http = sharedHttp.newBuilder().callTimeout(Math.max(1,seconds),TimeUnit.SECONDS)
+        return sharedHttp.newBuilder().callTimeout(Math.max(1,seconds),TimeUnit.SECONDS)
                 .addInterceptor(chain -> {
                     // Multipart consists of several calls; they share ONE stage deadline.
                     chain.call().timeout().deadlineNanoTime(absoluteDeadline);
                     return chain.proceed(chain.request());
                 }).build();
-        return MinioClient.builder().endpoint(config.getEndpoint()).credentials(config.getAccessKey(),config.getSecretKey())
-                .httpClient(http).build();
     }
     private String key(JsonNode object) {
         String key=object.path("server_key").asText();
@@ -99,6 +112,142 @@ public class IngestionStorage {
     public GetObjectResponse open(JsonNode object) {
         try { return client(1800).getObject(GetObjectArgs.builder().bucket(bucket()).object(key(object)).build()); }
         catch (Exception error) { throw new IngestionProblem(503,"SERVICE_UNAVAILABLE"); }
+    }
+    /** Settle only after both the object and its unfinished uploads are absent. */
+    void deleteConfirmed(JsonNode object) {
+        IngestionProblem.require("DELETE_PENDING".equals(object.path("state").asText())
+                && "MINIO".equals(object.path("storage").asText()),409,"STATE_CONFLICT");
+        String objectKey=key(object);
+        String bucketName=bucket();
+        try {
+            var client = new CleanupClient(MinioAsyncClient.builder().endpoint(config.getEndpoint())
+                    .credentials(config.getAccessKey(), config.getSecretKey()).httpClient(deadlineHttp(30)).build());
+            client.requireUnversioned(bucketName);
+            client.deleteObject(bucketName, objectKey);
+            client.abortPendingUploads(bucketName, objectKey);
+            client.requireObjectAbsent(bucketName, objectKey);
+            client.requireUnversioned(bucketName);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IngestionProblem(503,"SERVICE_UNAVAILABLE");
+        } catch (IngestionProblem error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IngestionProblem(503,"SERVICE_UNAVAILABLE");
+        }
+    }
+
+    // The pinned MinIO SDK exposes multipart operations and DELETE response headers to subclasses.
+    private static final class CleanupClient extends MinioAsyncClient {
+        private static final int MAX_MULTIPART_PASSES = 4;
+        private static final int MULTIPART_PAGE_SIZE = 32;
+        private static final int MAX_MULTIPART_XML_BYTES = 128 * 1024;
+        private static final String DELETE_MARKER = "x-amz-delete-marker";
+
+        private CleanupClient(MinioAsyncClient client) {
+            super(client);
+        }
+
+        private void requireUnversioned(String bucketName) throws Exception {
+            var versioning = getBucketVersioning(GetBucketVersioningArgs.builder().bucket(bucketName).build()).get();
+            IngestionProblem.require(versioning.status() == VersioningConfiguration.Status.OFF, 503, "SERVICE_UNAVAILABLE");
+        }
+
+        private void deleteObject(String bucketName, String objectKey) throws Exception {
+            var args = RemoveObjectArgs.builder().bucket(bucketName).object(objectKey).build();
+            var empty = ImmutableMultimap.<String, String>of();
+            try (var response = executeDeleteAsync(args, empty, empty).get()) {
+                requireNoDeleteMarker(response.header(DELETE_MARKER));
+            }
+        }
+
+        private void abortPendingUploads(String bucketName, String objectKey) throws Exception {
+            var empty = ImmutableMultimap.<String, String>of();
+            for (int pass = 0; pass < MAX_MULTIPART_PASSES; pass++) {
+                var page = pendingUploads(bucketName, objectKey);
+                if (page.uploadIds().isEmpty()) {
+                    IngestionProblem.require(!page.truncated(), 503, "SERVICE_UNAVAILABLE");
+                    return;
+                }
+                for (String uploadId : page.uploadIds()) {
+                    try {
+                        abortMultipartUploadAsync(bucketName, null, objectKey, uploadId, empty, empty).get();
+                    } catch (ExecutionException error) {
+                        // An earlier cleanup or MinIO's own expiry can remove the upload first.
+                        if (!s3Error(error, "NoSuchUpload")) throw error;
+                    }
+                }
+                // Re-read the first page: a deleted upload ID may no longer be a valid continuation marker.
+            }
+            throw new IngestionProblem(503, "SERVICE_UNAVAILABLE");
+        }
+
+        private record MultipartPage(List<String> uploadIds, boolean truncated) {}
+
+        private MultipartPage pendingUploads(String bucketName, String objectKey) throws Exception {
+            var query = ImmutableMultimap.of("uploads", "", "prefix", objectKey,
+                    "max-uploads", Integer.toString(MULTIPART_PAGE_SIZE));
+            String region = getRegionAsync(bucketName, null).get();
+            try (var response = executeAsync(Method.GET, bucketName, null, region, httpHeaders(null),
+                    query, null, 0).get()) {
+                // MinIO emits empty owner/initiator metadata that the pinned SDK's Upload model rejects.
+                byte[] xml = response.body().byteStream().readNBytes(MAX_MULTIPART_XML_BYTES + 1);
+                IngestionProblem.require(xml.length <= MAX_MULTIPART_XML_BYTES, 503, "SERVICE_UNAVAILABLE");
+                var factory = DocumentBuilderFactory.newInstance();
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+                factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+                var root = factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml)).getDocumentElement();
+                IngestionProblem.require("ListMultipartUploadsResult".equals(root.getTagName())
+                        && bucketName.equals(requiredText(root, "Bucket"))
+                        && objectKey.equals(requiredText(root, "Prefix")), 503, "SERVICE_UNAVAILABLE");
+                String truncated = requiredText(root, "IsTruncated");
+                IngestionProblem.require("true".equals(truncated) || "false".equals(truncated), 503, "SERVICE_UNAVAILABLE");
+                var uploads = root.getElementsByTagName("Upload");
+                IngestionProblem.require(uploads.getLength() <= MULTIPART_PAGE_SIZE, 503, "SERVICE_UNAVAILABLE");
+                List<String> uploadIds = new ArrayList<>();
+                for (int i = 0; i < uploads.getLength(); i++) {
+                    var upload = (Element) uploads.item(i);
+                    if (objectKey.equals(requiredText(upload, "Key"))) uploadIds.add(requiredText(upload, "UploadId"));
+                }
+                return new MultipartPage(uploadIds, "true".equals(truncated));
+            }
+        }
+
+        private static String requiredText(Element element, String tag) {
+            var fields = element.getElementsByTagName(tag);
+            IngestionProblem.require(fields.getLength() == 1, 503, "SERVICE_UNAVAILABLE");
+            String value = fields.item(0).getTextContent();
+            IngestionProblem.require(value != null && !value.isBlank(), 503, "SERVICE_UNAVAILABLE");
+            return value;
+        }
+
+        private void requireObjectAbsent(String bucketName, String objectKey) throws Exception {
+            try {
+                statObject(StatObjectArgs.builder().bucket(bucketName).object(objectKey).build()).get();
+            } catch (ExecutionException error) {
+                if (!s3Error(error, "NoSuchKey")) throw error;
+                var missing = (ErrorResponseException) storageCause(error);
+                requireNoDeleteMarker(missing.response().header(DELETE_MARKER));
+                return;
+            }
+            throw new IngestionProblem(503, "SERVICE_UNAVAILABLE");
+        }
+
+        private static boolean s3Error(ExecutionException error, String code) {
+            return storageCause(error) instanceof ErrorResponseException s3 && code.equals(s3.errorResponse().code());
+        }
+
+        private static Throwable storageCause(Throwable error) {
+            while ((error instanceof ExecutionException || error instanceof CompletionException) && error.getCause() != null) {
+                error = error.getCause();
+            }
+            return error;
+        }
+
+        private static void requireNoDeleteMarker(String marker) {
+            IngestionProblem.require(marker == null || "false".equalsIgnoreCase(marker), 503, "SERVICE_UNAVAILABLE");
+        }
     }
     /** Called only after image/owner/permanent-reference authorization; does not widen legacy key access. */
     public FilePresignedUrlVO presignedTiff(JsonNode object) {

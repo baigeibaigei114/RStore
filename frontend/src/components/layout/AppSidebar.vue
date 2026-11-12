@@ -15,13 +15,24 @@
       background-color="#101828"
       text-color="#cbd5e1"
       active-text-color="#ffffff"
+      :default-openeds="advancedActive ? ['advanced'] : []"
     >
-      <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+      <el-menu-item v-for="item in primaryItems" :key="item.path" :index="item.path">
         <el-icon>
           <component :is="item.icon" />
         </el-icon>
         <template #title>{{ item.title }}</template>
       </el-menu-item>
+      <el-sub-menu index="advanced">
+        <template #title>
+          <el-icon><Operation /></el-icon>
+          <span>进阶功能</span>
+        </template>
+        <el-menu-item v-for="item in advancedItems" :key="item.path" :index="item.path">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <template #title>{{ item.title }}</template>
+        </el-menu-item>
+      </el-sub-menu>
     </el-menu>
   </el-aside>
 </template>
@@ -37,24 +48,31 @@ import {
   UploadFilled,
   Plus,
   ChatDotRound,
+  Operation,
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const route = useRoute()
 const appStore = useAppStore()
 
-const menuItems = [
+const primaryItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
-  { path: '/agent', title: 'NDVI助手', icon: ChatDotRound },
-  { path: '/images', title: '影像资产', icon: Files },
-  { path: '/images/upload', title: '影像上传', icon: UploadFilled },
-  { path: '/ingestion', title: '产品入库', icon: UploadFilled },
-  { path: '/map', title: '地图浏览', icon: MapLocation },
-  { path: '/spatial-query', title: '空间查询', icon: Location },
-  { path: '/tasks', title: '任务管理', icon: DataAnalysis },
-  { path: '/tasks/create', title: '创建任务', icon: Plus },
+  { path: '/images', title: '影像', icon: Files },
+  { path: '/tasks', title: '任务', icon: DataAnalysis },
 ]
 
-const activeMenu = computed(() => String(route.meta.activeMenu || route.path))
+const advancedItems = [
+  { path: '/map', title: '地图与区域', icon: MapLocation },
+  { path: '/images/upload', title: '影像上传', icon: UploadFilled },
+  { path: '/ingestion', title: '产品入库', icon: UploadFilled },
+  ...(legacyAgentWrites ? [{ path: '/agent', title: 'NDVI助手', icon: ChatDotRound }] : []),
+  { path: '/spatial-query', title: '空间查询', icon: Location },
+  { path: '/tasks/create', title: '其他分析任务', icon: Plus },
+]
+
+const activeMenu = computed(() => route.path === '/tasks/create' && route.query.mode === 'region-ndvi'
+  ? '/tasks' : String(route.meta.activeMenu || route.path))
+const advancedActive = computed(() => advancedItems.some(item => item.path === activeMenu.value))
 </script>

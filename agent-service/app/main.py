@@ -13,7 +13,7 @@ from app.embedding import BgeEmbedding
 from app.errors import AgentError
 from app.knowledge.store import PgKnowledgeStore
 from app.model import JsonModel, strict_json
-from app.schemas import AnswerRequest, DecisionRequest, ExplanationRequest
+from app.schemas import AnswerRequest, DecisionRequest, ExplanationRequest, ResultAnswerRequest
 from app.service import AgentService
 
 logger = logging.getLogger("ndvi_agent")
@@ -138,6 +138,10 @@ def create_app(settings=None, service=None):
     @app.post("/internal/v1/explanations")
     def explanations(body: ExplanationRequest, request: Request):
         return result(request, request.app.state.service.explanation(body))
+
+    @app.post("/internal/v1/result-answers")
+    def result_answers(body: ResultAnswerRequest, request: Request):
+        return result(request, request.app.state.service.result_answer(body))
 
     return app
 

@@ -23,7 +23,7 @@
 
 已登记影像可以通过既有详情/下载入口使用。作业历史在资产删除或准入变化后仍保留；该资产不能再被复用。失败标准化需要用户明确重试，原包到期后可重传同一ZIP再绑定重试；相同处理意图不会重复创建成功资产。此流程不自动调用Agent或提交NDVI。
 
-启用地图发布后，作业独立显示发布状态。影像通过准入且发布成功后，所有者可查看真彩色地图并获取原生 WCS。发布失败可单独重试，无需重传原包或重跑标准化。完整到期与孤儿清理仍属后续工作。
+标准化通过后先登记私有资产，地图发布独立显示状态。发布完成后可打开真彩色地图；发布失败可单独重试。创建 NDVI 任务时，选择已登记的影像和原监测区域后手动提交。
 
 ## 启用与运行
 
@@ -42,8 +42,4 @@ Worker和Java本地原生验证需要Linux运行时；使用根Dockerfile/Compos
 
 处理使用持久工作意图、尝试租约与共享COMPUTE槽。租约过期不代表进程已经停止；无法确认停止或事务结果时保留恢复状态，不直接释放名额。原包有效期按7天校验，已确认活动工作保留引用；磁盘、临时空间、资产配额和执行时间均有有界拒绝限制，应在启用目标上另行核实容量。
 
-## 启用私有地图发布
-
-1. 沿用上述数据库迁移。GeoServer 只接入内部地图网络，Java 与 GeoServer 共享栅格目录，分别可写和只读。启用前核对硬链接、目录权限、实际网络与磁盘容量。
-2. 通过部署环境配置独立的 `GEOSERVER_INGESTION_READ_USERNAME/PASSWORD` 和 `GEOSERVER_INGESTION_PUBLISH_USERNAME/PASSWORD`。读取账号仅使用 `ROLE_INGEST_PROXY`，发布账号使用受控管理权限。全新隔离实例可参考 [ACL 初始化工具](../../docker/geoserver/ingestion/configure.py)。现有实例应先备份并审查已有 ACL。
-3. 核实匿名及普通用户无法读取私有图层，专用读账号无法访问管理 REST，旧图层代理正常后，将 `INGESTION_ENABLED`、`INGESTION_PUBLICATION_ENABLED` 和 `INGESTION_MAP_BOUNDARY_VERIFIED` 设为 `true`。发布与边界开关默认关闭。
+启用地图发布需设置 `INGESTION_PUBLICATION_ENABLED` 和 `INGESTION_MAP_BOUNDARY_VERIFIED`，并确认 GeoServer 处于内部网络，配置独立的发布账号、代理读账号和共享栅格卷。清理使用未开启版本控制的私有入库桶，存储确认对象已删除后才释放配额。清理账号需能查询桶版本状态、列出并中止未完成的分片上传，同时确认对象实际不存在。
