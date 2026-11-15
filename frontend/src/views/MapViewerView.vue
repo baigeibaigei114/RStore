@@ -36,6 +36,18 @@
         <aside v-show="panelOpen" class="work-panel" :aria-label="modeTitle">
           <header class="panel-heading"><div><span>地图工作</span><h3>{{ modeTitle }}</h3></div><el-button text :icon="Close" aria-label="收起工作面板" @click="panelOpen = false" /></header>
           <div class="panel-content">
+            <section v-if="mode === 'results' && loadedLayer?.taskType === 'BUILDING_CHANGE_DETECTION'" class="change-layers">
+              <el-radio-group :model-value="period" aria-label="建筑物变化检测图层" @change="changeLayer">
+                <el-radio-button value="before">前期</el-radio-button>
+                <el-radio-button value="after">后期</el-radio-button>
+                <el-radio-button value="change">变化</el-radio-button>
+              </el-radio-group>
+              <ul v-if="period === 'change'" class="change-legend" aria-label="变化图例">
+                <li><span class="changed"></span>预测变化</li>
+                <li><span class="unchanged"></span>未标记变化</li>
+                <li><span class="unavailable"></span>不可比较（透明）</li>
+              </ul>
+            </section>
             <MapResultPanel v-show="mode === 'results'" :task-id="routeTaskId" :image-id="routeImageId" :initial-task-type="routeTaskType" :loaded-id="loadedLayer?.id" @select="loadResult" @all="router.replace('/map')" />
             <MonitoringRegionPanel v-show="mode === 'regions'" :map="map" :active="panelOpen && mode === 'regions'" :image-id="loadedLayer?.imageId" />
             <MapAssetPanel v-show="mode === 'images'" :active="panelOpen && mode === 'images'" />
@@ -77,10 +89,12 @@ const modeTitle = computed(() => modes.find(item => item.key === mode.value)!.la
 const route = useRoute(), router = useRouter()
 const routeImageId = computed(() => positiveId(route.query.imageId))
 const routeTaskId = computed(() => positiveId(route.query.taskId))
-const routeTaskType = computed(() => typeof route.query.taskType === 'string' && ['NDVI', 'NDWI', 'CHANGE_DETECTION'].includes(route.query.taskType) ? route.query.taskType : '')
+const routeTaskType = computed(() => typeof route.query.taskType === 'string' && ['NDVI', 'NDWI', 'CHANGE_DETECTION', 'BUILDING_CHANGE_DETECTION'].includes(route.query.taskType) ? route.query.taskType : '')
 const routeEvidence = computed(() => readResultEvidence(route.query.resultVersion, route.query.section))
 const mapTarget = ref<HTMLElement>(), loadedLayer = ref<LayerListItem>(), locating = ref(false)
 const opacity = ref(100), baseMapVisible = ref(true)
+type DetectionLayer = 'before' | 'after' | 'change'
+const period = ref<DetectionLayer>('change')
 const { map, initMap, addWmsLayer, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView, wmsFailed } = useOlMap({ center: [104, 35], zoom: 5 })
 let locationRequest = 0, resize: ResizeObserver | undefined
 const evidenceStatus = ref('')
@@ -90,11 +104,21 @@ const evidenceLayer = new VectorLayer({ source: evidenceSource, zIndex: 20,
 
 function openMode(next: WorkMode) { mode.value = next; panelOpen.value = true }
 function loadResult(result: LayerListItem) {
+  period.value = 'change'
+  if (showLayer(result, period.value)) loadedLayer.value = { ...result }
+}
+function changeLayer(value: unknown) {
+  if (!loadedLayer.value || (value !== 'before' && value !== 'after' && value !== 'change')) return
+  if (showLayer(loadedLayer.value, value)) period.value = value
+}
+function showLayer(result: LayerListItem, selected: DetectionLayer) {
   const name = result.qualifiedLayerName || result.layerName
-  if (!name) { ElMessage.warning('这份结果暂时无法显示，请换一份或稍后重试。'); return }
-  addWmsLayer({ url: getLayerProxyWmsUrl(result), layers: name, opacity: opacity.value / 100,
+  if (!name) { ElMessage.warning('这份结果暂时无法显示，请换一份或稍后重试。'); return false }
+  const url = getLayerProxyWmsUrl(result)
+  addWmsLayer({ url: selected === 'change' ? url : `${url}${url.includes('?') ? '&' : '?'}period=${selected}`,
+    layers: name, opacity: opacity.value / 100,
     authToken: localStorage.getItem(TOKEN_KEY) || undefined })
-  loadedLayer.value = { ...result }
+  return true
 }
 
 watch([loadedLayer, routeTaskId, routeEvidence, map], async ([result, taskId, requested, currentMap], _, onCleanup) => {
@@ -163,6 +187,13 @@ onBeforeUnmount(() => { locationRequest++; evidenceSource.clear(); resize?.disco
 </script>
 
 <style scoped>
+.change-layers { margin-bottom: 16px; }
+.change-legend { display: grid; gap: 6px; list-style: none; padding: 0; font-size: 12px; }
+.change-legend li { display: flex; align-items: center; gap: 8px; }
+.change-legend span { width: 13px; height: 13px; display: inline-block; border: 1px solid #9da79e; }
+.changed { background: #d03832; }
+.unchanged { background: #e3e8e2; }
+.unavailable { background: repeating-conic-gradient(#fff 0 25%, #c9cfca 0 50%) 0 0 / 6px 6px; }
 .map-page { --el-color-primary: #28634c; --el-color-primary-light-3: #62947a; --el-color-primary-light-9: #eff6f0; color: #263e32; }
 .map-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }.map-heading h2 { margin: 0; font-size: 23px; letter-spacing: -.5px; font-weight: 600; }.map-heading p { margin: 7px 0 0; color: #748479; font-size: 13px; }
 .map-workspace { height: calc(100dvh - 180px); min-height: 490px; display: flex; flex-direction: column; border: 1px solid #d7e0da; border-radius: 12px; overflow: hidden; background: #fff; }

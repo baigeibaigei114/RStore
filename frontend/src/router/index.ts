@@ -10,10 +10,9 @@ import SpatialQueryView from '@/views/SpatialQueryView.vue'
 import TaskCreateView from '@/views/TaskCreateView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
 import TaskListView from '@/views/TaskListView.vue'
-import AgentView from '@/views/AgentView.vue'
+import ImagingAssistantView from '@/views/ImagingAssistantView.vue'
 import IngestionView from '@/views/IngestionView.vue'
 import { useAuthStore } from '@/stores/auth'
-import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -29,8 +28,8 @@ const router = createRouter({
       component: AppLayout,
       redirect: '/dashboard',
       children: [
-        { path: 'agent', name: 'Agent', component: AgentView, meta: {
-          title: legacyAgentWrites ? 'NDVI助手' : '历史解读', activeMenu: legacyAgentWrites ? '/agent' : '/tasks',
+        { path: 'agent', name: 'Agent', component: ImagingAssistantView, meta: {
+          title: '影像助手', activeMenu: '/agent',
         } },
         { path: 'ingestion', name: 'SafeIngestion', component: IngestionView, meta: { title: '产品入库', activeMenu: '/ingestion' } },
         {
@@ -79,7 +78,9 @@ const router = createRouter({
           path: 'tasks/create',
           name: 'TaskCreate',
           component: TaskCreateView,
-          meta: { title: '创建任务', activeMenu: '/tasks/create' },
+          beforeEnter: to => ['mode', 'taskType', 'type', 'imageId', 'monitoringRegionId'].some(key => to.query[key])
+            ? true : { path: '/tasks', query: to.query.tab === 'model' ? { tab: 'model' } : {} },
+          meta: { title: '创建任务', activeMenu: '/tasks' },
         },
         {
           path: 'tasks/:id',

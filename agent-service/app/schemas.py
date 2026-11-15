@@ -159,6 +159,19 @@ ResultTopic = Literal["SUMMARY", "MEAN", "RANGE", "VALID_PIXELS", "VALID_RATIO",
 ResultSection = Literal["NW", "NE", "SW", "SE"]
 
 
+class PreparationRequest(StrictModel):
+    schemaVersion: Literal[1]
+    goal: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class PreparationIntent(StrictModel):
+    kind: Literal["REGION_NDVI", "UNSUPPORTED"]
+    regionName: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)] | None = None
+    imageName: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
+    startDate: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+    endDate: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+
+
 class ResultAnswerRequest(StrictModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
     algorithm: Literal["NDVI", "NDWI", "CHANGE_DETECTION"] | None = None

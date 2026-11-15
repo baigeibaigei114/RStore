@@ -2,6 +2,8 @@ package com.remotesensing.platform.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remotesensing.platform.agent.AnalysisPreparation;
+import com.remotesensing.platform.common.BuildingChange;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.ResultMetadataValidator;
 import com.remotesensing.platform.common.InputAdmission;
@@ -13,6 +15,7 @@ import com.remotesensing.platform.common.enums.ImageStatus;
 import com.remotesensing.platform.common.enums.ResultFileStatus;
 import com.remotesensing.platform.common.enums.TaskClaimAction;
 import com.remotesensing.platform.common.enums.TaskStatus;
+import com.remotesensing.platform.common.enums.TaskGroup;
 import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.properties.MinioProperties;
 import com.remotesensing.platform.config.properties.RabbitTaskProperties;
@@ -249,6 +252,10 @@ public class RsTaskServiceImpl implements RsTaskService {
     public RsTaskClaimVO claim(Long taskId) {
         if (ingestionSlots == null || !ingestionSlots.enabled())
             return transactionTemplate.execute(status -> claimInTransaction(taskId));
+        RsTask pending = taskMapper.selectById(taskId);
+        if (pending != null && BuildingChange.TYPE.equals(pending.getTaskType())) {
+            return transactionTemplate.execute(status -> claimInTransaction(taskId));
+        }
         String executor = ingestionSlots.requestExecutor();
         var permit = ingestionSlots.reserve("COMPUTE", "NDVI:" + taskId, executor, 900);
         if (permit == null) return new RsTaskClaimVO(false, "BUSY", null, "计算服务忙或恢复中", null);
@@ -360,14 +367,34 @@ public class RsTaskServiceImpl implements RsTaskService {
      */
     @Override
     public PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize) {
+        return page(pageNum, pageSize, null);
+    }
+
+    @Override
+    public PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize, TaskGroup group) {
         int currentPageNum = normalizePageNum(pageNum);
         int currentPageSize = normalizePageSize(pageSize);
         int offset = (currentPageNum - 1) * currentPageSize;
 
         String currentUserId = currentUserContext.getCurrentUserId();
-        List<RsTaskListVO> records = taskMapper.selectPage(offset, currentPageSize, currentUserId);
-        long total = taskMapper.count(currentUserId);
+        List<RsTaskListVO> records = group == null ? taskMapper.selectPage(offset, currentPageSize, currentUserId)
+                : taskMapper.selectPageByGroup(offset, currentPageSize, currentUserId, group.name());
+        long total = group == null ? taskMapper.count(currentUserId) : taskMapper.countByGroup(currentUserId, group.name());
         return new PageResult<>(records, total, currentPageNum, currentPageSize);
+    }
+
+    @Override
+    public BuildingChangeOptions buildingChangeOptions() {
+        if (!rabbitTaskProperties.isBuildingChangeEnabled()) return new BuildingChangeOptions(false, null, null);
+        Long before = rabbitTaskProperties.getBuildingChangeSampleBefore();
+        Long after = rabbitTaskProperties.getBuildingChangeSampleAfter();
+        String owner = currentUserContext.getCurrentUserId();
+        if (before == null || after == null || before.equals(after)
+                || imageMapper.selectAccessibleById(before, owner) == null
+                || imageMapper.selectAccessibleById(after, owner) == null) {
+            return new BuildingChangeOptions(true, null, null);
+        }
+        return new BuildingChangeOptions(true, before, after);
     }
 
     /**
@@ -416,9 +443,35 @@ public class RsTaskServiceImpl implements RsTaskService {
                 return new PreparedTask(existingTask, existingTask.getOutputObjectKey(), null, false);
             }
         }
+        boolean checkImage = submitDTO.getExpectedImageIdentity() != null;
+        Integer checkRegionVersion = submitDTO.getExpectedRegionVersion();
+        if ((checkImage || checkRegionVersion != null)
+                && (submitDTO.getTaskType() != RemoteSensingTaskMessage.TaskType.NDVI || submitDTO.getMonitoringRegionId() == null)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "素材版本检查仅适用于区域 NDVI");
+        }
+        // A checked draft uses the same locked image for identity, admission and outbox creation.
+        if (lockedImage == null && checkImage) {
+            lockedImage = imageMapper.lockAccessibleById(submitDTO.getImageId(), currentUserId);
+            if (lockedImage == null || !matchesImageIdentity(lockedImage, submitDTO.getExpectedImageIdentity())) {
+                throw new BusinessException(ResultCode.CONFLICT.getCode(), "影像已更新或不可用，请重新核对影像后提交");
+            }
+        }
         // 第一步：校验影像是否存在且当前用户有访问权限。影像按用户隔离，不可越权提交。
-        RsImage image = lockedImage == null
-                ? imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId) : lockedImage;
+        Map<String, Object> taskParams = ensureMutableParams(submitDTO);
+        boolean buildingChange = submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.BUILDING_CHANGE_DETECTION;
+        RsImage image;
+        if (buildingChange) {
+            if (!rabbitTaskProperties.isBuildingChangeEnabled()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "建筑物变化检测暂未启用");
+            }
+            image = BuildingChange.prepare(imageMapper, currentUserId, submitDTO.getImageId(),
+                    requiredLongParam(taskParams, "beforeImageId"), taskParams);
+            submitDTO.setImageId(image.getId());
+        } else {
+            image = lockedImage == null
+                    ? imageMapper.selectAccessibleById(submitDTO.getImageId(), currentUserId) : lockedImage;
+            taskParams.remove(BuildingChange.SNAPSHOT);
+        }
         if (image == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像不存在或无权访问");
         }
@@ -426,7 +479,6 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (!ImageStatus.fromDb(image.getStatus()).canSubmitTask()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "只有 READY 状态的影像可以提交处理任务");
         }
-        Map<String, Object> taskParams = ensureMutableParams(submitDTO);
         taskParams.remove(TaskSubmissionIntent.FIELD);
         // 该字段只能由服务器生成，防止客户端伪造追溯信息。
         taskParams.remove("inputSnapshot");
@@ -439,15 +491,17 @@ public class RsTaskServiceImpl implements RsTaskService {
         }
         if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.CHANGE_DETECTION) {
             validateAndFillChangeDetectionParams(image, currentUserId, taskParams);
-        } else {
+        } else if (!buildingChange) {
             imageBandCapabilityService.validateAndFillTaskParams(image, submitDTO.getTaskType(), taskParams);
         }
 
         if (submitDTO.getTaskType() == RemoteSensingTaskMessage.TaskType.NDVI) {
             taskParams.put("inputSnapshot", InputAdmission.snapshot(image.getMetadataJson(), image.getId(), taskParams));
             if (submitDTO.getMonitoringRegionId() != null) {
-                taskParams.put("regionSnapshot", lockedRegion == null
-                        ? monitoringRegions.snapshot(submitDTO.getMonitoringRegionId()) : lockedRegion.deepCopy());
+                Long regionId = submitDTO.getMonitoringRegionId();
+                var region = lockedRegion != null ? lockedRegion.deepCopy() : checkRegionVersion == null
+                        ? monitoringRegions.snapshot(regionId) : monitoringRegions.snapshotForSubmission(regionId, checkRegionVersion);
+                taskParams.put("regionSnapshot", region);
             }
         }
 
@@ -471,6 +525,14 @@ public class RsTaskServiceImpl implements RsTaskService {
                 buildMessage(submitDTO, image, task.getId(), outputObjectKey)
         );
         return new PreparedTask(task, outputObjectKey, outboxId, true);
+    }
+
+    private boolean matchesImageIdentity(RsImage image, String expected) {
+        try {
+            return AnalysisPreparation.imageIdentity(image).equals(expected);
+        } catch (BusinessException changed) {
+            return false;
+        }
     }
 
     private RsTaskSubmitVO resolveDuplicateSubmit(RsTaskSubmitDTO submitDTO, JsonNode intent, RuntimeException exception) {
@@ -609,7 +671,7 @@ public class RsTaskServiceImpl implements RsTaskService {
     private Long requiredLongParam(Map<String, Object> params, String paramName) {
         Object value = params.get(paramName);
         if (value == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "CHANGE_DETECTION 需要 params." + paramName);
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "双期变化检测需要 params." + paramName);
         }
         if (value instanceof Number number) {
             return number.longValue();
@@ -694,6 +756,21 @@ public class RsTaskServiceImpl implements RsTaskService {
             return new RsTaskClaimVO(false, TaskClaimAction.ALREADY_RUNNING.dbValue(), task.getStatus(), "任务正在运行，跳过本次重复投递", task.getOutputObjectKey());
         }
 
+        if (BuildingChange.TYPE.equals(task.getTaskType())) {
+            try {
+                BuildingChange.validateClaim(imageMapper, task.getOwnerId(), task.getImageId(), task.getParams());
+            } catch (BusinessException invalidSource) {
+                String reason = invalidSource.getMessage();
+                taskMapper.markFailedIfActive(taskId, reason);
+                var failure = new RsTaskStatusUpdateDTO();
+                failure.setStatus(TaskStatus.FAILED.dbValue());
+                insertStatusLog(task, TaskStatus.FAILED.dbValue(), failure, reason);
+                releaseImageIfTaskFinished(task, TaskStatus.FAILED);
+                return new RsTaskClaimVO(false, TaskClaimAction.ALREADY_FINISHED.dbValue(),
+                        TaskStatus.FAILED.dbValue(), reason, task.getOutputObjectKey());
+            }
+        }
+
         // CAS 式抢占：只有 status 仍然等于当前值时才更新为 RUNNING。
         String attemptId = UUID.randomUUID().toString();
         String outputKey = "result/attempts/task_" + taskId + "/" + attemptId + ".tif";
@@ -749,7 +826,7 @@ public class RsTaskServiceImpl implements RsTaskService {
         if (currentStatus == TaskStatus.RUNNING && task.getAttemptId() == null && task.getLeaseUntil() != null) {
             throw new BusinessException(409, "历史执行缺少 attemptId，等待回收后重新提交");
         }
-        if (ingestionSlots != null && !currentStatus.isTerminal())
+        if (ingestionSlots != null && !currentStatus.isTerminal() && !BuildingChange.TYPE.equals(task.getTaskType()))
             ingestionSlots.guardNdvi(taskId, updateDTO.getSlotFence());
         if (task.getAttemptId() != null) {
             if (!task.getAttemptId().equals(updateDTO.getAttemptId())) {

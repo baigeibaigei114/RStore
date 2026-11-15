@@ -91,8 +91,10 @@ import { canApplyView, PendingActionStore, RequestEpoch, resolvedByQuery, should
 import AgentEvidence from '@/components/agent/AgentEvidence.vue'
 import AgentMetrics from '@/components/agent/AgentMetrics.vue'
 import AgentSteps from '@/components/agent/AgentSteps.vue'
-import { legacyAgentWrites } from '@/utils/legacyAgent'
+import { legacyAgentWrites as legacyWritesConfigured } from '@/utils/legacyAgent'
 
+const props = defineProps<{ readOnly?: boolean }>()
+const legacyAgentWrites = !props.readOnly && legacyWritesConfigured
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const mode = ref<'analysis' | 'knowledge'>('analysis'), goal = ref(''), question = ref(''), extra = ref('')
 const execution = ref<AgentExecution | null>(null), answer = ref<AgentAnswer | null>(null), steps = ref<AgentStep[]>([])

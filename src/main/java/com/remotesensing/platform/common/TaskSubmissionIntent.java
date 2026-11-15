@@ -24,6 +24,8 @@ public final class TaskSubmissionIntent {
         intent.set("imageId", JSON.valueToTree(dto.getImageId()));
         intent.set("taskType", JSON.valueToTree(dto.getTaskType()));
         intent.set("monitoringRegionId", JSON.valueToTree(dto.getMonitoringRegionId()));
+        if (dto.getExpectedRegionVersion() != null) intent.put("expectedRegionVersion", dto.getExpectedRegionVersion());
+        if (dto.getExpectedImageIdentity() != null) intent.put("expectedImageIdentity", dto.getExpectedImageIdentity());
         ObjectNode params = dto.getParams() == null
                 ? JSON.createObjectNode() : JSON.valueToTree(dto.getParams());
         params.remove(SERVER_FIELDS);

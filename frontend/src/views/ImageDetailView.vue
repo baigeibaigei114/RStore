@@ -8,6 +8,7 @@
 
     <div class="detail-actions">
       <el-button type="primary" :disabled="!image" @click="router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId } })">分析这景影像</el-button>
+      <RouterLink to="/agent">影像助手</RouterLink>
       <el-button @click="router.push('/images')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="fetchDetail">刷新</el-button>
       <el-button :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">

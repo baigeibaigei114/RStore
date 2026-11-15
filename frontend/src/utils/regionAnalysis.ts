@@ -4,6 +4,12 @@ import type { TaskSubmitParams } from '@/types/task'
 export const DEMO_IMAGE_NAME = '示例影像 · 鄱阳湖 2024-11-29'
 export const DEMO_REGION_NAME = '示例区域 · 250 × 250 像素'
 
+const captureDateFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' })
+export function ndviCaptureDate(value?: string) {
+  const date = value ? new Date(value) : undefined
+  return date && Number.isFinite(date.getTime()) ? captureDateFormat.format(date) : '未记录采集日期'
+}
+
 export function positiveId(value: unknown): number | undefined {
   const id = Number(value)
   return Number.isSafeInteger(id) && id > 0 ? id : undefined

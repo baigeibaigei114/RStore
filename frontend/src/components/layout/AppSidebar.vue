@@ -46,13 +46,11 @@ import {
   Location,
   MapLocation,
   UploadFilled,
-  Plus,
   ChatDotRound,
   Operation,
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { legacyAgentWrites } from '@/utils/legacyAgent'
 
 const route = useRoute()
 const appStore = useAppStore()
@@ -61,18 +59,16 @@ const primaryItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
   { path: '/images', title: '影像', icon: Files },
   { path: '/tasks', title: '任务', icon: DataAnalysis },
+  { path: '/agent', title: '影像助手', icon: ChatDotRound },
 ]
 
 const advancedItems = [
   { path: '/map', title: '地图与区域', icon: MapLocation },
   { path: '/images/upload', title: '影像上传', icon: UploadFilled },
   { path: '/ingestion', title: '产品入库', icon: UploadFilled },
-  ...(legacyAgentWrites ? [{ path: '/agent', title: 'NDVI助手', icon: ChatDotRound }] : []),
   { path: '/spatial-query', title: '空间查询', icon: Location },
-  { path: '/tasks/create', title: '其他分析任务', icon: Plus },
 ]
 
-const activeMenu = computed(() => route.path === '/tasks/create' && route.query.mode === 'region-ndvi'
-  ? '/tasks' : String(route.meta.activeMenu || route.path))
+const activeMenu = computed(() => String(route.meta.activeMenu || route.path))
 const advancedActive = computed(() => advancedItems.some(item => item.path === activeMenu.value))
 </script>

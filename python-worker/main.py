@@ -13,6 +13,9 @@ Worker 入口模块 -- 应用启动入口，负责组装各依赖并启动 Rabbi
   - 通过 if __name__ == "__main__" 守卫确保模块被导入时不会意外执行。
 """
 
+import os
+from pathlib import Path
+
 from clients.callback_client import CallbackClient
 from clients.minio_client import MinioStorageClient
 from config import load_settings
@@ -50,10 +53,16 @@ def main() -> None:
             storage_client, settings.worker.temp_dir
         ),
     }
+    if os.environ.get("WORKER_TASK_PROFILE") == "tinycd":
+        from processors.tinycd import BuildingChangeProcessor, TinyCD
+
+        if settings.worker.ingestion_enabled or settings.rabbitmq.queue == "rs.task.queue":
+            raise RuntimeError("TinyCD requires a dedicated queue and worker")
+        model = TinyCD(Path(os.environ["TINYCD_WEIGHTS"]))
+        processors = {"BUILDING_CHANGE_DETECTION": BuildingChangeProcessor(storage_client, settings.worker.temp_dir, model)}
 
     consumer = RabbitMqConsumer(settings.rabbitmq, callback_client, processors)
     if settings.worker.ingestion_enabled:
-        import os
         if os.name != "posix":
             raise RuntimeError("SAFE ingestion requires the supported Linux Worker")
         callback_client.runtime_ready(capabilities=["standardize-v1"])

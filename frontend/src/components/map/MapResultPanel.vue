@@ -11,6 +11,7 @@
         <el-option label="植被绿度" value="NDVI" />
         <el-option label="水体指数" value="NDWI" />
         <el-option label="地表变化" value="CHANGE_DETECTION" />
+        <el-option label="建筑物变化检测" value="BUILDING_CHANGE_DETECTION" />
       </el-select>
       <el-button link :loading="loading" @click="fetchResults(false)">刷新</el-button>
     </div>

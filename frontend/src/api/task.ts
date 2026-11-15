@@ -21,6 +21,11 @@ export function createTaskApi(params: TaskSubmitParams, silentError = false) {
   return request.post<unknown, TaskSubmitResult>('/tasks', params, { silentError })
 }
 
+export function getBuildingChangeOptionsApi(signal?: AbortSignal) {
+  return request.get<unknown, { enabled: boolean; beforeImageId?: number; afterImageId?: number }>(
+    '/tasks/building-change/options', { silentError: true, signal })
+}
+
 /**
  * 分页查询任务列表接口
  * 按分页参数获取当前用户的任务列表

@@ -24,6 +24,12 @@ public class RabbitTaskProperties {
     /** 路由键，用于将消息从交换器路由到主队列。 */
     private String routingKey;
 
+    private String buildingChangeQueue = "rs.task.building-change.queue";
+    private String buildingChangeRoutingKey = "rs.task.building-change";
+    private boolean buildingChangeEnabled;
+    private Long buildingChangeSampleBefore;
+    private Long buildingChangeSampleAfter;
+
     /** 死信交换器名称，超过重试次数的消息被转发至此。 */
     private String deadLetterExchange;
 

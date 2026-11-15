@@ -309,6 +309,7 @@ function taskTypeText(type: TaskType) {
     NDVI: '植被指数',
     NDWI: '水体指数',
     CHANGE_DETECTION: '变化检测',
+    BUILDING_CHANGE_DETECTION: '建筑物变化检测',
   }
   return map[type] || type
 }

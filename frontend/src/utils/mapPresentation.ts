@@ -2,7 +2,7 @@ import type { LayerListItem } from '@/types/layer'
 import type { TaskDetail, TaskResultFile } from '@/types/task'
 
 export function mapAnalysisLabel(type?: string) {
-  return ({ NDVI: '植被绿度', NDWI: '水体指数', CHANGE_DETECTION: '地表变化' } as Record<string, string>)[type || ''] || '分析结果'
+  return ({ NDVI: '植被绿度', NDWI: '水体指数', CHANGE_DETECTION: '地表变化', BUILDING_CHANGE_DETECTION: '建筑物变化检测' } as Record<string, string>)[type || ''] || '分析结果'
 }
 
 export function mapResultTitle(result: LayerListItem) {

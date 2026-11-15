@@ -78,6 +78,10 @@ app:
 
 rabbitmq:
   remote-sensing-task:
+    building-change-enabled: ${TINYCD_ENABLED:false}
+    building-change-queue: ${TINYCD_QUEUE:rs.task.building-change.queue}
+    building-change-sample-before: ${TINYCD_SAMPLE_BEFORE:}
+    building-change-sample-after: ${TINYCD_SAMPLE_AFTER:}
     exchange: rs.task.exchange
     queue: rs.task.queue
     routing-key: rs.task.submit

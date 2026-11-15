@@ -164,6 +164,11 @@ public class MinioServiceImpl implements MinioService {
      */
     @Override
     public void downloadObject(String objectKey, Path targetPath) {
+        downloadObject(minioProperties.getBucketName(), objectKey, targetPath);
+    }
+
+    @Override
+    public void downloadObject(String bucket, String objectKey, Path targetPath) {
         if (objectKey == null || objectKey.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 不能为空");
         }
@@ -171,7 +176,7 @@ public class MinioServiceImpl implements MinioService {
             // 确保父目录存在，避免 downloadObject 因目录不存在而失败。
             Files.createDirectories(targetPath.getParent());
             minioClient.downloadObject(DownloadObjectArgs.builder()
-                    .bucket(minioProperties.getBucketName())
+                    .bucket(bucket)
                     .object(objectKey)
                     .filename(targetPath.toAbsolutePath().toString())
                     .build());

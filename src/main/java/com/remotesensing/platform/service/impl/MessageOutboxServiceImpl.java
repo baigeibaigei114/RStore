@@ -99,7 +99,8 @@ public class MessageOutboxServiceImpl implements MessageOutboxService {
         outbox.setAggregateType(AGGREGATE_TYPE_TASK);
         outbox.setAggregateId(taskId);
         outbox.setExchangeName(rabbitTaskProperties.getExchange());
-        outbox.setRoutingKey(rabbitTaskProperties.getRoutingKey());
+        outbox.setRoutingKey(message.getTaskType() == RemoteSensingTaskMessage.TaskType.BUILDING_CHANGE_DETECTION
+                ? rabbitTaskProperties.getBuildingChangeRoutingKey() : rabbitTaskProperties.getRoutingKey());
         outbox.setPayload(toJson(message));
         outbox.setStatus(MessageOutboxStatus.PENDING.dbValue());
         outbox.setRetryCount(0);

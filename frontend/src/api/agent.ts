@@ -2,6 +2,39 @@ import request from '@/api/request'
 import type { PageResult } from '@/types/api'
 import type { AgentAnswer, AgentExecution, AgentStep, PendingAction } from '@/types/agent'
 
+interface PreparationImage { id: number; name: string; captureDate: string | null }
+interface PreparationRegion { id: number; name: string; version: number }
+export interface AnalysisDraft extends PreparationImage {
+  regionId: number
+  regionName: string
+  regionVersion: number
+  imageIdentity: string
+  coverage: 'FULL' | 'PARTIAL' | 'OUTSIDE' | 'UNKNOWN'
+  bands: { redBand: number; nirBand: number }
+}
+interface Preparation {
+  status: 'READY' | 'CHOOSE' | 'NO_MATCH' | 'UNSUPPORTED'
+  modelCalls: number
+  modelRoundMs: number
+  images?: PreparationImage[]
+  regions?: PreparationRegion[]
+  moreImages?: boolean
+  moreRegions?: boolean
+  draft?: AnalysisDraft
+}
+
+const assistant = '/agent/imaging-assistant'
+export function prepareAnalysisApi(goal: string, signal?: AbortSignal) {
+  return request.post<unknown, Preparation>(`${assistant}/preparation`, { goal }, { timeout: 40000, silentError: true, signal })
+}
+export function readAnalysisDraftApi(imageId: number, monitoringRegionId: number, signal?: AbortSignal) {
+  return request.post<unknown, AnalysisDraft>(`${assistant}/draft`,
+    { imageId: String(imageId), monitoringRegionId: String(monitoringRegionId) }, { silentError: true, signal })
+}
+export function askPlatformKnowledgeApi(question: string, signal?: AbortSignal) {
+  return request.post<unknown, AgentAnswer>(`${assistant}/knowledge`, { question }, { timeout: 40000, silentError: true, signal })
+}
+
 // Writes can use the bounded model round; reads never cause a model call.
 export function executeAgentAction(action: PendingAction, signal?: AbortSignal) {
   const config = { timeout: 40000, silentError: true, signal }

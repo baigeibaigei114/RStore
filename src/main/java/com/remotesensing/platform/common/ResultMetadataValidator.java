@@ -17,6 +17,10 @@ public final class ResultMetadataValidator {
             NdviMetadataValidator.validateTaskRegion(metadata, taskParams);
             return;
         }
+        if (BuildingChange.TYPE.equals(taskType)) {
+            validateBuildingChange(metadata, parseParams(taskParams));
+            return;
+        }
         // Older workers complete NDWI and change tasks without trustworthy statistics.
         if (metadata == null || metadata.isNull()) return;
         require(("NDWI".equals(taskType) || "CHANGE_DETECTION".equals(taskType))
@@ -37,6 +41,27 @@ public final class ResultMetadataValidator {
         int green = band(bands, params, "greenBand", 2);
         int nir = band(bands, params, "nirBand", 4);
         require(green != nir, "波段必须不同");
+    }
+
+    private static void validateBuildingChange(JsonNode metadata, JsonNode params) {
+        require(metadata != null && BuildingChange.TYPE.equals(metadata.path("algorithm").asText())
+                && integer(metadata, "schemaVersion") == 1 && "aligned_rgb_raster".equals(metadata.path("scope").asText()),
+                "建筑物变化检测结果缺少有效统计");
+        JsonNode expected = params.path(BuildingChange.SNAPSHOT);
+        require(expected.isObject() && com.remotesensing.platform.agent.AgentJson.hash(expected)
+                .equals(com.remotesensing.platform.agent.AgentJson.hash(metadata.path("snapshot"))), "建筑物变化检测的素材或模型快照不匹配");
+        JsonNode grid = expected.path("grid");
+        JsonNode stats = metadata.path("statistics");
+        long total = integer(stats, "totalPixelCount");
+        long valid = integer(stats, "validPixelCount");
+        long changed = integer(stats, "changedPixelCount");
+        require(total == integer(grid, "width") * integer(grid, "height")
+                && changed >= 0 && changed <= valid && valid > 0 && valid <= total, "建筑物变化检测像素统计不一致");
+        double area = BuildingChange.pixelArea(grid.path("transform"));
+        require(area > 0 && number(stats, "pixelAreaM2") == area
+                && number(stats, "changedAreaM2") == changed * area
+                && Math.abs(number(stats, "changeRatio") - (double) changed / valid) < 1e-9
+                && Math.abs(number(stats, "validPixelRatio") - (double) valid / total) < 1e-9, "建筑物变化检测面积或比例不一致");
     }
 
     private static void validateChange(JsonNode metadata, JsonNode params, JsonNode stats) {

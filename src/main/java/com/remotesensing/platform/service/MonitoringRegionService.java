@@ -59,7 +59,18 @@ public class MonitoringRegionService {
     }
 
     public ObjectNode snapshot(Long id) {
-        MonitoringRegionVO region = get(id);
+        return snapshot(get(id));
+    }
+
+    public ObjectNode snapshotForSubmission(Long id, int expectedVersion) {
+        MonitoringRegionVO region = mapper.lock(id, users.getCurrentUserId());
+        if (region == null || region.getVersion() != expectedVersion) {
+            throw new BusinessException(ResultCode.CONFLICT.getCode(), "监测区已更新或不可用，请重新核对区域后提交");
+        }
+        return snapshot(region);
+    }
+
+    private ObjectNode snapshot(MonitoringRegionVO region) {
         ObjectNode result = json.createObjectNode()
                 .put("schemaVersion", 1).put("regionId", region.getId()).put("name", region.getName())
                 .put("version", region.getVersion()).put("crs", "EPSG:4326")

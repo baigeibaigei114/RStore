@@ -84,9 +84,9 @@ public class TaskResultAnswerService {
                 if (!old.equals(active)) versions.add(old);
             }
         } catch (BadSqlGrammarException error) {
-            // Agent-disabled installs may not have opted into either result-answer migration.
+            // An install using the new knowledge endpoint may never have enabled result-answer history.
             String sqlState = error.getSQLException() == null ? null : error.getSQLException().getSQLState();
-            if (enabled || !("42P01".equals(sqlState) || "42703".equals(sqlState))) throw error;
+            if (!("42P01".equals(sqlState) || "42703".equals(sqlState))) throw error;
         }
         return state;
     }

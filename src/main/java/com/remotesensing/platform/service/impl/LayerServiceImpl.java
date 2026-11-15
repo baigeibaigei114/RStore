@@ -153,12 +153,24 @@ public class LayerServiceImpl implements LayerService {
         validateFormat(queryParams, WMS_ALLOWED_FORMATS, "WMS format 仅支持 image/png 或 image/jpeg");
         // Step 5: 白名单拷贝允许透传的参数，排除 service/layers/query_layers 等后端管控键
         MultiValueMap<String, String> forwardedParams = copyAllowedWithoutKeys(queryParams, WMS_ALLOWED_KEYS, WMS_FORCED_KEYS);
+        String qualifiedName = qualifiedLayerName(layer);
+        String period = firstValueIgnoreCase(queryParams, "period");
+        if (period != null) {
+            if (!com.remotesensing.platform.common.BuildingChange.TYPE.equals(layer.getTaskType())
+                    || !Set.of("before", "after").contains(period)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "无效的模型检测图层");
+            }
+            if (!layerMapper.canViewBuildingChangeSource(layer.getTaskId(), period, currentUserContext.getCurrentUserId())) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像已不可访问");
+            }
+            qualifiedName += "_" + period;
+        }
         // Step 6: 添加强制管控参数 —— 防止客户端伪造 service 或 layers
         forwardedParams.set("service", "WMS");
-        forwardedParams.set("layers", qualifiedLayerName(layer));
+        forwardedParams.set("layers", qualifiedName);
         // GetFeatureInfo 需要额外指定 query_layers 参数
         if ("GetFeatureInfo".equalsIgnoreCase(firstValueIgnoreCase(queryParams, REQUEST_PARAM))) {
-            forwardedParams.set("query_layers", qualifiedLayerName(layer));
+            forwardedParams.set("query_layers", qualifiedName);
         }
         // Step 7: 对未传入的可选参数应用默认值（format 默认 image/png，tiled 按配置决定）
         applyWmsDefaults(queryParams, forwardedParams);

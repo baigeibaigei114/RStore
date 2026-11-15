@@ -6,6 +6,8 @@ export const taskStatusText = (status?: TaskStatus) => statusLabels[status || ''
 export const isActiveStatus = (status?: TaskStatus) => !!status && ['PENDING', 'RUNNING', 'RETRYING'].includes(status)
 
 export function failureMessage(message?: string, type?: TaskType): string {
+  if (type === 'BUILDING_CHANGE_DETECTION' && message
+    && /共同有效像元|前期或后期影像|投影、范围和仿射网格|三波段 uint8/.test(message)) return message
   if (type === 'CHANGE_DETECTION' && message?.includes('no common valid pixels')) {
     return '两期影像没有共同有效像素。请核对所选波段和有效范围。'
   }
@@ -69,6 +71,21 @@ export function readChangeSummary(task: TaskDetail | null, result: TaskResultFil
       !Number.isFinite(ratio) || Math.abs(ratio - changed / base.validPixelCount) > 1e-9 ||
       !Number.isFinite(threshold) || threshold < 0) return null
     return { changed, valid: base.validPixelCount, total: base.totalPixelCount, ratio, threshold }
+  } catch { return null }
+}
+
+export function readBuildingChange(task: TaskDetail | null, result: TaskResultFile | null) {
+  if (task?.taskType !== 'BUILDING_CHANGE_DETECTION' || result?.taskId !== task.id || !result.resultMetadata) return null
+  try {
+    const metadata = JSON.parse(result.resultMetadata)
+    const expected = JSON.parse(task.params || '{}').buildingChangeSnapshot
+    const stats = metadata.statistics
+    if (!expected || metadata.schemaVersion !== 1 || metadata.algorithm !== task.taskType
+      || canonical(expected) !== canonical(metadata.snapshot)
+      || !Number.isFinite(stats.changedAreaM2) || !Number.isFinite(stats.changeRatio) || !Number.isFinite(stats.validPixelRatio)) return null
+    return { area: Number(stats.changedAreaM2), ratio: Number(stats.changeRatio), validRatio: Number(stats.validPixelRatio),
+      changed: Number(stats.changedPixelCount), valid: Number(stats.validPixelCount), total: Number(stats.totalPixelCount),
+      before: expected.before as { name: string; captureTime: string }, after: expected.after as { name: string; captureTime: string } }
   } catch { return null }
 }
 

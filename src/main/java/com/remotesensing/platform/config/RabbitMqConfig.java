@@ -5,6 +5,7 @@ import com.remotesensing.platform.config.properties.RabbitTaskProperties;
 import com.remotesensing.platform.service.RabbitPublishFailureService;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
@@ -53,7 +54,18 @@ public class RabbitMqConfig {
      */
     @Bean
     public Queue remoteSensingTaskQueue(RabbitTaskProperties properties) {
-        return QueueBuilder.durable(properties.getQueue())
+        return taskQueue(properties.getQueue(), properties);
+    }
+
+    @Bean
+    public Declarables buildingChangeTasks(DirectExchange remoteSensingTaskExchange, RabbitTaskProperties properties) {
+        Queue queue = taskQueue(properties.getBuildingChangeQueue(), properties);
+        return new Declarables(queue, BindingBuilder.bind(queue)
+                .to(remoteSensingTaskExchange).with(properties.getBuildingChangeRoutingKey()));
+    }
+
+    private Queue taskQueue(String name, RabbitTaskProperties properties) {
+        return QueueBuilder.durable(name)
                 .withArgument("x-dead-letter-exchange", properties.getDeadLetterExchange())
                 .withArgument("x-dead-letter-routing-key", properties.getDeadLetterRoutingKey())
                 .withArgument("x-queue-type", "quorum")

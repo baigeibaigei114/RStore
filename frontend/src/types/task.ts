@@ -1,5 +1,5 @@
 /** 解译任务类型：NDVI（植被指数）/ NDWI（水体指数）/ CHANGE_DETECTION（变化检测） */
-export type TaskType = 'NDVI' | 'NDWI' | 'CHANGE_DETECTION'
+export type TaskType = 'NDVI' | 'NDWI' | 'CHANGE_DETECTION' | 'BUILDING_CHANGE_DETECTION'
 
 /** 任务状态：待处理 / 运行中 / 成功 / 失败 / 重试中 / 已取消 */
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'RETRYING' | 'CANCELED'
@@ -10,6 +10,8 @@ export interface TaskSubmitParams {
   /** 待处理的影像 ID */
   imageId: number
   monitoringRegionId?: number
+  expectedRegionVersion?: number
+  expectedImageIdentity?: string
   /** 解译任务类型 */
   taskType: TaskType
   /** 可选的自定义参数，不同类型任务可能有额外配置 */
@@ -148,6 +150,7 @@ export interface TaskLog {
 
 /** 任务列表分页查询参数 */
 export interface TaskPageParams {
+  group?: 'COMPUTE' | 'MODEL'
   /** 当前页码，从 1 开始 */
   pageNum?: number
   /** 每页记录数 */

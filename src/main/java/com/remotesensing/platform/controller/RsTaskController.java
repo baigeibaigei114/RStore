@@ -3,6 +3,7 @@ package com.remotesensing.platform.controller;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.Result;
+import com.remotesensing.platform.common.enums.TaskGroup;
 import com.remotesensing.platform.config.properties.RateLimitProperties;
 import com.remotesensing.platform.dto.RsTaskStatusUpdateDTO;
 import com.remotesensing.platform.dto.RsTaskSubmitDTO;
@@ -116,8 +117,14 @@ public class RsTaskController {
      */
     @GetMapping
     public Result<PageResult<RsTaskListVO>> page(@RequestParam(required = false) Integer pageNum,
-                                                 @RequestParam(required = false) Integer pageSize) {
-        return Result.success(taskService.page(pageNum, pageSize));
+                                                @RequestParam(required = false) Integer pageSize,
+                                                @RequestParam(required = false) TaskGroup group) {
+        return Result.success(group == null ? taskService.page(pageNum, pageSize) : taskService.page(pageNum, pageSize, group));
+    }
+
+    @GetMapping("/building-change/options")
+    public Result<RsTaskService.BuildingChangeOptions> buildingChangeOptions() {
+        return Result.success(taskService.buildingChangeOptions());
     }
 
     /**

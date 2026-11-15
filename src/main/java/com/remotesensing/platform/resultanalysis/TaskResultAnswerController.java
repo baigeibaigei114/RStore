@@ -1,11 +1,11 @@
 package com.remotesensing.platform.resultanalysis;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.remotesensing.platform.agent.AgentFailure;
 import com.remotesensing.platform.common.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,12 +23,12 @@ public class TaskResultAnswerController {
     public Result<JsonNode> get(@PathVariable long taskId,
                                 @RequestParam(required = false) String version,
                                 @RequestParam(required = false) Integer beforeTurn) {
-        return Result.success(service.get(taskId, version, beforeTurn));
+        return Result.success(service.get(taskId, version, beforeTurn).put("canAsk", false));
     }
 
     @PostMapping
-    public Result<JsonNode> ask(@PathVariable long taskId, @RequestBody JsonNode body) {
-        return Result.success(service.ask(taskId, body));
+    public Result<JsonNode> ask() {
+        throw new AgentFailure("RESULT_ANSWERS_READ_ONLY", "结果解读已归档。请在影像助手查询平台知识。", 403, false);
     }
 
     @GetMapping("/evidence")

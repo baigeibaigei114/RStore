@@ -3,6 +3,9 @@
     <div class="page-title"><span>区域分析 / 01</span><h2>单期区域 NDVI</h2><p>确认一景影像与一个区域，查看这次观测的植被绿度。</p></div>
     <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon class="feedback" />
     <div v-if="expired" class="feedback"><el-button @click="relogin">重新登录并返回</el-button></div>
+    <div v-else-if="needsReview && !intent" class="feedback">
+      <el-button :loading="reviewing" @click="reviewUpdatedResources">重新读取并核对素材</el-button>
+    </div>
     <el-card v-if="intent && !submitting" shadow="never" class="feedback recovery">
       <template v-if="intent.taskId"><strong>已有一次分析已受理</strong><p>可继续查看原任务，也可以显式发起新分析。</p></template>
       <template v-else><strong>暂未确认是否提交成功，已保留本次请求</strong><p>恢复会使用原影像、区域和请求，不会重复创建同一次分析。</p></template>
@@ -10,7 +13,7 @@
       <el-button v-if="intent.taskId" :disabled="submitting" @click="newAnalysis">发起新分析</el-button>
     </el-card>
     <el-card shadow="never" class="analysis-card">
-      <el-form label-position="top" :disabled="submitting || !!(intent && !intent.taskId)">
+      <el-form label-position="top" :disabled="submitting || reviewing || !!(intent && !intent.taskId)">
         <div class="selection-grid">
           <div>
             <el-form-item label="影像 · 必选">
@@ -22,7 +25,7 @@
             <p v-if="imageLoading">正在读取可用影像…</p>
             <p v-else-if="imageError" class="field-error">{{ imageError }} <el-button link @click="loadImages">重试读取</el-button></p>
             <p v-else-if="!images.length">还没有可用影像。<router-link to="/images">查看可用影像</router-link></p>
-            <template v-if="selectedImage"><p>{{ selectedImage.acquisitionTime?.slice(0, 10) || '未记录采集日期' }} · {{ selectedImage.sensorType || '遥感影像' }}</p>
+            <template v-if="selectedImage"><p>{{ ndviCaptureDate(selectedImage.acquisitionTime) }} · {{ selectedImage.sensorType || '遥感影像' }}</p>
               <el-tag :type="admitted ? 'success' : 'warning'">{{ admissionLoading ? '正在检查准入' : admitted ? '已通过 NDVI 准入' : '暂不能用于区域 NDVI' }}</el-tag>
               <p v-if="!admissionLoading && !admitted" class="field-error">缺少所需的标准化信息或可信波段，请换一景影像或查看影像详情。</p>
             </template>
@@ -46,7 +49,7 @@
       </el-form>
       <el-collapse class="technical"><el-collapse-item title="波段与来源详情" name="source"><p>红光波段 {{ selectedImage?.bandMapping?.red ?? '—' }} / 近红外波段 {{ selectedImage?.bandMapping?.nir ?? '—' }}</p><InputProvenance v-if="selectedImage" :raw="selectedImage.metadataJson" /></el-collapse-item></el-collapse>
     </el-card>
-    <p class="footnote">NDVI 描述植被绿度，单期均值不能直接判断作物健康或预测产量。<router-link to="/tasks/create">其他任务类型</router-link></p>
+    <p class="footnote">NDVI 描述植被绿度，单期均值不能直接判断作物健康或预测产量。<router-link to="/tasks">查看全部任务</router-link></p>
   </section>
 </template>
 
@@ -55,11 +58,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import InputProvenance from '@/components/InputProvenance.vue'
 import { getImageDetailApi, searchImagesApi } from '@/api/image'
+import { readAnalysisDraftApi } from '@/api/agent'
 import { getMonitoringRegionApi, listMonitoringRegionsApi, type MonitoringRegion } from '@/api/monitoringRegion'
 import { createTaskApi } from '@/api/task'
 import { useAuthStore } from '@/stores/auth'
 import { clearIntent, definiteRejection, readIntent, saveIntent, type AnalysisIntent } from '@/utils/analysisRecovery'
-import { errorText, hasNdviAdmission, isUnauthorized, ndviPayload, positiveId } from '@/utils/regionAnalysis'
+import { errorText, hasNdviAdmission, isUnauthorized, ndviCaptureDate, ndviPayload, positiveId } from '@/utils/regionAnalysis'
 import type { ImageDetail, ImageListItem } from '@/types/image'
 import type { TaskSubmitParams } from '@/types/task'
 
@@ -68,11 +72,14 @@ const account = ref(''), imageId = ref<number>(), regionId = ref<number>()
 const images = ref<ImageListItem[]>([]), regions = ref<MonitoringRegion[]>([]), selectedImage = ref<ImageDetail>()
 const imageLoading = ref(false), regionLoading = ref(false), admissionLoading = ref(false), submitting = ref(false)
 const imageError = ref(''), regionError = ref(''), error = ref(''), expired = ref(false)
+const needsReview = ref(false), reviewing = ref(false)
+const checkedImage = ref<{ id: number; identity: string }>()
 const intent = ref<AnalysisIntent | null>(null)
 const selectedRegion = computed(() => regions.value.find(region => region.id === regionId.value))
 const admitted = computed(() => !!selectedImage.value && hasNdviAdmission(selectedImage.value))
 const canSubmit = computed(() => account.value && imageId.value && selectedImage.value?.id === imageId.value
-  && selectedImage.value.status === 'READY' && admitted.value && selectedRegion.value && !imageLoading.value && !regionLoading.value && !admissionLoading.value)
+  && selectedImage.value.status === 'READY' && admitted.value && selectedRegion.value && !needsReview.value
+  && !imageLoading.value && !regionLoading.value && !admissionLoading.value)
 let alive = true, imageEpoch = 0, hydrated = false
 onBeforeUnmount(() => { alive = false; imageEpoch++ })
 const current = () => alive && !!account.value && auth.userInfo?.userId === account.value
@@ -88,8 +95,17 @@ onMounted(async () => {
     try { draft = JSON.parse(sessionStorage.getItem(draftKey()) || '{}') } catch { /* No valid draft. */ }
     imageId.value = positiveId(route.query.imageId) ?? positiveId(draft.imageId)
     regionId.value = positiveId(route.query.monitoringRegionId) ?? positiveId(draft.regionId)
+    const identity = route.query.imageIdentity
+    const expectedRegionVersion = positiveId(route.query.regionVersion)
+    if (imageId.value && typeof identity === 'string' && /^[a-f0-9]{64}$/.test(identity)) {
+      checkedImage.value = { id: imageId.value, identity }
+    }
     await Promise.all([loadImages(), loadRegions()])
     if (!current()) return
+    if (expectedRegionVersion && selectedRegion.value?.version !== expectedRegionVersion) {
+      needsReview.value = true
+      error.value = '助手草稿中的监测区已更新，请重新读取并核对素材。'
+    }
     if (!route.query.monitoringRegionId && selectedRegion.value && draft.version && draft.version !== selectedRegion.value.version) {
       regionId.value = undefined
       error.value = '原区域已变更，请重新选择并核对范围。影像选择已保留。'
@@ -107,7 +123,35 @@ function persistDraft() {
 function showError(cause: unknown) {
   if (!alive) return
   expired.value = isUnauthorized(cause)
+  if ((cause as { code?: number } | null)?.code === 409 && !intent.value) needsReview.value = true
   error.value = expired.value ? '登录已过期，已保留本次信息。请重新登录后继续。' : errorText(cause)
+}
+async function reviewUpdatedResources() {
+  if (reviewing.value || !current() || intent.value) return
+  reviewing.value = true
+  error.value = ''
+  try {
+    await Promise.all([loadImages(), loadRegions()])
+    if (!current() || imageError.value || regionError.value) return
+    if (checkedImage.value && imageId.value && regionId.value && selectedRegion.value && admitted.value) {
+      const draft = await readAnalysisDraftApi(imageId.value, regionId.value)
+      if (!current()) return
+      if (draft.id !== imageId.value || draft.regionId !== regionId.value || draft.regionVersion !== selectedRegion.value?.version) {
+        throw new Error('素材再次发生变化，请重新读取。')
+      }
+      if (draft.coverage === 'PARTIAL' || draft.coverage === 'OUTSIDE') {
+        throw new Error('这景影像目前未完整覆盖监测区，请调整素材后重新读取。')
+      }
+      checkedImage.value = { id: draft.id, identity: draft.imageIdentity }
+      await router.replace({ query: { ...route.query, imageId: draft.id, monitoringRegionId: draft.regionId,
+        regionVersion: draft.regionVersion, imageIdentity: draft.imageIdentity } })
+      if (!current()) return
+    }
+    needsReview.value = false
+    error.value = '素材已刷新，请核对日期和区域后再开始分析。'
+    persistDraft()
+  } catch (cause) { showError(cause) }
+  finally { reviewing.value = false }
 }
 async function confirmAccount() {
   // A different tab can replace the token while this form stays mounted.
@@ -168,12 +212,12 @@ async function submit() {
   try {
     if (!await confirmAccount()) return
     if (!selectedImage.value || !selectedRegion.value) return
-    const image = await getImageDetailApi(selectedImage.value.id, true)
-    const region = await getMonitoringRegionApi(selectedRegion.value.id, true)
-    if (!current()) return
-    if (region.version !== selectedRegion.value?.version) { await loadRegions(); throw new Error('区域已变更，请重新核对范围后提交。') }
+    const image = selectedImage.value
+    const region = selectedRegion.value
     if (image.status !== 'READY' || !hasNdviAdmission(image)) { selectedImage.value = image; throw new Error('这景影像当前不可用，请换一景影像或稍后重试。') }
     const payload = ndviPayload(image.id, image.bandMapping!.red!, image.bandMapping!.nir!, region.id)
+    payload.expectedRegionVersion = region.version
+    if (checkedImage.value?.id === image.id) payload.expectedImageIdentity = checkedImage.value.identity
     payload.clientRequestId = crypto.randomUUID()
     intent.value = saveIntent(sessionStorage, account.value, payload)
     await sendOriginal(payload)

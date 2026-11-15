@@ -225,6 +225,31 @@
         LIMIT #{pageSize} OFFSET #{offset}
     </select>
 
+    <select id="searchForPreparation" resultMap="RsImageResultMap">
+        SELECT <include refid="BaseColumnList"/> FROM rs_image
+        WHERE deleted_at IS NULL AND (visibility = 'PUBLIC' OR owner_id = #{currentUserId})
+          AND status = 'READY'
+          AND metadata_json #&gt;&gt; '{admission,status}' = 'PASSED'
+          AND metadata_json #&gt;&gt; '{admission,validatorVersion}' = 'input-v1'
+        <if test="keyword != null">
+            AND strpos(lower(image_name), lower(#{keyword})) &gt; 0
+        </if>
+        <if test="start != null">
+            AND acquisition_time &gt;= #{start}
+        </if>
+        <if test="endExclusive != null">
+            AND acquisition_time &lt; #{endExclusive}
+        </if>
+        <if test="regionId != null and keyword == null">
+            AND (footprint IS NULL OR EXISTS (
+                SELECT 1 FROM monitoring_region r
+                WHERE r.id = #{regionId} AND r.owner_id = #{currentUserId} AND footprint &amp;&amp; r.geom
+            ))
+        </if>
+        ORDER BY acquisition_time DESC NULLS LAST, id DESC
+        LIMIT 101
+    </select>
+
     <select id="searchPage" resultMap="RsImageResultMap">
         SELECT
         <include refid="BaseColumnList"/>

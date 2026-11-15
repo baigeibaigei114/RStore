@@ -42,6 +42,7 @@ public class RemoteSensingTaskMessage implements Serializable {
     public enum TaskType {
         NDVI,
         NDWI,
-        CHANGE_DETECTION
+        CHANGE_DETECTION,
+        BUILDING_CHANGE_DETECTION
     }
 }

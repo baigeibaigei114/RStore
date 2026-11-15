@@ -178,7 +178,7 @@
           AND t.owner_id = #{ownerId}
     </select>
 
-    <select id="selectPage" resultType="com.remotesensing.platform.vo.RsTaskListVO">
+    <sql id="ListTasks">
         SELECT
             t.id,
             t.owner_id,
@@ -200,8 +200,31 @@
         FROM rs_task t
         LEFT JOIN rs_image i ON i.id = t.image_id
         WHERE t.owner_id = #{ownerId}
+    </sql>
+
+    <sql id="TaskGroupFilter">
+        <choose>
+            <when test="group == 'MODEL'">AND t.task_type = 'BUILDING_CHANGE_DETECTION'</when>
+            <otherwise>AND t.task_type IN ('NDVI', 'NDWI', 'CHANGE_DETECTION')</otherwise>
+        </choose>
+    </sql>
+
+    <select id="selectPage" resultType="com.remotesensing.platform.vo.RsTaskListVO">
+        <include refid="ListTasks"/>
         ORDER BY t.submitted_at DESC, t.id DESC
         LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="selectPageByGroup" resultType="com.remotesensing.platform.vo.RsTaskListVO">
+        <include refid="ListTasks"/>
+        <include refid="TaskGroupFilter"/>
+        ORDER BY t.submitted_at DESC, t.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countByGroup" resultType="long">
+        SELECT COUNT(1) FROM rs_task t WHERE t.owner_id = #{ownerId}
+        <include refid="TaskGroupFilter"/>
     </select>
 
     <select id="count" resultType="long">

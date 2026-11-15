@@ -1,15 +1,28 @@
 <template>
   <section class="analysis-history">
     <div class="page-title">
-      <span>我的分析</span>
-      <h2>分析记录</h2>
-      <p>继续查看正在进行的分析，或打开已经完成的结果。</p>
+      <h2>任务</h2>
+    </div>
+    <el-tabs :model-value="tab" @tab-change="changeTab">
+      <el-tab-pane label="普通计算" name="compute" />
+      <el-tab-pane label="模型检测" name="model" />
+    </el-tabs>
+    <div v-if="tab === 'compute'" class="launch-actions" aria-label="发起普通计算">
+      <el-button type="primary" @click="router.push('/tasks/create?mode=region-ndvi')">区域 NDVI</el-button>
+      <el-button @click="router.push('/tasks/create?taskType=NDWI')">NDWI</el-button>
+      <el-button @click="router.push('/tasks/create?taskType=CHANGE_DETECTION')">波段差值变化检测</el-button>
+    </div>
+    <div v-else class="launch-actions">
+      <el-button type="primary" :disabled="!modelEnabled" :loading="modelLoading"
+        @click="router.push('/tasks/create?taskType=BUILDING_CHANGE_DETECTION')">建筑物变化检测</el-button>
+      <span v-if="modelError">{{ modelError }}</span>
+      <span v-else-if="!modelLoading && !modelEnabled">模型检测暂未启用</span>
     </div>
 
     <el-card class="table-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>全部分析</span>
+          <span>{{ tab === 'model' ? '检测记录' : '计算记录' }}</span>
           <div class="table-toolbar">
             <el-switch
               v-model="autoRefresh"
@@ -18,9 +31,6 @@
               @change="handleAutoRefreshChange"
             />
             <el-button :icon="Refresh" :loading="loading" :disabled="expired" @click="refreshTasks">刷新</el-button>
-            <el-button class="new-analysis" type="primary" :icon="Plus" @click="router.push('/tasks/create?mode=region-ndvi')">
-              开始区域分析
-            </el-button>
           </div>
         </div>
       </template>
@@ -41,12 +51,12 @@
             <el-tag :type="taskStatusType(task.status)" effect="plain">{{ taskStatusText(task.status) }}</el-tag>
             <time :datetime="task.submittedAt">{{ formatDateTime(task.submittedAt) }}</time>
           </div>
-          <el-button @click="router.push(`/tasks/${task.id}`)">
+          <el-button @click="router.push({ path: `/tasks/${task.id}`, query: tab === 'model' ? { tab } : {} })">
             {{ task.status === 'SUCCESS' ? '查看结果' : isActiveStatus(task.status) ? '继续查看' : '查看详情' }}
           </el-button>
         </li>
       </ul>
-      <el-empty v-else-if="hasLoaded && !connectionError" description="还没有分析记录，从一次区域分析开始吧" />
+      <el-empty v-else-if="hasLoaded && !connectionError" description="暂无记录" />
 
       <div v-if="hasLoaded && pagination.total" class="pagination-bar">
         <el-pagination
@@ -66,9 +76,9 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listTasksApi } from '@/api/task'
+import { getBuildingChangeOptionsApi, listTasksApi } from '@/api/task'
 import type { TaskListItem, TaskStatus, TaskType } from '@/types/task'
 import { useAuthStore } from '@/stores/auth'
 import { isUnauthorized } from '@/utils/regionAnalysis'
@@ -77,6 +87,8 @@ import { createRefreshController, isActiveStatus, taskStatusText } from '@/utils
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const tab = computed(() => route.query.tab === 'model' ? 'model' : 'compute')
+const modelLoading = ref(false), modelEnabled = ref(false), modelError = ref('')
 const loading = ref(false)
 const autoRefresh = ref(true)
 const taskList = ref<TaskListItem[]>([])
@@ -108,7 +120,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
-watch(() => auth.userInfo?.userId, () => {
+watch([() => auth.userInfo?.userId, tab], () => {
   generation++
   controller.stop()
   taskList.value = []
@@ -121,6 +133,27 @@ watch(() => auth.userInfo?.userId, () => {
   else if (alive) { expired.value = true; connectionError.value = '登录已过期，请重新登录后继续查看。' }
 })
 
+watch([tab, () => auth.userInfo?.userId], async ([selected], _, onCleanup) => {
+  if (selected !== 'model') return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  modelLoading.value = true
+  modelEnabled.value = false
+  modelError.value = ''
+  try {
+    const settings = await getBuildingChangeOptionsApi(controller.signal)
+    if (!controller.signal.aborted) modelEnabled.value = settings.enabled
+  } catch {
+    if (!controller.signal.aborted) modelError.value = '暂时无法读取模型状态，请刷新重试'
+  } finally {
+    if (!controller.signal.aborted) modelLoading.value = false
+  }
+}, { immediate: true })
+
+function changeTab(name: string | number) {
+  void router.replace({ path: '/tasks', query: name === 'model' ? { tab: 'model' } : {} })
+}
+
 async function readTasks(): Promise<boolean> {
   const epoch = generation
   const current = () => alive && epoch === generation
@@ -129,6 +162,7 @@ async function readTasks(): Promise<boolean> {
     const page = await listTasksApi({
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
+      group: tab.value === 'model' ? 'MODEL' : 'COMPUTE',
     }, true)
     if (!current()) return false
     taskList.value = page.records
@@ -196,7 +230,8 @@ function taskTypeText(type: TaskType) {
   const map: Record<TaskType, string> = {
     NDVI: '植被指数',
     NDWI: '水体指数',
-    CHANGE_DETECTION: '变化检测',
+    CHANGE_DETECTION: '波段差值变化检测',
+    BUILDING_CHANGE_DETECTION: '建筑物变化检测',
   }
   return map[type] || '影像分析'
 }
@@ -224,7 +259,8 @@ function formatDateTime(value?: string) {
 .list-feedback .el-button { margin-top: 10px; }
 .last-read { margin: 0 0 16px; color: #667085; font-size: 12px; line-height: 1.7; }
 .card-header, .table-toolbar { flex-wrap: wrap; gap: 12px; }
-.new-analysis { --el-button-bg-color: #176b52; --el-button-border-color: #176b52; --el-button-hover-bg-color: #215e4c; --el-button-hover-border-color: #215e4c; }
+.launch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 4px 20px; }
+.launch-actions .el-button { margin-left: 0; }
 .analysis-list { margin: 0; padding: 0; list-style: none; }
 .analysis-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; align-items: center; gap: 24px; padding: 20px 0; border-bottom: 1px solid #eaecf0; }
 .analysis-row:first-child { padding-top: 4px; }

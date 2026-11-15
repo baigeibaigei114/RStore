@@ -109,6 +109,12 @@ public interface RsTaskService {
      */
     PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize);
 
+    PageResult<RsTaskListVO> page(Integer pageNum, Integer pageSize, com.remotesensing.platform.common.enums.TaskGroup group);
+
+    BuildingChangeOptions buildingChangeOptions();
+
+    record BuildingChangeOptions(boolean enabled, Long beforeImageId, Long afterImageId) {}
+
     /**
      * 查询指定任务的完整操作日志列表。
      * <p>

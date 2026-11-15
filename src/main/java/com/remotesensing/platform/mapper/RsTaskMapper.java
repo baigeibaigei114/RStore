@@ -89,6 +89,11 @@ public interface RsTaskMapper {
      */
     long count(@Param("ownerId") String ownerId);
 
+    List<RsTaskListVO> selectPageByGroup(@Param("offset") int offset, @Param("pageSize") int pageSize,
+                                        @Param("ownerId") String ownerId, @Param("group") String group);
+
+    long countByGroup(@Param("ownerId") String ownerId, @Param("group") String group);
+
     /**
      * 更新任务的输出存储路径。
      * 输出路径依赖 taskId 生成，因此作为任务创建后的独立回写步骤。

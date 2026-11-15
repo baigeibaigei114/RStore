@@ -10,7 +10,16 @@
     <el-button v-if="expired" @click="relogin">重新登录并返回原任务</el-button>
     <el-card shadow="never" class="result-summary">
       <div class="result-state"><strong>{{ taskStatusText(task?.status) }}</strong><span>最近成功读取：{{ lastRead || '尚未读取' }}</span></div>
-      <template v-if="changeSummary">
+      <template v-if="buildingChange">
+        <div class="statistics-grid">
+          <div><span>预测变化面积</span><strong>{{ buildingChange.area.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) }}<small> 平方米</small></strong><small>{{ buildingChange.changed.toLocaleString() }} 个预测变化像元</small></div>
+          <div><span>变化比例</span><strong>{{ (buildingChange.ratio * 100).toFixed(2) }}<small>%</small></strong><small>占两期共同有效像元</small></div>
+          <div><span>共同有效覆盖</span><strong>{{ (buildingChange.validRatio * 100).toFixed(2) }}<small>%</small></strong><small>{{ buildingChange.valid.toLocaleString() }} / {{ buildingChange.total.toLocaleString() }} 个像元</small></div>
+        </div>
+        <p class="result-note">前期 {{ buildingChange.before.name }} · {{ buildingChange.before.captureTime.slice(0, 10) }}</p>
+        <p class="result-note">后期 {{ buildingChange.after.name }} · {{ buildingChange.after.captureTime.slice(0, 10) }}</p>
+      </template>
+      <template v-else-if="changeSummary">
         <div class="statistics-grid">
           <div><span>变化比例</span><strong>{{ (changeSummary.ratio * 100).toFixed(2) }}<small>%</small></strong>
             <small>{{ changeSummary.changed.toLocaleString() }} 个变化像素 / {{ changeSummary.valid.toLocaleString() }} 个共同有效像素</small></div>
@@ -32,7 +41,7 @@
     </el-card>
 
     <div class="detail-actions">
-      <el-button @click="router.push('/tasks')">返回列表</el-button>
+      <el-button @click="router.push(listLocation)">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="refreshAll">刷新</el-button>
       <el-button v-if="resultFile?.status === 'PUBLISHED' && qualifiedResultLayerName" @click="openResultLayerInMap">查看地图</el-button>
       <el-button
@@ -45,12 +54,9 @@
       </el-button>
     </div>
 
-    <TaskResultAnswers v-if="answerAlgorithm && task?.status === 'SUCCESS' && auth.isLoggedIn"
+    <TaskResultAnswers v-if="showAnswerHistory && answerAlgorithm && task?.status === 'SUCCESS' && auth.isLoggedIn"
       :key="answerViewKey" :task-id="taskId" :algorithm="answerAlgorithm"
       :map-ready="resultFile?.status === 'PUBLISHED' && !!qualifiedResultLayerName" />
-    <p v-else-if="task?.status === 'SUCCESS' && !legacyAgentWrites" class="result-note">
-      此结果可查看计算详情。NDVI 问答适用于已保存监测区域的任务。
-    </p>
     <el-collapse v-model="technicalOpen"><el-collapse-item title="技术详情与更多结果" name="details">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="16">
@@ -307,7 +313,7 @@ import type { TaskDetail, TaskLog, TaskResultFile, TaskStatus, TaskType } from '
 import { useAuthStore } from '@/stores/auth'
 import { useTaskRefresh } from '@/composables/useTaskRefresh'
 import { isUnauthorized } from '@/utils/regionAnalysis'
-import { failureMessage, isActiveStatus, readChangeSummary, readStatistics, regionSnapshot as getRegionSnapshot, taskStatusText } from '@/utils/taskPresentation'
+import { failureMessage, isActiveStatus, readBuildingChange, readChangeSummary, readStatistics, regionSnapshot as getRegionSnapshot, taskStatusText } from '@/utils/taskPresentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -326,10 +332,14 @@ const aiReport = ref<AiTaskReport | null>(null)
 const logs = ref<TaskLog[]>([])
 
 const taskId = computed(() => String(route.params.id))
+const listLocation = computed(() => ({ path: '/tasks', query:
+  route.query.tab === 'model' || task.value?.taskType === 'BUILDING_CHANGE_DETECTION' ? { tab: 'model' } : {} }))
+const showAnswerHistory = computed(() => route.hash === '#result-answers-title' || route.query.history === 'result-answers')
 
 const regionSnapshot = computed(() => getRegionSnapshot(task.value))
 const indexStatistics = computed(() => task.value?.taskType === 'CHANGE_DETECTION' ? null : readStatistics(task.value, resultFile.value))
 const changeSummary = computed(() => readChangeSummary(task.value, resultFile.value))
+const buildingChange = computed(() => readBuildingChange(task.value, resultFile.value))
 const answerAlgorithm = computed(() => {
   const type = task.value?.taskType
   return type === 'NDWI' || type === 'CHANGE_DETECTION' || (type === 'NDVI' && regionSnapshot.value) ? type : null
@@ -423,7 +433,12 @@ async function readResult(): Promise<boolean> {
 function relogin() { auth.logout(); void router.push({ path: '/login', query: { redirect: route.fullPath } }) }
 function returnOptions() {
   if (!task.value) return
-  if (task.value.taskType !== 'NDVI') { void router.push('/tasks/create'); return }
+  if (task.value.taskType !== 'NDVI') {
+    let beforeImageId: number | undefined
+    try { beforeImageId = JSON.parse(task.value.params || '{}').beforeImageId } catch { /* No stored parameters. */ }
+    void router.push({ path: '/tasks/create', query: { taskType: task.value.taskType, imageId: task.value.imageId, beforeImageId } })
+    return
+  }
   void router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId: task.value.imageId,
     ...(regionSnapshot.value ? { monitoringRegionId: regionSnapshot.value.regionId } : {}) } })
 }
@@ -485,7 +500,8 @@ function taskTypeText(type: TaskType) {
   const map: Record<TaskType, string> = {
     NDVI: '植被指数',
     NDWI: '水体指数',
-    CHANGE_DETECTION: '变化检测',
+    CHANGE_DETECTION: '波段差值变化检测',
+    BUILDING_CHANGE_DETECTION: '建筑物变化检测',
   }
   return map[type] || type
 }

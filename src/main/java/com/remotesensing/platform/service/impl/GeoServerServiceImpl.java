@@ -234,6 +234,15 @@ public class GeoServerServiceImpl implements GeoServerService {
             // Step 6: 执行发布 —— 先创建 workspace（幂等），再注册外部 GeoTIFF
             createWorkspace(workspace);
             createCoverageStore(workspace, storeName, layerName, geoTiffLocation);
+            if (com.remotesensing.platform.common.BuildingChange.TYPE.equals(task.getTaskType())) {
+                var params = com.remotesensing.platform.agent.AgentJson.parse(task.getParams());
+                for (String period : java.util.List.of("before", "after")) {
+                    String sourceLayer = layerName + "_" + period;
+                    String sourceLocation = prepareSharedGeoTiff(resultFile.getObjectKey() + "." + period + ".tif",
+                            params.path(period + "Bucket").asText(), params.path(period + "ObjectKey").asText());
+                    createCoverageStore(workspace, sourceLayer + "_store", sourceLayer, sourceLocation);
+                }
+            }
             // Step 7: 标记发布成功，写入 workspace/store/layer 及服务 URL
             resultFileMapper.markPublished(resultFile.getId(), workspace, storeName, layerName, wmsUrl, wcsUrl);
 
@@ -360,9 +369,13 @@ public class GeoServerServiceImpl implements GeoServerService {
      * @return GeoServer 可访问的 file:// URL
      */
     private String prepareSharedGeoTiff(String objectKey) {
-        validateResultObjectKey(objectKey);
+        return prepareSharedGeoTiff(objectKey, null, objectKey);
+    }
+
+    private String prepareSharedGeoTiff(String relativePath, String bucket, String objectKey) {
+        validateResultObjectKey(relativePath);
         Path localRoot = Paths.get(geoServerProperties.getSharedDataLocalDir()).toAbsolutePath().normalize();
-        Path localPath = localRoot.resolve(objectKey).normalize();
+        Path localPath = localRoot.resolve(relativePath).normalize();
         if (!localPath.startsWith(localRoot)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "结果文件 objectKey 格式不合法");
         }
@@ -370,7 +383,8 @@ public class GeoServerServiceImpl implements GeoServerService {
         if (!Files.exists(localPath)) {
             Path tempPath = localPath.resolveSibling(localPath.getFileName() + ".part");
             try {
-                minioService.downloadObject(objectKey, tempPath);
+                if (bucket == null) minioService.downloadObject(objectKey, tempPath);
+                else minioService.downloadObject(bucket, objectKey, tempPath);
                 Files.move(tempPath, localPath, StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException exception) {
                 deleteTempFileQuietly(tempPath);
@@ -380,7 +394,7 @@ public class GeoServerServiceImpl implements GeoServerService {
                 throw exception;
             }
         }
-        return buildGeoServerFileUrl(objectKey);
+        return buildGeoServerFileUrl(relativePath);
     }
 
     /**

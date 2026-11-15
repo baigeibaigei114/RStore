@@ -2,6 +2,7 @@ package com.remotesensing.platform.mapper;
 
 import com.remotesensing.platform.entity.RsImage;
 import com.remotesensing.platform.dto.RsImageSearchDTO;
+import java.time.OffsetDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -41,6 +42,10 @@ public interface RsImageMapper {
                                  @Param("currentUserId") String currentUserId);
 
     RsImage lockAccessibleById(@Param("id") Long id, @Param("currentUserId") String currentUserId);
+
+    List<RsImage> searchForPreparation(@Param("currentUserId") String currentUserId,
+                                       @Param("keyword") String keyword, @Param("start") OffsetDateTime start,
+                                       @Param("endExclusive") OffsetDateTime endExclusive, @Param("regionId") Long regionId);
 
     /**
      * 分页查询当前用户可访问的影像列表。

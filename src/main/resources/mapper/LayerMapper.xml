@@ -76,4 +76,13 @@
           AND rf.workspace != ''
           AND (rf.visibility = 'PUBLIC' OR rf.owner_id = #{currentUserId})
     </select>
+
+    <select id="canViewBuildingChangeSource" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM rs_task t
+            JOIN rs_image i ON i.id = (t.params -&gt;&gt; concat(#{period}, 'ImageId'))::bigint
+            WHERE t.id = #{taskId} AND t.task_type = 'BUILDING_CHANGE_DETECTION'
+              AND i.deleted_at IS NULL AND (i.owner_id = #{currentUserId} OR i.visibility = 'PUBLIC')
+        )
+    </select>
 </mapper>

@@ -2,6 +2,7 @@ package com.remotesensing.platform.dto;
 
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
@@ -21,6 +22,12 @@ public class RsTaskSubmitDTO {
     /** 可选私有监测区域；省略时保留整幅裁剪矩形统计。 */
     @Positive
     private Long monitoringRegionId;
+
+    @Positive
+    private Integer expectedRegionVersion;
+
+    @Pattern(regexp = "[a-f0-9]{64}")
+    private String expectedImageIdentity;
 
     /** 任务类型枚举（NDVI / NDWI / CHANGE_DETECTION），对应 RemoteSensingTaskMessage.TaskType。不能为空。 */
     @NotNull(message = "任务类型不能为空")

@@ -40,6 +40,8 @@ public interface MinioService {
      */
     void downloadObject(String objectKey, Path targetPath);
 
+    void downloadObject(String bucket, String objectKey, Path targetPath);
+
     /**
      * 删除对象存储文件，用于数据库失败补偿或影像删除后的空间回收。
      *

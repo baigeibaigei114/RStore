@@ -1,5 +1,6 @@
 <template>
-  <RegionAnalysisForm v-if="regionMode" />
+  <BuildingChangeForm v-if="modelMode" />
+  <RegionAnalysisForm v-else-if="regionMode" :key="`${route.query.imageId || ''}:${route.query.monitoringRegionId || ''}`" />
   <section v-else>
     <div class="page-title">
       <span>创建任务</span>
@@ -147,14 +148,16 @@ import { searchImagesApi, getImageDetailApi } from '@/api/image'
 import { createTaskApi } from '@/api/task'
 import { createSubmissionIntent } from '@/utils/submissionIntent'
 import RegionAnalysisForm from '@/components/analysis/RegionAnalysisForm.vue'
-import { hasNdviAdmission, ndviPayload } from '@/utils/regionAnalysis'
+import BuildingChangeForm from '@/components/analysis/BuildingChangeForm.vue'
+import { hasNdviAdmission, ndviPayload, positiveId } from '@/utils/regionAnalysis'
 import type { ImageListItem } from '@/types/image'
 import type { TaskSubmitParams, TaskType } from '@/types/task'
 
+type ComputeTaskType = Exclude<TaskType, 'BUILDING_CHANGE_DETECTION'>
 interface TaskCreateForm {
   imageId?: number
   beforeImageId?: number
-  taskType: TaskType
+  taskType: ComputeTaskType
   redBand: number
   greenBand: number
   nirBand: number
@@ -164,7 +167,10 @@ interface TaskCreateForm {
 
 const router = useRouter()
 const route = useRoute()
-const regionMode = computed(() => route.query.mode === 'region-ndvi')
+const requestedType = computed(() => String(route.query.taskType || route.query.type || '').toUpperCase())
+const modelMode = computed(() => requestedType.value === 'BUILDING_CHANGE_DETECTION')
+const regionMode = computed(() => route.query.mode === 'region-ndvi'
+  || (!!route.query.monitoringRegionId && ['', 'NDVI'].includes(requestedType.value)))
 const monitoringRegionId = ref<number>()
 const monitoringRegions = ref<MonitoringRegion[]>([])
 const regionLoading = ref(true)
@@ -175,9 +181,9 @@ const submitting = ref(false)
 const readyImages = ref<ImageListItem[]>([])
 
 const form = reactive<TaskCreateForm>({
-  imageId: undefined,
-  beforeImageId: undefined,
-  taskType: 'NDVI',
+  imageId: positiveId(route.query.imageId),
+  beforeImageId: positiveId(route.query.beforeImageId),
+  taskType: requestedType.value === 'NDWI' || requestedType.value === 'CHANGE_DETECTION' ? requestedType.value : 'NDVI',
   redBand: 3,
   greenBand: 2,
   nirBand: 4,
@@ -188,7 +194,7 @@ const form = reactive<TaskCreateForm>({
 const taskTypeOptions = computed(() => [
   { label: 'NDVI', value: 'NDVI', disabled: !canRunTaskType('NDVI') },
   { label: 'NDWI', value: 'NDWI', disabled: !canRunTaskType('NDWI') },
-  { label: '变化检测', value: 'CHANGE_DETECTION' },
+  { label: '波段差值变化检测', value: 'CHANGE_DETECTION' },
 ])
 
 const rules: FormRules<TaskCreateForm> = {
@@ -225,7 +231,7 @@ watch(() => form.imageId, async (id, _, onCleanup) => {
   } finally {
     if (!stale) admissionLoading.value = false
   }
-})
+}, { immediate: true })
 const beforeImage = computed(() => readyImages.value.find((item) => item.id === form.beforeImageId))
 const selectedTaskSupported = computed(() => canRunTaskType(form.taskType))
 const selectedBandMappingText = computed(() => formatBandMapping(selectedImage.value))
@@ -253,9 +259,8 @@ watch(selectedImage, () => {
 })
 
 onMounted(() => {
-  if (!regionMode.value) { loadReadyImages(); loadRegions() }
+  if (!regionMode.value && !modelMode.value) { loadReadyImages(); loadRegions() }
 })
-watch(regionMode, value => { if (!value) { loadReadyImages(); loadRegions() } })
 
 async function loadRegions() {
   try {
@@ -283,6 +288,11 @@ async function loadReadyImages() {
       pageSize: 100,
     })
     readyImages.value = page.records.filter((item) => item.status === 'READY')
+    for (const id of new Set([form.imageId, form.beforeImageId])) {
+      if (!id || readyImages.value.some(item => item.id === id)) continue
+      const detail = await getImageDetailApi(id, true).catch(() => undefined)
+      if (detail?.status === 'READY') readyImages.value.push(detail)
+    }
   } finally {
     imageLoading.value = false
   }
@@ -296,7 +306,7 @@ function handleImageChange() {
 }
 
 /** 判断当前选中影像是否支持指定处理任务。 */
-function canRunTaskType(taskType: TaskType) {
+function canRunTaskType(taskType: ComputeTaskType) {
   if (taskType === 'NDVI' && selectedImage.value && !ndviAdmitted.value) return false
   if (taskType === 'CHANGE_DETECTION') {
     return true

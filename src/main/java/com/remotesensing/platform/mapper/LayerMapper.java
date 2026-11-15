@@ -49,4 +49,7 @@ public interface LayerMapper {
      */
     LayerVO selectAccessiblePublishedById(@Param("id") Long id,
                                           @Param("currentUserId") String currentUserId);
+
+    boolean canViewBuildingChangeSource(@Param("taskId") Long taskId, @Param("period") String period,
+                                        @Param("currentUserId") String currentUserId);
 }
