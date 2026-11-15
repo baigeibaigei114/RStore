@@ -9,6 +9,7 @@ import XYZ from 'ol/source/XYZ'
 import { defaults as defaultControls, FullScreen, ScaleLine } from 'ol/control'
 import { fromLonLat, toLonLat } from 'ol/proj'
 import type { Coordinate } from 'ol/coordinate'
+import type { Extent } from 'ol/extent'
 
 export interface UseOlMapOptions {
   center?: Coordinate
@@ -23,6 +24,7 @@ export interface WmsLayerOptions {
   transparent?: boolean
   opacity?: number
   authToken?: string
+  extent?: Extent
 }
 
 const CHINA_BASE_TILE_URL =
@@ -31,7 +33,7 @@ const CHINA_BASE_TILE_URL =
 export function useOlMap(options: UseOlMapOptions = {}) {
   const map = shallowRef<Map>()
   const baseLayer = shallowRef<TileLayer<XYZ>>()
-  const wmsLayer = shallowRef<TileLayer<TileWMS>>()
+  let wmsLayers: TileLayer<TileWMS>[] = []
   const wmsFailed = ref(false)
   const pointerLonLat = ref<Coordinate | null>(null)
   const zoom = ref(options.zoom ?? 5)
@@ -77,16 +79,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     return map.value
   }
 
-  function addWmsLayer(options: WmsLayerOptions) {
-    if (!map.value) {
-      return
-    }
-
-    if (wmsLayer.value) {
-      map.value.removeLayer(wmsLayer.value)
-    }
-
-    wmsFailed.value = false
+  function createWmsLayer(options: WmsLayerOptions, index: number) {
     const layer = new TileLayer({
       source: new TileWMS({
         url: options.url,
@@ -104,26 +97,32 @@ export function useOlMap(options: UseOlMapOptions = {}) {
         },
       }),
       opacity: options.opacity ?? 1,
-      zIndex: 10,
+      extent: options.extent,
+      zIndex: 10 + index,
     })
 
     layer.getSource()?.on('tileloaderror', () => {
-      if (wmsLayer.value === layer) wmsFailed.value = true
+      if (wmsLayers.includes(layer)) wmsFailed.value = true
     })
-    wmsLayer.value = layer
-    map.value.addLayer(layer)
+    return layer
+  }
+
+  function setWmsLayers(options: WmsLayerOptions[]) {
+    const currentMap = map.value
+    if (!currentMap) return
+    removeWmsLayer()
+    wmsLayers = options.map(createWmsLayer)
+    wmsLayers.forEach(layer => currentMap.addLayer(layer))
   }
 
   function removeWmsLayer() {
-    if (map.value && wmsLayer.value) {
-      map.value.removeLayer(wmsLayer.value)
-      wmsLayer.value = undefined
-      wmsFailed.value = false
-    }
+    wmsLayers.forEach(layer => map.value?.removeLayer(layer))
+    wmsLayers = []
+    wmsFailed.value = false
   }
 
   function updateWmsOpacity(opacity: number) {
-    wmsLayer.value?.setOpacity(opacity)
+    wmsLayers.forEach(layer => layer.setOpacity(opacity))
   }
 
   function setBaseLayerVisible(visible: boolean) {
@@ -142,7 +141,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     map.value?.setTarget(undefined)
     map.value = undefined
     baseLayer.value = undefined
-    wmsLayer.value = undefined
+    wmsLayers = []
     pointerLonLat.value = null
     ready.value = false
   }
@@ -161,7 +160,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
       },
     })
       .then((response) => {
-        if (!response.ok) {
+        if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) {
           throw new Error(`WMS 图层加载失败：${response.status}`)
         }
         return response.blob()
@@ -188,7 +187,7 @@ export function useOlMap(options: UseOlMapOptions = {}) {
     ready,
     wmsFailed,
     initMap,
-    addWmsLayer,
+    setWmsLayers,
     removeWmsLayer,
     updateWmsOpacity,
     setBaseLayerVisible,

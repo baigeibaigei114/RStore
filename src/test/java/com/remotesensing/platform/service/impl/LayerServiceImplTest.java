@@ -1,10 +1,13 @@
 package com.remotesensing.platform.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.remotesensing.platform.common.CurrentUserContext;
+import com.remotesensing.platform.common.BuildingChange;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.enums.Visibility;
 import com.remotesensing.platform.config.properties.GeoServerProperties;
@@ -50,6 +53,57 @@ class LayerServiceImplTest {
     void setUp() {
         geoServerProperties = new GeoServerProperties();
         service = new LayerServiceImpl(layerMapper, currentUserContext, geoServerProxyClient, geoServerProperties);
+    }
+
+    @Test
+    void changeOverlayUsesFixedTransparentMaskAndChecksLaterImage() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_change");
+        layer.setTaskType(BuildingChange.TYPE);
+        layer.setTaskId(5L);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+        when(layerMapper.canViewBuildingChangeSource(5L, "after", "user-a")).thenReturn(true);
+        MultiValueMap<String, String> request = new LinkedMultiValueMap<>();
+        request.set("REQUEST", "GetMap");
+        request.set("period", "overlay");
+        request.set("SLD_BODY", "client-style");
+        request.set("STYLES", "client-style");
+        request.set("FORMAT", "image/jpeg");
+        request.set("TRANSPARENT", "false");
+        request.set("TILED", "true");
+
+        service.proxyWms(12L, request);
+
+        ArgumentCaptor<MultiValueMap<String, String>> query = ArgumentCaptor.forClass(MultiValueMap.class);
+        verify(geoServerProxyClient).proxy(org.mockito.ArgumentMatchers.eq("/wms"), query.capture());
+        MultiValueMap<String, String> forwarded = query.getValue();
+        assertThat(forwarded).doesNotContainKeys("period", "SLD_BODY", "STYLES", "FORMAT", "TRANSPARENT", "TILED");
+        assertThat(forwarded.getFirst("layers")).isEqualTo("remote_sensing:task_5_change");
+        assertThat(forwarded.getFirst("format")).isEqualTo("image/png");
+        assertThat(forwarded.getFirst("transparent")).isEqualTo("true");
+        assertThat(forwarded.getFirst("tiled")).isEqualTo("false");
+        assertThat(forwarded.getFirst("sld_body")).contains("<Name>remote_sensing:task_5_change</Name>",
+                "<IsDefault>1</IsDefault>",
+                "quantity=\"0\" color=\"#000000\" opacity=\"0\"",
+                "quantity=\"1\" color=\"#d03832\" opacity=\"1\"",
+                "quantity=\"255\" color=\"#000000\" opacity=\"0\"");
+    }
+
+    @Test
+    void changeOverlayRejectsUnavailableLaterImage() {
+        LayerVO layer = layer(12L, "user-a", Visibility.PRIVATE.dbValue(), "remote_sensing", "task_5_change");
+        layer.setTaskType(BuildingChange.TYPE);
+        layer.setTaskId(5L);
+        when(currentUserContext.getCurrentUserId()).thenReturn("user-a");
+        when(layerMapper.selectAccessiblePublishedById(12L, "user-a")).thenReturn(layer);
+        MultiValueMap<String, String> request = new LinkedMultiValueMap<>();
+        request.set("request", "GetMap");
+        request.set("period", "overlay");
+
+        assertThatThrownBy(() -> service.proxyWms(12L, request)).isInstanceOf(BusinessException.class)
+                .hasMessage("影像已不可访问");
+        verify(layerMapper).canViewBuildingChangeSource(5L, "after", "user-a");
+        verifyNoInteractions(geoServerProxyClient);
     }
 
     @Test

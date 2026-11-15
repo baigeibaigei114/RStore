@@ -21,6 +21,8 @@ docker compose -f docker-compose.yml -f shared/building-change/compose.yml --pro
 
 Worker 使用 2 CPU、2 GiB，模型启动时加载一次。任务沿用原 Outbox、租约和回调。成功状态允许读取统计与签名下载，GeoServer 随后发布前期、后期和变化图层。前后期 WMS 请求实时检查当前账号对原影像的访问权限。
 
+任务地图默认显示「变化叠加」。后期原图上只标出值为 `1` 的预测变化。叠加渲染沿用后期影像的访问权限，GeoServer 通过 WMS `SLD_BODY` 应用服务器固定样式。此前已发布的结果可直接使用，下载仍提供完整分类 GeoTIFF。 [GeoServer SLD 文档](https://docs.geoserver.org/stable/en/user/styling/sld/working/#library-mode)
+
 ## 输出口径
 
 输入以 ImageNet RGB 归一化。反射填充后按 256 × 256 推理，取中央 192 × 192 拼接。共同无效位置的 RGB 在推理前置零，并在结果中标记为 255。阈值严格取大于 0.5。

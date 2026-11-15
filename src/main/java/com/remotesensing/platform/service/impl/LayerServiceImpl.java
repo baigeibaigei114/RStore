@@ -1,5 +1,6 @@
 package com.remotesensing.platform.service.impl;
 
+import com.remotesensing.platform.common.BuildingChange;
 import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.common.PageResult;
 import com.remotesensing.platform.common.ResultCode;
@@ -78,6 +79,24 @@ public class LayerServiceImpl implements LayerService {
     private static final String REQUEST_PARAM = "request";
     /** WMS 允许的请求类型 —— 只支持 GetMap（获取地图图片）和 GetFeatureInfo（获取要素信息） */
     private static final Set<String> WMS_ALLOWED_REQUESTS = Set.of("GetMap", "GetFeatureInfo");
+    private static final String CHANGE_OVERLAY_SLD = """
+            <StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld">
+              <NamedLayer>
+                <Name>%s</Name>
+                <UserStyle>
+                  <Name>tinycd_change_overlay</Name>
+                  <IsDefault>1</IsDefault>
+                  <FeatureTypeStyle><Rule><RasterSymbolizer>
+                    <ColorMap type="values">
+                      <ColorMapEntry quantity="0" color="#000000" opacity="0"/>
+                      <ColorMapEntry quantity="1" color="#d03832" opacity="1"/>
+                      <ColorMapEntry quantity="255" color="#000000" opacity="0"/>
+                    </ColorMap>
+                  </RasterSymbolizer></Rule></FeatureTypeStyle>
+                </UserStyle>
+              </NamedLayer>
+            </StyledLayerDescriptor>
+            """;
 
     private final LayerMapper layerMapper;
     private final CurrentUserContext currentUserContext;
@@ -155,15 +174,17 @@ public class LayerServiceImpl implements LayerService {
         MultiValueMap<String, String> forwardedParams = copyAllowedWithoutKeys(queryParams, WMS_ALLOWED_KEYS, WMS_FORCED_KEYS);
         String qualifiedName = qualifiedLayerName(layer);
         String period = firstValueIgnoreCase(queryParams, "period");
+        boolean overlay = "overlay".equals(period);
         if (period != null) {
-            if (!com.remotesensing.platform.common.BuildingChange.TYPE.equals(layer.getTaskType())
-                    || !Set.of("before", "after").contains(period)) {
+            if (!BuildingChange.TYPE.equals(layer.getTaskType())
+                    || !Set.of("before", "after", "overlay").contains(period)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "无效的模型检测图层");
             }
-            if (!layerMapper.canViewBuildingChangeSource(layer.getTaskId(), period, currentUserContext.getCurrentUserId())) {
+            if (!layerMapper.canViewBuildingChangeSource(layer.getTaskId(), overlay ? "after" : period,
+                    currentUserContext.getCurrentUserId())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "影像已不可访问");
             }
-            qualifiedName += "_" + period;
+            if (!overlay) qualifiedName += "_" + period;
         }
         // Step 6: 添加强制管控参数 —— 防止客户端伪造 service 或 layers
         forwardedParams.set("service", "WMS");
@@ -174,8 +195,23 @@ public class LayerServiceImpl implements LayerService {
         }
         // Step 7: 对未传入的可选参数应用默认值（format 默认 image/png，tiled 按配置决定）
         applyWmsDefaults(queryParams, forwardedParams);
+        if (overlay) applyChangeOverlay(forwardedParams, qualifiedName);
         // Step 8: 转发至 GeoServer
         return geoServerProxyClient.proxy("/wms", forwardedParams);
+    }
+
+    private void applyChangeOverlay(MultiValueMap<String, String> params, String qualifiedName) {
+        if (!"GetMap".equalsIgnoreCase(firstValueIgnoreCase(params, REQUEST_PARAM))
+                || !qualifiedName.matches("[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+")) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "变化叠加仅支持地图渲染");
+        }
+        // The fixed style must be applied even when a client sends a differently cased parameter.
+        Set<String> overridden = Set.of("styles", "transparent", "format", "tiled", "exceptions");
+        params.keySet().removeIf(key -> overridden.contains(key.toLowerCase(Locale.ROOT)));
+        params.set("format", "image/png");
+        params.set("transparent", "true");
+        params.set("tiled", "false");
+        params.set("sld_body", CHANGE_OVERLAY_SLD.formatted(qualifiedName));
     }
 
     /**
