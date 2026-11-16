@@ -20,7 +20,7 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-button v-else text @click="router.push('/login')">登录</el-button>
+      <el-button v-else text @click="router.push({ path: '/login', query: { redirect: route.fullPath } })">登录</el-button>
     </div>
   </el-header>
 </template>
@@ -41,14 +41,13 @@ const pageTitle = computed(() => String(route.meta.title || '工作台'))
 
 onMounted(() => {
   if (authStore.isLoggedIn && !authStore.userInfo) {
-    authStore.loadCurrentUser().catch(() => authStore.logout())
+    void authStore.loadCurrentUser().catch(() => { /* The request interceptor handles session expiry. */ })
   }
 })
 
 function handleCommand(command: string) {
   if (command === 'logout') {
     authStore.logout()
-    router.replace('/login')
   }
 }
 </script>

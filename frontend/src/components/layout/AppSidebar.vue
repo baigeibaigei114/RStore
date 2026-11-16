@@ -23,7 +23,7 @@
         </el-icon>
         <template #title>{{ item.title }}</template>
       </el-menu-item>
-      <el-sub-menu index="advanced">
+      <el-sub-menu v-if="auth.isLoggedIn" index="advanced">
         <template #title>
           <el-icon><Operation /></el-icon>
           <span>进阶功能</span>
@@ -51,16 +51,22 @@ import {
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const appStore = useAppStore()
+const auth = useAuthStore()
 
-const primaryItems = [
+const accountItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
   { path: '/images', title: '影像', icon: Files },
   { path: '/tasks', title: '任务', icon: DataAnalysis },
   { path: '/agent', title: '影像助手', icon: ChatDotRound },
 ]
+const primaryItems = computed(() => auth.isLoggedIn ? accountItems : [
+  { path: '/dashboard', title: '工作台', icon: DataBoard },
+  { path: '/images', title: '公开影像', icon: Files },
+])
 
 const advancedItems = [
   { path: '/map', title: '地图与区域', icon: MapLocation },

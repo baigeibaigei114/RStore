@@ -102,6 +102,14 @@ export interface ImageListItem {
   supportedTaskTypes?: SupportedImageTaskType[]
 }
 
+/** 访客列表和详情的展示字段。 */
+export interface PublicImage extends Pick<ImageListItem, 'id' | 'imageName' | 'sensorType' | 'acquisitionTime'
+  | 'cloudPercent' | 'status' | 'width' | 'height' | 'resolutionMeter' | 'thumbnailStatus'> {
+  footprintWkt?: string
+  previewAvailable?: boolean
+  thumbnailPreview?: { url: string; expiresAt: string }
+}
+
 /** 影像完整详情（继承 ImageListItem，包含全部元数据） */
 export interface ImageDetail extends ImageListItem {
   thumbnailPreview?: { url: string; expiresAt: string } | null

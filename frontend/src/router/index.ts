@@ -36,13 +36,13 @@ const router = createRouter({
           path: 'dashboard',
           name: 'Dashboard',
           component: DashboardView,
-          meta: { title: '工作台', activeMenu: '/dashboard' },
+          meta: { title: '工作台', activeMenu: '/dashboard', public: true },
         },
         {
           path: 'images',
           name: 'ImageList',
           component: ImageListView,
-          meta: { title: '影像资产', activeMenu: '/images' },
+          meta: { title: '影像资产', activeMenu: '/images', public: true },
         },
         {
           path: 'images/upload',
@@ -54,7 +54,7 @@ const router = createRouter({
           path: 'images/:id',
           name: 'ImageDetail',
           component: ImageDetailView,
-          meta: { title: '影像详情', activeMenu: '/images' },
+          meta: { title: '影像详情', activeMenu: '/images', public: true },
         },
         {
           path: 'map',

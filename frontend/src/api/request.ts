@@ -12,6 +12,7 @@ export const apiEndpoint = (path?: string) => resolveApiEndpoint(API_BASE_URL, p
  * 用于请求拦截时自动附加 Authorization 请求头
  */
 export const TOKEN_KEY = 'rs_access_token'
+export const SESSION_EXPIRED_EVENT = 'rs-session-expired'
 
 /** Preserve a definite business rejection so controlled writes can distinguish it from an unknown outcome. */
 export class ApiError extends Error {
@@ -26,11 +27,21 @@ export class ApiError extends Error {
 declare module 'axios' {
   interface AxiosRequestConfig {
     silentError?: boolean
+    anonymous?: boolean
   }
 }
 
 interface RequestConfig extends InternalAxiosRequestConfig {
   silentError?: boolean
+  anonymous?: boolean
+}
+
+function expireSession(config?: RequestConfig) {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token && config?.headers.get('Authorization') === `Bearer ${token}`) {
+    localStorage.removeItem(TOKEN_KEY)
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
 }
 
 /**
@@ -50,7 +61,7 @@ const allowAuthNotice = createAuthNoticeGate()
 request.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = localStorage.getItem(TOKEN_KEY)
 
-  if (token) {
+  if (token && !(config as RequestConfig).anonymous) {
     config.headers.Authorization = `Bearer ${token}`
   }
 
@@ -78,7 +89,7 @@ request.interceptors.response.use(
     // 后端统一使用 Result<T>，业务层只需要拿到 data。
     if (body && typeof body.code === 'number') {
       if (body.code !== 200) {
-        if (body.code === 401) localStorage.removeItem(TOKEN_KEY)
+        if (body.code === 401) expireSession(config)
         const message = body.code === 401 ? authFailureMessage(config.url) : body.message || '请求失败'
         if (body.code === 401 ? allowAuthNotice(config.url, config.silentError) : !config.silentError) {
           ElMessage.error(message)
@@ -95,7 +106,7 @@ request.interceptors.response.use(
     const config = error.config as RequestConfig | undefined
 
     if (error.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
+      expireSession(config)
       if (allowAuthNotice(config?.url, config?.silentError)) {
         ElMessage.error(authFailureMessage(config?.url))
       }

@@ -14,6 +14,16 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface RsImageMapper {
 
+    List<RsImage> selectPublicPage(@Param("keyword") String keyword,
+                                  @Param("offset") long offset,
+                                  @Param("pageSize") int pageSize);
+
+    long countPublic(@Param("keyword") String keyword);
+
+    RsImage selectPublicById(@Param("id") Long id);
+
+    String selectPublicThumbnailKey(@Param("id") Long id);
+
     /**
      * 插入一条新的影像记录。
      * 插入后 MyBatis 回填自增主键 id，缩略图 objectKey 需要依赖该 imageId 生成。

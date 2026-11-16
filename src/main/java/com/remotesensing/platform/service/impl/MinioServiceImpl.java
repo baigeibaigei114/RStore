@@ -5,6 +5,7 @@ import com.remotesensing.platform.common.CurrentUserContext;
 import com.remotesensing.platform.config.properties.MinioProperties;
 import com.remotesensing.platform.exception.BusinessException;
 import com.remotesensing.platform.mapper.FileObjectMapper;
+import com.remotesensing.platform.mapper.RsImageMapper;
 import com.remotesensing.platform.service.MinioService;
 import com.remotesensing.platform.vo.FilePresignedUrlVO;
 import com.remotesensing.platform.vo.MinioUploadVO;
@@ -22,6 +23,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -49,19 +51,23 @@ public class MinioServiceImpl implements MinioService {
     private static final DateTimeFormatter MONTH_FORMATTER = DateTimeFormatter.ofPattern("MM");
     /** 预签名 URL 默认过期时间：30 分钟。选择 30 分钟平衡安全性与大文件下载的耗时。 */
     private static final int DEFAULT_PRESIGNED_EXPIRE_SECONDS = 30 * 60;
+    private static final int PUBLIC_THUMBNAIL_EXPIRE_SECONDS = 5 * 60;
 
     private final MinioClient minioClient;
     private final MinioProperties minioProperties;
     private final FileObjectMapper fileObjectMapper;
+    private final RsImageMapper imageMapper;
     private final CurrentUserContext currentUserContext;
 
     public MinioServiceImpl(MinioClient minioClient,
                             MinioProperties minioProperties,
                             FileObjectMapper fileObjectMapper,
+                            RsImageMapper imageMapper,
                             CurrentUserContext currentUserContext) {
         this.minioClient = minioClient;
         this.minioProperties = minioProperties;
         this.fileObjectMapper = fileObjectMapper;
+        this.imageMapper = imageMapper;
         this.currentUserContext = currentUserContext;
     }
 
@@ -112,16 +118,30 @@ public class MinioServiceImpl implements MinioService {
     @Override
     public FilePresignedUrlVO generatePresignedUrl(String objectKey) {
         validatePresignedObjectKey(objectKey);
+        return signGet(objectKey, DEFAULT_PRESIGNED_EXPIRE_SECONDS, Map.of());
+    }
 
+    @Override
+    public FilePresignedUrlVO generatePublicThumbnailUrl(Long imageId) {
+        String key = imageMapper.selectPublicThumbnailKey(imageId);
+        if (key == null || !key.startsWith("thumbnail/") || !isSafeObjectKey(key)
+                || !(key.endsWith(".png") || key.endsWith(".webp"))) {
+            return null;
+        }
+        return signGet(key, PUBLIC_THUMBNAIL_EXPIRE_SECONDS, Map.of("response-cache-control", "private, no-store"));
+    }
+
+    private FilePresignedUrlVO signGet(String objectKey, int expireSeconds, Map<String, String> responseParameters) {
         try {
             String url = buildPresignedClient().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(minioProperties.getBucketName())
                     .object(objectKey)
                     .region(minioProperties.getRegion())
-                    .expiry(DEFAULT_PRESIGNED_EXPIRE_SECONDS)
+                    .expiry(expireSeconds)
+                    .extraQueryParams(responseParameters)
                     .build());
-            return new FilePresignedUrlVO(objectKey, url, DEFAULT_PRESIGNED_EXPIRE_SECONDS);
+            return new FilePresignedUrlVO(objectKey, url, expireSeconds);
         } catch (Exception exception) {
             throw new BusinessException(ResultCode.FAIL.getCode(), "生成文件预签名 URL 失败：" + exception.getMessage());
         }
@@ -254,7 +274,7 @@ public class MinioServiceImpl implements MinioService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 不能为空");
         }
         // 预签名 URL 会直接暴露私有对象的临时访问能力，先收紧路径形态。
-        if (objectKey.contains("..") || objectKey.startsWith("/") || objectKey.contains("\\")) {
+        if (!isSafeObjectKey(objectKey)) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 格式不合法");
         }
         if (!objectKey.startsWith("raw/")
@@ -267,6 +287,10 @@ public class MinioServiceImpl implements MinioService {
         if (fileObjectMapper.countAccessibleObjectKey(objectKey, currentUserId) <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "objectKey 未在业务表中登记，不能生成访问链接");
         }
+    }
+
+    private static boolean isSafeObjectKey(String key) {
+        return !key.contains("..") && !key.startsWith("/") && !key.contains("\\");
     }
 
     private String buildObjectKey(String originalFilename) {

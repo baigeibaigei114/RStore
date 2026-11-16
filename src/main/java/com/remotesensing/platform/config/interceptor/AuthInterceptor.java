@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * 用户认证拦截器。
@@ -29,6 +30,11 @@ public class AuthInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         // OPTIONS 请求（CORS 预检）不校验身份
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
+            return true;
+        }
+        Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (HttpMethod.GET.matches(request.getMethod())
+                && ("/public/images".equals(pattern) || "/public/images/{id}".equals(pattern))) {
             return true;
         }
         // 解析当前用户 ID，若未认证则直接抛出异常

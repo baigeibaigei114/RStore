@@ -191,6 +191,45 @@
         )
     </insert>
 
+    <sql id="PublicImageAccess">
+        visibility = 'PUBLIC' AND deleted_at IS NULL
+    </sql>
+
+    <sql id="PublicImageNameFilter">
+        <if test="keyword != null">
+            AND strpos(lower(image_name), lower(#{keyword})) &gt; 0
+        </if>
+    </sql>
+
+    <sql id="PublicImageSummary">
+        id, image_name, sensor_type, acquisition_time, cloud_percent, status
+    </sql>
+
+    <select id="selectPublicPage" resultMap="RsImageResultMap">
+        SELECT <include refid="PublicImageSummary"/>
+        FROM rs_image WHERE <include refid="PublicImageAccess"/>
+        <include refid="PublicImageNameFilter"/>
+        ORDER BY acquisition_time DESC NULLS LAST, created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countPublic" resultType="long">
+        SELECT COUNT(*) FROM rs_image WHERE <include refid="PublicImageAccess"/>
+        <include refid="PublicImageNameFilter"/>
+    </select>
+
+    <select id="selectPublicById" resultMap="RsImageResultMap">
+        SELECT <include refid="PublicImageSummary"/>,
+            width, height, resolution_meter, ST_AsText(footprint) AS footprint_wkt,
+            thumbnail_status, thumbnail_object_key
+        FROM rs_image WHERE id = #{id} AND <include refid="PublicImageAccess"/>
+    </select>
+
+    <select id="selectPublicThumbnailKey" resultType="string">
+        SELECT thumbnail_object_key
+        FROM rs_image WHERE id = #{id} AND <include refid="PublicImageAccess"/>
+    </select>
+
     <select id="selectById" resultMap="RsImageResultMap">
         SELECT
         <include refid="BaseColumnList"/>

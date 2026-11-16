@@ -10,6 +10,7 @@ import type {
   ImageSearchParams,
   ImageUploadParams,
   ImageVisibility,
+  PublicImage,
 } from '@/types/image'
 
 /**
@@ -20,6 +21,14 @@ import type {
  */
 export function searchImagesApi(params: ImageSearchParams, silentError = false) {
   return request.get<unknown, PageResult<ImageListItem>>('/images/search', { params, silentError })
+}
+
+export function searchPublicImagesApi(params: Pick<ImageSearchParams, 'keyword' | 'pageNum' | 'pageSize'>) {
+  return request.get<unknown, PageResult<PublicImage>>('/public/images', { params, anonymous: true })
+}
+
+export function getPublicImageDetailApi(id: number | string) {
+  return request.get<unknown, PublicImage>(`/public/images/${id}`, { anonymous: true, silentError: true })
 }
 
 /**

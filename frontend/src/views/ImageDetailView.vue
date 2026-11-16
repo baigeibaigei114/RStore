@@ -2,31 +2,31 @@
   <section class="image-detail">
     <div class="page-title">
       <span>影像详情</span>
-      <h2>{{ image?.imageName || '读取影像详情' }}</h2>
-      <p>查看这景影像的采集信息，选择监测区域继续分析。</p>
+      <h2>{{ displayedImage?.imageName || '影像详情' }}</h2>
+      <p>{{ auth.isLoggedIn ? '查看这景影像的采集信息，选择监测区域继续分析。' : '查看这景公开影像的采集信息、覆盖范围和缩略图。' }}</p>
     </div>
 
     <div class="detail-actions">
-      <el-button type="primary" :disabled="!image" @click="router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId } })">分析这景影像</el-button>
-      <RouterLink to="/agent">影像助手</RouterLink>
+      <el-button v-if="auth.isLoggedIn" type="primary" :disabled="!image" @click="router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', imageId } })">分析这景影像</el-button>
+      <RouterLink v-if="auth.isLoggedIn" to="/agent">影像助手</RouterLink>
       <el-button @click="router.push('/images')">返回列表</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="fetchDetail">刷新</el-button>
-      <el-button :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
+      <el-button v-if="auth.isLoggedIn" :loading="downloadLoading" :disabled="!image" @click="downloadOriginalImage">
         下载原始影像
       </el-button>
     </div>
 
-    <el-skeleton v-if="loading && !image" :rows="8" animated />
+    <el-skeleton v-if="loading && !displayedImage" :rows="8" animated />
 
-    <template v-else-if="image">
+    <template v-else-if="displayedImage">
       <div class="image-overview">
 
           <el-card class="detail-card" shadow="never">
             <template #header>
               <div class="card-header">
                 <span>缩略图</span>
-                <el-tag :type="thumbnailStatusType(image.thumbnailStatus)" effect="plain">
-                  {{ thumbnailStatusText(image.thumbnailStatus) }}
+                <el-tag :type="thumbnailStatusType(displayedImage.thumbnailStatus)" effect="plain">
+                  {{ thumbnailStatusText(displayedImage.thumbnailStatus) }}
                 </el-tag>
               </div>
             </template>
@@ -41,30 +41,30 @@
               @error="handlePreviewError"
             />
             <el-empty v-else :description="previewLoading ? '正在获取缩略图…' : '暂无缩略图'">
-              <el-button v-if="image.thumbnailObjectKey && !previewLoading" link @click="refreshPreview">
+              <el-button v-if="(image?.thumbnailObjectKey || publicImage?.previewAvailable) && !previewLoading" link @click="refreshPreview">
                 重试预览
               </el-button>
             </el-empty>
 
-            <p v-if="image.thumbnailErrorMessage" class="preview-note">暂时没有可用预览，影像信息仍可查看。</p>
+            <p v-if="image?.thumbnailErrorMessage" class="preview-note">暂时没有可用预览，影像信息仍可查看。</p>
           </el-card>
 
         <el-card class="detail-card overview-summary" shadow="never">
-          <template #header><div class="card-header"><span>影像概览</span><el-tag :type="imageStatusType(image.status)" effect="plain">{{ imageStatusText(image.status) }}</el-tag></div></template>
+          <template #header><div class="card-header"><span>影像概览</span><el-tag :type="imageStatusType(displayedImage.status)" effect="plain">{{ imageStatusText(displayedImage.status) }}</el-tag></div></template>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="传感器">{{ image.sensorType || '未记录' }}</el-descriptions-item>
-            <el-descriptions-item label="采集时间">{{ formatDateTime(image.acquisitionTime) }}</el-descriptions-item>
-            <el-descriptions-item label="云量">{{ formatCloud(image.cloudPercent) }}</el-descriptions-item>
-            <el-descriptions-item label="分辨率">{{ formatResolution(image.resolutionMeter) }}</el-descriptions-item>
-            <el-descriptions-item label="尺寸">{{ formatSize(image.width, image.height) }}</el-descriptions-item>
-            <el-descriptions-item label="文件大小">{{ formatFileSize(image.fileSize) }}</el-descriptions-item>
-            <el-descriptions-item label="可见性">{{ visibilityText(image.visibility) }}</el-descriptions-item>
-            <el-descriptions-item label="格式">{{ image.fileFormat || '未记录' }}</el-descriptions-item>
+            <el-descriptions-item label="传感器">{{ displayedImage.sensorType || '未记录' }}</el-descriptions-item>
+            <el-descriptions-item label="采集时间">{{ formatDateTime(displayedImage.acquisitionTime) }}</el-descriptions-item>
+            <el-descriptions-item label="云量">{{ formatCloud(displayedImage.cloudPercent) }}</el-descriptions-item>
+            <el-descriptions-item label="分辨率">{{ formatResolution(displayedImage.resolutionMeter) }}</el-descriptions-item>
+            <el-descriptions-item label="尺寸">{{ formatSize(displayedImage.width, displayedImage.height) }}</el-descriptions-item>
+            <el-descriptions-item v-if="image" label="文件大小">{{ formatFileSize(image.fileSize) }}</el-descriptions-item>
+            <el-descriptions-item label="可见性">{{ image ? visibilityText(image.visibility) : '公开' }}</el-descriptions-item>
+            <el-descriptions-item v-if="image" label="格式">{{ image.fileFormat || '未记录' }}</el-descriptions-item>
           </el-descriptions>
-          <p class="preview-note">选择一个已保存的监测区域继续分析。提交前会核对影像和区域是否可用。</p>
+          <p v-if="image" class="preview-note">选择一个已保存的监测区域继续分析。提交前会核对影像和区域是否可用。</p>
         </el-card>
       </div>
-      <el-collapse v-model="detailPanels" class="advanced-panels">
+      <el-collapse v-if="image" v-model="detailPanels" class="advanced-panels">
         <el-collapse-item title="来源与技术详情" name="technical">
           <InputProvenance :raw="image.metadataJson" />
           <p v-if="image.thumbnailErrorMessage" class="error-text">缩略图原始错误：{{ image.thumbnailErrorMessage }}</p>
@@ -190,10 +190,15 @@
           </el-card>
         </el-collapse-item>
       </el-collapse>
+      <el-collapse v-else-if="publicImage?.footprintWkt" class="advanced-panels">
+        <el-collapse-item title="空间范围（WGS 84）" name="footprint">
+          <pre class="code-block">{{ publicImage.footprintWkt }}</pre>
+        </el-collapse-item>
+      </el-collapse>
     </template>
 
     <el-card v-else class="placeholder-card" shadow="never">
-      <el-empty description="未找到影像详情">
+      <el-empty :description="detailError || '未找到影像详情'">
         <el-button type="primary" @click="router.push('/images')">返回影像列表</el-button>
       </el-empty>
     </el-card>
@@ -206,18 +211,22 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
+import { isAxiosError } from 'axios'
+import { useAuthStore } from '@/stores/auth'
 import {
   deleteImageApi,
   getImageDetailWithThumbnailApi,
   getImageDownloadUrlApi,
   getImageThumbnailUrlApi,
+  getPublicImageDetailApi,
   updateImageBandMappingApi,
   updateImageVisibilityApi,
 } from '@/api/image'
-import type { ImageBandMappingUpdateParams, ImageDetail, ImageStatus, ImageVisibility, ThumbnailStatus } from '@/types/image'
+import type { ImageBandMappingUpdateParams, ImageDetail, ImageStatus, ImageVisibility, PublicImage, ThumbnailStatus } from '@/types/image'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 const loading = ref(false)
 const downloadLoading = ref(false)
@@ -225,6 +234,9 @@ const deleteLoading = ref(false)
 const visibilitySaving = ref(false)
 const bandMappingSaving = ref(false)
 const image = ref<ImageDetail | null>(null)
+const publicImage = ref<PublicImage | null>(null)
+const displayedImage = computed(() => auth.isLoggedIn ? image.value : publicImage.value)
+const detailError = ref('')
 const thumbnailUrl = ref('')
 const previewLoading = ref(false)
 let detailRequest = 0
@@ -257,6 +269,7 @@ const supportedTaskText = computed(() => {
 
 watch(imageId, () => {
   image.value = null
+  publicImage.value = null
   void fetchDetail()
 }, { immediate: true })
 onBeforeUnmount(() => { detailRequest++ })
@@ -268,23 +281,30 @@ async function fetchDetail() {
   thumbnailUrl.value = ''
   previewLoading.value = false
   previewRetried = false
+  detailError.value = ''
 
   try {
-    const detail = await getImageDetailWithThumbnailApi(id)
-    if (call !== detailRequest) return
-    image.value = detail
-    visibilityValue.value = detail.visibility
-    syncBandMapping(detail)
-
-    if (detail.thumbnailPreview) {
-      if (Date.parse(detail.thumbnailPreview.expiresAt) > Date.now()) {
-        thumbnailUrl.value = detail.thumbnailPreview.url
-      } else {
-        void refreshPreview()
-      }
+    if (auth.isLoggedIn) {
+      const detail = await getImageDetailWithThumbnailApi(id)
+      if (call !== detailRequest) return
+      image.value = detail
+      visibilityValue.value = detail.visibility
+      syncBandMapping(detail)
+    } else {
+      const detail = await getPublicImageDetailApi(id)
+      if (call !== detailRequest) return
+      publicImage.value = detail
     }
-  } catch {
-    // The request interceptor shows the detail error.
+    const preview = displayedImage.value?.thumbnailPreview
+    if (preview) {
+      if (Date.parse(preview.expiresAt) > Date.now()) thumbnailUrl.value = preview.url
+      else void refreshPreview()
+    }
+  } catch (error) {
+    if (call === detailRequest && !auth.isLoggedIn) {
+      publicImage.value = null
+      if (!isAxiosError(error) || error.response?.status !== 404) detailError.value = '暂时无法读取影像详情，请刷新重试。'
+    }
   } finally {
     if (call === detailRequest) loading.value = false
   }
@@ -297,15 +317,26 @@ function handlePreviewError() {
 
 async function refreshPreview() {
   const detail = image.value
-  if (!detail?.thumbnailObjectKey || previewLoading.value) return
+  const guestDetail = publicImage.value
+  if ((!detail?.thumbnailObjectKey && !guestDetail?.previewAvailable) || previewLoading.value) return
   const call = detailRequest
   previewRetried = true
   previewLoading.value = true
   try {
-    const preview = await getImageThumbnailUrlApi(detail.id, true)
-    if (call === detailRequest) thumbnailUrl.value = preview.url
-  } catch {
-    // Keep the retry control available when the preview cannot be signed.
+    if (guestDetail) {
+      const updated = await getPublicImageDetailApi(guestDetail.id)
+      if (call !== detailRequest) return
+      publicImage.value = updated
+      const preview = updated.thumbnailPreview
+      thumbnailUrl.value = preview && Date.parse(preview.expiresAt) > Date.now() ? preview.url : ''
+    } else if (detail) {
+      const preview = await getImageThumbnailUrlApi(detail.id, true)
+      if (call === detailRequest) thumbnailUrl.value = preview.url
+    }
+  } catch (error) {
+    if (call === detailRequest && guestDetail && isAxiosError(error) && error.response?.status === 404) {
+      publicImage.value = null
+    }
   } finally {
     if (call === detailRequest) previewLoading.value = false
   }

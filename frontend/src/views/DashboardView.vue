@@ -1,6 +1,14 @@
 <template>
   <section class="analysis-desk">
-    <header class="desk-heading"><span>区域植被监测 / 工作台</span><p>一次观测，从这里开始</p></header>
+    <header class="desk-heading"><span>区域植被监测 / 工作台</span><p v-if="auth.isLoggedIn">一次观测，从这里开始</p></header>
+    <div v-if="!auth.isLoggedIn" class="guest-introduction">
+      <div class="introduction">
+        <h1>浏览公开遥感影像</h1>
+        <p>查看公开样本的采集信息、覆盖范围和缩略图。</p>
+        <el-button type="primary" size="large" @click="router.push('/images')">浏览公开影像</el-button>
+      </div>
+    </div>
+    <template v-else>
     <div class="desk-main">
       <div class="introduction"><span class="eyebrow">单期区域 NDVI</span><h1>选择一景影像，<br>看见区域的植被绿度。</h1><p>确认影像和监测区域，提交分析。<br>计算完成后，在同一页查看真实统计。</p>
         <el-button v-if="sample" type="primary" size="large" @click="startSample">用示例数据开始</el-button>
@@ -23,6 +31,7 @@
     </section>
     <el-alert v-if="expired" title="登录已过期，请重新登录后继续。" type="warning" :closable="false"><el-button @click="relogin">重新登录并返回</el-button></el-alert>
     <footer class="desk-footer"><span>进阶操作</span><router-link to="/images">影像资产</router-link><router-link to="/map">地图与画区</router-link><router-link to="/ingestion">SAFE 入库</router-link><router-link to="/agent">影像助手</router-link></footer>
+    </template>
   </section>
 </template>
 
@@ -45,9 +54,9 @@ const recentLoaded = ref(false)
 let alive = true, epoch = 0
 let loadedAccount: string | undefined
 onBeforeUnmount(() => { alive = false; epoch++ })
-onMounted(load)
+onMounted(() => { if (auth.isLoggedIn) void load() })
 async function load() {
-  if (loading.value) return
+  if (!auth.isLoggedIn || loading.value) return
   loading.value = true
   const generation = ++epoch
   try {
@@ -99,6 +108,7 @@ function relogin() { auth.logout(); void router.push({ path: '/login', query: { 
 .analysis-desk { max-width: 1120px; margin: 0 auto; color: #193e30; --el-color-primary: #175b47; }
 .desk-heading { display: flex; justify-content: space-between; border-bottom: 1px solid #dbe4de; padding-bottom: 16px; font-size: 13px; letter-spacing: .08em; }.desk-heading p { margin: 0; color: #77847b; }
 .desk-main { display: grid; grid-template-columns: 1.2fr 1fr; background: #fff; margin: 24px 0; border: 1px solid #e2e9e4; }
+.guest-introduction { background: #fff; margin: 24px 0; border: 1px solid #e2e9e4; }
 .introduction { padding: 36px; }.eyebrow { color: #6e8276; font-size: 12px; letter-spacing: .14em; }.introduction h1 { font-family: 'Noto Serif SC','Source Han Serif SC','SimSun',serif; font-size: clamp(26px, 2.5vw, 36px); line-height: 1.5; margin: 16px 0; font-weight: 600; }.introduction p { color: #67796c; line-height: 1.9; font-size: 14px; }
 .text-action { display: block; border: 0; background: none; padding: 16px 0 0; color: #175b47; cursor: pointer; }.sample-panel { padding: 24px 32px; background: #edf3ee; }.sample-label { font-size: 11px; letter-spacing: .14em; color: #6b806f; }.sample-panel h3 { font-size: 17px; margin: 8px 0; }.sample-panel p { font-size: 13px; color: #6a7c70; line-height: 1.8; }.sample-region { border-top: 1px solid #d4dfd5; padding-top: 14px; font-size: 14px; line-height: 1.8; }.sample-contour { height: 110px; }.sample-contour svg { height: 100%; width: 100%; fill: none; stroke: #b3c7b7; stroke-width: 1.5; }.sample-contour rect { stroke: #175b47; stroke-width: 2; fill: #175b470a; }
 .recent { border-top: 1px solid #dbe4de; border-bottom: 1px solid #dbe4de; padding: 20px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }.recent h3 { margin: 8px 0; font-size: 17px; }.recent p,.subtle { font-size: 13px !important; color: #718074; }.desk-footer { display: flex; flex-wrap: wrap; gap: 22px; padding: 22px 0; font-size: 13px; }.desk-footer span { color: #859187; }.desk-footer a { color: #536c5c; }

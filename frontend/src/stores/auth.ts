@@ -38,12 +38,14 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     async loadCurrentUser() {
-      if (!this.token) {
+      const token = this.token
+      if (!token) {
         return null
       }
-
-      this.userInfo = await getCurrentUserApi()
-      return this.userInfo
+      const user = await getCurrentUserApi()
+      if (this.token !== token) return null
+      this.userInfo = user
+      return user
     },
     logout() {
       this.token = ''

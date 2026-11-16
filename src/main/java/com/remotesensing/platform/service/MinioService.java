@@ -56,4 +56,7 @@ public interface MinioService {
      * @return 预签名 URL 信息（URL、过期时间等）
      */
     FilePresignedUrlVO generatePresignedUrl(String objectKey);
+
+    /** 为当前公开影像的缩略图生成短期 GET 地址。没有可访问的缩略图时返回 null。 */
+    FilePresignedUrlVO generatePublicThumbnailUrl(Long imageId);
 }

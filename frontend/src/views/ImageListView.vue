@@ -1,9 +1,9 @@
 <template>
   <section class="image-catalog">
     <div class="page-title">
-      <span>我的影像</span>
+      <span>{{ auth.isLoggedIn ? '我的影像' : '公开影像' }}</span>
       <h2>选择要查看的影像</h2>
-      <p>按名称查找影像，打开详情后可开始区域分析。</p>
+      <p>{{ auth.isLoggedIn ? '按名称查找影像，打开详情后可开始区域分析。' : '按名称查找公开影像，查看采集信息和缩略图。' }}</p>
     </div>
 
     <el-card class="filter-card" shadow="never">
@@ -15,13 +15,13 @@
           <div class="query-actions">
             <el-button type="primary" :icon="Search" :loading="loading" @click="submitSearch">查询</el-button>
             <el-button :icon="Refresh" @click="resetSearch">重置</el-button>
-            <el-button :aria-expanded="moreFilters" aria-controls="image-advanced-filters" @click="moreFilters = !moreFilters">
+            <el-button v-if="auth.isLoggedIn" :aria-expanded="moreFilters" aria-controls="image-advanced-filters" @click="moreFilters = !moreFilters">
               {{ moreFilters ? '收起筛选' : '更多筛选' }}{{ selectedFilterCount ? `（已设置 ${selectedFilterCount} 项）` : '' }}
             </el-button>
-            <el-button :icon="UploadFilled" @click="router.push('/images/upload')">上传影像</el-button>
+            <el-button v-if="auth.isLoggedIn" :icon="UploadFilled" @click="router.push('/images/upload')">上传影像</el-button>
           </div>
         </div>
-        <el-row v-show="moreFilters" id="image-advanced-filters" :gutter="16">
+        <el-row v-if="auth.isLoggedIn" v-show="moreFilters" id="image-advanced-filters" :gutter="16">
           <el-col :xs="24" :sm="12" :lg="6">
             <el-form-item label="传感器">
               <el-input v-model="queryForm.sensor" clearable placeholder="例如 Sentinel-2" />
@@ -58,7 +58,7 @@
       </el-form>
     </el-card>
 
-    <el-collapse class="optional-search">
+    <el-collapse v-if="auth.isLoggedIn" class="optional-search">
       <el-collapse-item title="用自然语言筛选（可选）" name="ai">
       <p class="ai-explanation">将一句话整理成筛选条件，由你核对后再查询。</p>
 
@@ -120,7 +120,7 @@
         <el-table-column label="影像" min-width="260">
           <template #default="{ row }">
             <div class="image-identity"><strong>{{ row.imageName || '未命名影像' }}</strong>
-              <small>{{ row.sensorType || '未记录来源' }} · {{ row.visibility === 'PUBLIC' ? '公开' : '私有' }}</small></div>
+              <small>{{ row.sensorType || '未记录来源' }} · {{ !auth.isLoggedIn || row.visibility === 'PUBLIC' ? '公开' : '私有' }}</small></div>
           </template>
         </el-table-column>
         <el-table-column label="云量" width="100">
@@ -165,17 +165,19 @@
 
 <script setup lang="ts">
 import { legacyAgentWrites } from '@/utils/legacyAgent'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { parseAiQueryApi } from '@/api/ai'
-import { searchImagesApi } from '@/api/image'
+import { searchImagesApi, searchPublicImagesApi } from '@/api/image'
+import { useAuthStore } from '@/stores/auth'
 import type { AiQueryParseResult } from '@/types/ai'
 import type {
   ImageListItem,
   ImageSearchParams,
   ImageStatus,
+  PublicImage,
 } from '@/types/image'
 import type { TaskType } from '@/types/task'
 
@@ -187,12 +189,14 @@ interface QueryForm {
 }
 
 const router = useRouter()
+const auth = useAuthStore()
 const loading = ref(false)
 const moreFilters = ref(false)
 const aiInput = ref('')
 const aiParseLoading = ref(false)
 const aiParsed = ref<AiQueryParseResult | null>(null)
-const imageList = ref<ImageListItem[]>([])
+const imageList = ref<(ImageListItem | PublicImage)[]>([])
+let listRequest = 0
 
 const queryForm = reactive<QueryForm>({
   keyword: '',
@@ -211,20 +215,27 @@ const pagination = reactive({
 })
 
 onMounted(() => {
-  fetchImages()
+  void fetchImages()
 })
+onBeforeUnmount(() => { listRequest++ })
 
 async function fetchImages() {
+  const call = ++listRequest
   loading.value = true
   try {
     const params = buildSearchParams()
-    const page = await searchImagesApi(params)
+    const page = await (auth.isLoggedIn ? searchImagesApi(params) : searchPublicImagesApi({
+      keyword: params.keyword, pageNum: params.pageNum, pageSize: params.pageSize,
+    }))
+    if (call !== listRequest) return
     imageList.value = page.records
     pagination.total = page.total
     pagination.pageNum = page.pageNum
     pagination.pageSize = page.pageSize
+  } catch {
+    // The request interceptor shows the list error.
   } finally {
-    loading.value = false
+    if (call === listRequest) loading.value = false
   }
 }
 
@@ -279,7 +290,7 @@ function applyAiParsedResult(result: AiQueryParseResult) {
   pagination.pageNum = 1
 }
 
-function openDetail(row: ImageListItem) {
+function openDetail(row: Pick<ImageListItem, 'id'>) {
   router.push(`/images/${row.id}`)
 }
 
