@@ -18,8 +18,10 @@ import com.remotesensing.platform.vo.RsImageVO;
 import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -116,8 +118,21 @@ public class RsImageController {
      * @return 影像详细信息 VO，包含元数据与空间范围
      */
     @GetMapping("/{id}")
-    public Result<RsImageVO> getById(@PathVariable Long id) {
-        return Result.success(imageService.getById(id));
+    public ResponseEntity<Result<RsImageVO>> getById(@PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean includeThumbnail) {
+        RsImageVO image = imageService.getById(id);
+        if (includeThumbnail && image.getThumbnailObjectKey() != null && !image.getThumbnailObjectKey().isBlank()) {
+            try {
+                checkPresignedUrlRateLimit();
+                Instant issuedAt = Instant.now();
+                FilePresignedUrlVO preview = imageService.getThumbnailUrl(id);
+                image.setThumbnailPreview(new RsImageVO.ThumbnailPreview(
+                        preview.getUrl(), issuedAt.plusSeconds(preview.getExpireSeconds())));
+            } catch (BusinessException unavailable) {
+                // Preview is optional. The detail stays available if signing or its rate limit fails.
+            }
+        }
+        return ResponseEntity.ok().header("Cache-Control", "private, no-store").body(Result.success(image));
     }
 
     /**

@@ -72,7 +72,10 @@ class LayerServiceImplTest {
         request.set("TRANSPARENT", "false");
         request.set("TILED", "true");
 
-        service.proxyWms(12L, request);
+        when(geoServerProxyClient.proxy(org.mockito.ArgumentMatchers.eq("/wms"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(ResponseEntity.ok().header("Cache-Control", "public, max-age=120")
+                        .body(streaming(new byte[]{1})));
+        assertThat(service.proxyWms(12L, request).getHeaders().getCacheControl()).isEqualTo("private, no-store");
 
         ArgumentCaptor<MultiValueMap<String, String>> query = ArgumentCaptor.forClass(MultiValueMap.class);
         verify(geoServerProxyClient).proxy(org.mockito.ArgumentMatchers.eq("/wms"), query.capture());

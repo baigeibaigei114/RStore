@@ -199,15 +199,15 @@ public class ThumbnailAsyncServiceImpl implements ThumbnailAsyncService {
     /**
      * 构建缩略图在 MinIO 中的对象键。
      *
-     * <p>路径格式：{@code thumbnail/{yyyy}/{MM}/{imageId}.png}，按创建时间分目录存储，
+     * <p>路径格式：{@code thumbnail/{yyyy}/{MM}/{imageId}.webp}，按创建时间分目录存储，
      * 避免单个前缀下对象过多导致 MinIO 列出性能下降。</p>
      *
      * @param image 影像记录
-     * @return 缩略图对象键，例如 {@code thumbnail/2025/03/42.png}
+     * @return 缩略图对象键，例如 {@code thumbnail/2025/03/42.webp}
      */
     private String buildThumbnailObjectKey(RsImage image) {
         OffsetDateTime time = image.getCreatedAt() == null ? OffsetDateTime.now() : image.getCreatedAt();
-        return "thumbnail/%s/%s/%s.png".formatted(
+        return "thumbnail/%s/%s/%s.webp".formatted(
                 YEAR_FORMATTER.format(time),
                 MONTH_FORMATTER.format(time),
                 image.getId()

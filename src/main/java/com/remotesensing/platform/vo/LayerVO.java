@@ -22,6 +22,12 @@ public class LayerVO {
 
     /** 关联影像的名称，通过 JOIN rs_image 查询得到。 */
     private String imageName;
+    /** 有权访问的后期源影像范围。 */
+    private String footprintWkt;
+    private String footprintCrs;
+    /** 模型结果全部像元有效时可使用不含透明通道的底图。 */
+    private Boolean opaqueRgb;
+    private Boolean hasPredictedChanges;
 
     /** 关联影像的软删除时间（UTC），用于判断原始影像是否已被删除，通过 JOIN rs_image 查询。 */
     private OffsetDateTime imageDeletedAt;

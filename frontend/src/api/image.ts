@@ -42,6 +42,10 @@ export function getImageDetailApi(id: number | string, silentError = false) {
   return request.get<unknown, ImageDetail>(`/images/${id}`, { silentError })
 }
 
+export function getImageDetailWithThumbnailApi(id: number | string) {
+  return request.get<unknown, ImageDetail>(`/images/${id}`, { params: { includeThumbnail: true } })
+}
+
 /**
  * 获取影像原始文件下载地址接口
  * 返回一个预签名的临时下载 URL（MinIO 预签名 URL），可直连对象存储下载
@@ -58,8 +62,8 @@ export function getImageDownloadUrlApi(imageId: number | string) {
  * @param imageId - 影像 ID
  * @returns Promise<FilePresignedUrl> - 包含缩略图预签名 URL 的对象
  */
-export function getImageThumbnailUrlApi(imageId: number | string) {
-  return request.get<unknown, FilePresignedUrl>(`/images/${imageId}/thumbnail-url`)
+export function getImageThumbnailUrlApi(imageId: number | string, silentError = false) {
+  return request.get<unknown, FilePresignedUrl>(`/images/${imageId}/thumbnail-url`, { silentError })
 }
 
 /**

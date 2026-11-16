@@ -15,6 +15,9 @@ public class LayerSearchDTO {
     /** 关联影像主键 ID 筛选，对应 rs_image 表 id 列。 */
     private Long imageId;
 
+    /** 精确定位当前用户的任务结果。 */
+    private Long taskId;
+
     /** 搜索关键词，模糊匹配图层名称或关联影像名称。 */
     private String keyword;
 }

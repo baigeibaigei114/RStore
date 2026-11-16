@@ -197,7 +197,16 @@ public class LayerServiceImpl implements LayerService {
         applyWmsDefaults(queryParams, forwardedParams);
         if (overlay) applyChangeOverlay(forwardedParams, qualifiedName);
         // Step 8: 转发至 GeoServer
-        return geoServerProxyClient.proxy("/wms", forwardedParams);
+        ResponseEntity<StreamingResponseBody> response = geoServerProxyClient.proxy("/wms", forwardedParams);
+        if (period == null) {
+            return response;
+        }
+        return ResponseEntity.status(response.getStatusCode())
+                .headers(headers -> {
+                    headers.addAll(response.getHeaders());
+                    headers.set("Cache-Control", "private, no-store");
+                })
+                .body(response.getBody());
     }
 
     private void applyChangeOverlay(MultiValueMap<String, String> params, String qualifiedName) {

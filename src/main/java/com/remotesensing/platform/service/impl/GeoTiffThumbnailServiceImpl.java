@@ -18,19 +18,19 @@ import org.springframework.stereotype.Service;
 /**
  * GeoTIFF 缩略图生成服务实现类。
  *
- * <p>职责：调用 Python 工作进程生成 GeoTIFF 的缩略图 PNG，并将结果上传至 MinIO 对象存储。</p>
+ * <p>职责：调用 Python 工作进程生成 GeoTIFF 的缩略图 WebP，并将结果上传至 MinIO 对象存储。</p>
  *
  * <p>核心设计点：</p>
  * <ul>
  *   <li>影像波段读取和直方图拉伸等计算密集型操作由 Python/rasterio 完成，Java 只做流程编排；</li>
- *   <li>临时文件统一在 finally 块中清理，保证不会残留临时 PNG 文件；</li>
- *   <li>即使 Python 脚本返回 {@code success: true}，仍校验 PNG 文件是否实际落盘，防止上传空路径。</li>
+ *   <li>临时文件统一在 finally 块中清理，保证不会残留临时 WebP 文件；</li>
+ *   <li>即使 Python 脚本返回 {@code success: true}，仍校验 WebP 文件是否实际落盘，防止上传空路径。</li>
  * </ul>
  */
 @Service
 public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
 
-    private static final String PNG_CONTENT_TYPE = "image/png";
+    private static final String WEBP_CONTENT_TYPE = "image/webp";
 
     private final PythonWorkerProperties properties;
     private final ObjectMapper objectMapper;
@@ -47,7 +47,7 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
     /**
      * 生成指定 GeoTIFF 的缩略图，并上传至 MinIO。
      *
-     * <p>流程：创建临时目录 -> 调用 Python 脚本生成 PNG -> 上传 PNG 到 MinIO -> 清理临时文件。</p>
+     * <p>流程：创建临时目录 -> 调用 Python 脚本生成 WebP -> 上传 WebP 到 MinIO -> 清理临时文件。</p>
      *
      * <p>关键约束：</p>
      * <ul>
@@ -67,10 +67,10 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
         Path thumbnailFile = null;
         try {
             tempDir = Files.createTempDirectory("rs-thumb-");
-            thumbnailFile = tempDir.resolve("thumbnail.png");
+            thumbnailFile = tempDir.resolve("thumbnail.webp");
 
             runPythonThumbnail(inputFile, thumbnailFile);
-            minioService.uploadLocalFile(thumbnailFile, thumbnailObjectKey, PNG_CONTENT_TYPE);
+            minioService.uploadLocalFile(thumbnailFile, thumbnailObjectKey, WEBP_CONTENT_TYPE);
             return thumbnailObjectKey;
         } catch (BusinessException exception) {
             throw exception;
@@ -85,18 +85,18 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
     /**
      * 启动 Python 进程执行缩略图生成脚本。
      *
-     * <p>Python 脚本接收两个参数：源 GeoTIFF 路径和输出 PNG 路径。脚本完成 PNG 生成后，
+     * <p>Python 脚本接收两个参数：源 GeoTIFF 路径和输出 WebP 路径。脚本完成 WebP 生成后，
      * 通过 stdout 输出 {@code {"success": true/false}} 表示执行结果。</p>
      *
      * <p>校验逻辑：</p>
      * <ul>
      *   <li>超时退出并强制销毁进程；</li>
      *   <li>stdout 为空时以 stderr 作为错误信息；</li>
-     *   <li>脚本返回成功后仍需 {@link Files} 确认 PNG 文件确实落盘。</li>
+     *   <li>脚本返回成功后仍需 {@link Files} 确认 WebP 文件确实落盘。</li>
      * </ul>
      *
      * @param inputFile     源 GeoTIFF 文件路径
-     * @param thumbnailFile 输出的缩略图 PNG 文件路径
+     * @param thumbnailFile 输出的缩略图 WebP 文件路径
      * @throws IOException          如果进程 I/O 或 JSON 解析失败
      * @throws InterruptedException 如果当前线程被中断
      */
@@ -124,14 +124,14 @@ public class GeoTiffThumbnailServiceImpl implements GeoTiffThumbnailService {
             throw new BusinessException(ResultCode.FAIL.getCode(), "Python 缩略图脚本无输出：" + stderr);
         }
 
-        // 即使脚本返回成功，也确认 PNG 文件确实落盘，避免上传空路径。
+        // 即使脚本返回成功，也确认 WebP 文件确实落盘，避免上传空路径。
         JsonNode root = objectMapper.readTree(stdout);
         if (!root.path("success").asBoolean(false)) {
             throw new BusinessException(ResultCode.FAIL.getCode(), root.path("error").asText("缩略图生成失败"));
         }
         // 二次校验：脚本可能返回 success:true 但实际文件并未写入（如磁盘空间不足）
         if (!Files.exists(thumbnailFile)) {
-            throw new BusinessException(ResultCode.FAIL.getCode(), "缩略图脚本未生成 PNG 文件");
+            throw new BusinessException(ResultCode.FAIL.getCode(), "缩略图脚本未生成 WebP 文件");
         }
     }
 

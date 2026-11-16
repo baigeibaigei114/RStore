@@ -40,6 +40,9 @@
         <if test="query.imageId != null">
           AND rf.image_id = #{query.imageId}
         </if>
+        <if test="query.taskId != null">
+          AND rf.task_id = #{query.taskId} AND t.owner_id = #{currentUserId} AND t.image_id = rf.image_id
+        </if>
         <if test="query.keyword != null">
           AND (
             rf.file_name ILIKE CONCAT('%', #{query.keyword}, '%')
@@ -49,9 +52,28 @@
         </if>
     </sql>
 
+    <sql id="AccessibleAfterImage">
+        t.task_type = 'BUILDING_CHANGE_DETECTION'
+            AND i.id::text = (t.params -&gt;&gt; 'afterImageId')
+            AND i.deleted_at IS NULL AND (i.owner_id = #{currentUserId} OR i.visibility = 'PUBLIC')
+    </sql>
+
     <select id="selectPage" resultType="com.remotesensing.platform.vo.LayerVO">
         SELECT
-        <include refid="LayerColumnList"/>
+        <include refid="LayerColumnList"/>,
+        CASE WHEN <include refid="AccessibleAfterImage"/>
+            THEN ST_AsText(i.footprint) END AS footprint_wkt,
+        CASE WHEN <include refid="AccessibleAfterImage"/> AND i.footprint IS NOT NULL
+            THEN 'EPSG:' || ST_SRID(i.footprint) END AS footprint_crs,
+        CASE WHEN <include refid="AccessibleAfterImage"/> AND i.footprint IS NOT NULL
+            THEN rf.result_metadata #>> '{statistics,validPixelCount}' = rf.result_metadata #>> '{statistics,totalPixelCount}'
+                 AND rf.result_metadata #>> '{statistics,totalPixelCount}' != '0'
+            END AS opaque_rgb,
+        CASE WHEN <include refid="AccessibleAfterImage"/>
+             AND jsonb_typeof(rf.result_metadata #> '{statistics,changedPixelCount}') = 'number'
+             AND rf.result_metadata #>> '{statistics,validPixelCount}' != '0'
+            THEN rf.result_metadata #>> '{statistics,changedPixelCount}' != '0'
+            END AS has_predicted_changes
         <include refid="LayerBaseFromWhere"/>
         ORDER BY rf.published_at DESC NULLS LAST, rf.id DESC
         LIMIT #{pageSize} OFFSET #{offset}

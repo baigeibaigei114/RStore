@@ -43,16 +43,19 @@ public class LayerController {
      * @return 分页结果，包含图层概要信息列表
      */
     @GetMapping
-    public Result<PageResult<LayerVO>> page(@RequestParam(required = false) Integer pageNum,
+    public ResponseEntity<Result<PageResult<LayerVO>>> page(@RequestParam(required = false) Integer pageNum,
                                             @RequestParam(required = false) Integer pageSize,
                                             @RequestParam(required = false) String taskType,
                                             @RequestParam(required = false) Long imageId,
+                                            @RequestParam(required = false) Long taskId,
                                             @RequestParam(required = false) String keyword) {
         LayerSearchDTO query = new LayerSearchDTO();
         query.setTaskType(taskType);
         query.setImageId(imageId);
+        query.setTaskId(taskId);
         query.setKeyword(keyword);
-        return Result.success(layerService.page(query, pageNum, pageSize));
+        return ResponseEntity.ok().header("Cache-Control", "private, no-store")
+                .body(Result.success(layerService.page(query, pageNum, pageSize)));
     }
 
     /**

@@ -45,6 +45,12 @@
                   <el-radio-button value="overlay">变化叠加</el-radio-button>
                 </el-radio-group>
                 <div v-if="period === 'overlay'" class="change-legend"><span aria-hidden="true"></span>预测变化</div>
+                <p v-if="detectionFailed.length" class="change-legend" role="status">
+                  {{ detectionFailed.includes('overlay') ? '变化叠加加载失败。' : '原图加载失败。' }}
+                  <el-button link @click="detection.select(period, true)">重试图层</el-button>
+                </p>
+                <p v-else-if="detectionPending || locating" class="change-legend" role="status">正在加载当前视窗…</p>
+                <p v-else-if="period === 'overlay' && loadedLayer.hasPredictedChanges === false" class="change-legend" role="status">没有预测变化。</p>
               </section>
             </MapResultPanel>
             <MonitoringRegionPanel v-show="mode === 'regions'" :map="map" :active="panelOpen && mode === 'regions'" :image-id="loadedLayer?.imageId" />
@@ -76,6 +82,7 @@ import { getTaskResultEvidenceApi } from '@/api/ai'
 import { getLayerProxyWmsUrl } from '@/api/layer'
 import { TOKEN_KEY } from '@/api/request'
 import { useOlMap } from '@/composables/map/useOlMap'
+import { useDetectionWms, type DetectionPeriod } from '@/composables/map/useDetectionWms'
 import { isUnauthorized, positiveId } from '@/utils/regionAnalysis'
 import { mapResultDetail, mapResultTitle } from '@/utils/mapPresentation'
 import { readResultEvidence, sectionLabels } from '@/utils/resultEvidence'
@@ -92,11 +99,11 @@ const routeTaskType = computed(() => typeof route.query.taskType === 'string' &&
 const routeEvidence = computed(() => readResultEvidence(route.query.resultVersion, route.query.section))
 const mapTarget = ref<HTMLElement>(), loadedLayer = ref<LayerListItem>(), locating = ref(false)
 let resultExtent: Extent | undefined
-let positioningNewDetection = false
 const opacity = ref(100), baseMapVisible = ref(true)
-type DetectionLayer = 'before' | 'after' | 'overlay'
-const period = ref<DetectionLayer>('overlay')
+const period = ref<DetectionPeriod>('overlay')
 const { map, initMap, setWmsLayers, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView, wmsFailed } = useOlMap({ center: [104, 35], zoom: 5 })
+const detection = useDetectionWms()
+const { failed: detectionFailed, pending: detectionPending } = detection
 let locationRequest = 0, resize: ResizeObserver | undefined
 const evidenceStatus = ref('')
 const evidenceSource = new VectorSource()
@@ -112,31 +119,28 @@ function loadResult(result: LayerListItem) {
   const same = loadedLayer.value?.id === result.id
   if (!same) {
     resultExtent = undefined
-    positioningNewDetection = result.taskType === 'BUILDING_CHANGE_DETECTION'
     period.value = 'overlay'
     removeWmsLayer()
+    detection.clear()
   }
   loadedLayer.value = { ...result }
-  if (!positioningNewDetection) showLayer(result, period.value)
+  if (result.taskType === 'BUILDING_CHANGE_DETECTION') {
+    if (same) {
+      if (resultExtent) detection.select(period.value, true)
+      else void locateLoadedLayer(0)
+    }
+  } else {
+    const url = getLayerProxyWmsUrl(result)
+    setWmsLayers([{
+      layers: (result.qualifiedLayerName || result.layerName)!,
+      url, opacity: opacity.value / 100, authToken: localStorage.getItem(TOKEN_KEY) || undefined,
+    }])
+  }
 }
 function changeLayer(value: unknown) {
   if (!loadedLayer.value || (value !== 'before' && value !== 'after' && value !== 'overlay')) return
   period.value = value
-  if (!positioningNewDetection) showLayer(loadedLayer.value, value)
-}
-function showLayer(result: LayerListItem, selected: DetectionLayer) {
-  const name = result.qualifiedLayerName || result.layerName
-  if (!name) return
-  const url = getLayerProxyWmsUrl(result)
-  const options = { layers: name, opacity: opacity.value / 100, authToken: localStorage.getItem(TOKEN_KEY) || undefined }
-  const forPeriod = (value: DetectionLayer) => ({
-    ...options, extent: resultExtent, url: `${url}${url.includes('?') ? '&' : '?'}period=${value}`,
-  })
-  if (result.taskType !== 'BUILDING_CHANGE_DETECTION') {
-    setWmsLayers([{ ...options, url }])
-  } else {
-    setWmsLayers(selected === 'overlay' ? [forPeriod('after'), forPeriod('overlay')] : [forPeriod(selected)])
-  }
+  detection.select(value)
 }
 
 watch([() => loadedLayer.value?.id, routeEvidence, () => map.value], async ([, requested, currentMap], _, onCleanup) => {
@@ -148,15 +152,7 @@ watch([() => loadedLayer.value?.id, routeEvidence, () => map.value], async ([, r
   evidenceStatus.value = ''
   if (!result || !currentMap) return
   if (result.taskType === 'BUILDING_CHANGE_DETECTION') {
-    // Fit the footprint before requesting tiles so the initial world view stays outside the source projection's render path.
-    const token = localStorage.getItem(TOKEN_KEY)
-    let active = true
-    onCleanup(() => { active = false })
-    await locateLoadedLayer(0)
-    if (active && token === localStorage.getItem(TOKEN_KEY)) {
-      positioningNewDetection = false
-      showLayer(result, period.value)
-    }
+    void locateLoadedLayer(0)
     return
   }
   if (!requested || !taskId || String(result.taskId) !== String(taskId)) {
@@ -197,33 +193,55 @@ async function locateLoadedLayer(duration = 350) {
   const request = ++locationRequest, token = localStorage.getItem(TOKEN_KEY)
   locating.value = true
   try {
-    const image = await getImageDetailApi(result.imageId, true)
+    const currentMap = map.value
+    if (!currentMap) return
+    const needsDetection = result.taskType === 'BUILDING_CHANGE_DETECTION'
+    let extent = resultExtent || readFootprint(result.footprintWkt, result.footprintCrs)
+    if (!extent) {
+      const image = await getImageDetailApi(result.imageId, true)
+      extent = readFootprint(image.footprintWkt, 'EPSG:4326')
+    }
     if (request !== locationRequest || token !== localStorage.getItem(TOKEN_KEY)) return
-    if (!image.footprintWkt) { ElMessage.warning('这景影像暂时没有可定位的范围。'); return }
-    const extent = new WKT().readGeometry(image.footprintWkt, { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' }).getExtent()
-    if (!extent.every(Number.isFinite) || extent[0] >= extent[2] || extent[1] >= extent[3]) { ElMessage.warning('影像范围暂时不可用，请稍后重试。'); return }
-    if (result.taskType === 'BUILDING_CHANGE_DETECTION') resultExtent = extent
-    map.value?.getView().fit(extent, { padding: [70, 40, 100, 40], maxZoom: 17, ...(duration ? { duration } : {}) })
-  } catch { if (request === locationRequest) ElMessage.warning('暂时无法定位影像，仍可拖动地图查看。') }
+    if (!extent) { ElMessage.warning('影像范围暂时不可用，请稍后重试。'); return }
+    const firstDetectionView = needsDetection && !resultExtent
+    currentMap.getView().fit(extent, { padding: [70, 40, 100, 40], maxZoom: 17, ...(duration && !firstDetectionView ? { duration } : {}) })
+    if (firstDetectionView) {
+      resultExtent = extent
+      detection.start(currentMap, result, extent, period.value)
+    }
+  } catch { if (request === locationRequest) ElMessage.warning('暂时无法定位影像，请重试定位。') }
   finally { if (request === locationRequest) locating.value = false }
+}
+function readFootprint(wkt?: string, crs?: string) {
+  if (!wkt || (crs !== 'EPSG:4326' && crs !== 'EPSG:3857')) return
+  try {
+    const extent = new WKT().readGeometry(wkt, { dataProjection: crs, featureProjection: 'EPSG:3857' }).getExtent()
+    if (extent.every(Number.isFinite) && extent[0] < extent[2] && extent[1] < extent[3]) return extent
+  } catch {
+    return
+  }
 }
 function clearResult() {
   locationRequest++
   locating.value = false
   loadedLayer.value = undefined
   resultExtent = undefined
-  positioningNewDetection = false
+  detection.clear()
   removeWmsLayer()
 }
 watch(routeTaskId, (next, previous) => { if (next && next !== previous) clearResult() })
-function changeOpacity(value: number | number[]) { updateWmsOpacity((Array.isArray(value) ? value[0]! : value) / 100) }
+function changeOpacity(value: number | number[]) {
+  const fraction = (Array.isArray(value) ? value[0]! : value) / 100
+  updateWmsOpacity(fraction)
+  detection.setOpacity(fraction)
+}
 onMounted(() => {
   if (!mapTarget.value) return
   initMap(mapTarget.value).addLayer(evidenceLayer)
   resize = new ResizeObserver(() => map.value?.updateSize())
   resize.observe(mapTarget.value)
 })
-onBeforeUnmount(() => { locationRequest++; evidenceSource.clear(); resize?.disconnect() })
+onBeforeUnmount(() => { locationRequest++; detection.clear(); evidenceSource.clear(); resize?.disconnect() })
 </script>
 
 <style scoped>

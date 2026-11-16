@@ -2,7 +2,7 @@
 GeoTIFF 缩略图生成脚本 -- 供 Java 后端通过 ProcessBuilder 调用的命令行工具。
 
 职责：
-  - 读取 GeoTIFF 文件并将其转换为 PNG 缩略图。
+  - 读取 GeoTIFF 文件并生成缩略图。
   - 多波段影像优先使用前三个波段作为 RGB 预览，符合常见遥感影像习惯。
   - 单波段影像使用灰度图保留亮度信息。
   - 自动缩放至不超过 max_size x max_size（默认 512px），保持宽高比。
@@ -10,7 +10,7 @@ GeoTIFF 缩略图生成脚本 -- 供 Java 后端通过 ProcessBuilder 调用的�
 设计要点：
   - 百分位拉伸（2%-98%）而非 min-max 线性拉伸，可抵抗遥感影像中极端值（云、雪等）干扰。
   - 使用 rasterio 的 out_shape 参数在读取时直接降采样，避免加载全分辨率大文件导致的 OOM。
-  - 使用 Pillow（PIL）库生成 PNG，这是 Python 生态中最成熟的图像处理库。
+  - 使用 Pillow（PIL）编码 WebP，也支持输出 PNG。
   - 作为独立脚本通过 stdout 输出 JSON，与 Java 后端的 ProcessBuilder 通信。
 """
 
@@ -91,11 +91,11 @@ def output_shape(width, height, max_size):
 
 
 def generate_thumbnail(input_path, output_path, max_size):
-    """生成 GeoTIFF 的 PNG 缩略图。
+    """生成 GeoTIFF 缩略图，根据输出扩展名选择编码。
 
     Args:
         input_path: 输入 GeoTIFF 文件路径。
-        output_path: 输出 PNG 文件路径。
+        output_path: 输出 .webp 或 .png 文件路径。
         max_size: 缩略图的最大宽度或高度（像素），默认 512。
 
     Returns:
@@ -110,6 +110,10 @@ def generate_thumbnail(input_path, output_path, max_size):
         raise FileNotFoundError(f"GeoTIFF 文件不存在：{src_path}")
 
     dst_path = Path(output_path)
+    formats = {".webp": "WEBP", ".png": "PNG"}
+    output_format = formats.get(dst_path.suffix.lower())
+    if output_format is None:
+        raise ValueError("缩略图输出扩展名必须为 .webp 或 .png")
     # mkdir(parents=True, exist_ok=True) 确保输出目录存在，不存在则递归创建。
     # 等价于 Java Files.createDirectories(path)。
     dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +142,7 @@ def generate_thumbnail(input_path, output_path, max_size):
                 [normalize_to_uint8(bands[i]) for i in range(3)], axis=-1
             )
             image = Image.fromarray(rgb, mode="RGB")
+            invalid = np.ma.getmaskarray(bands).any(axis=0)
         else:
             # 单波段影像没有天然 RGB 组合，使用灰度图保留亮度信息。
             # mode="L" 表示 8 位灰度图（Luminance）。
@@ -148,8 +153,14 @@ def generate_thumbnail(input_path, output_path, max_size):
             )
             gray = normalize_to_uint8(band)
             image = Image.fromarray(gray, mode="L")
+            invalid = np.ma.getmaskarray(band)
 
-        image.save(dst_path, format="PNG")
+        if invalid.any():
+            alpha = np.where(invalid, 0, 255).astype(np.uint8)
+            image = image.convert("RGBA")
+            image.putalpha(Image.fromarray(alpha, mode="L"))
+        options = {"quality": 78, "method": 4} if output_format == "WEBP" else {}
+        image.save(dst_path, format=output_format, **options)
 
     return {
         "output": str(dst_path),
@@ -192,10 +203,10 @@ def main():
         int: 成功返回 0，失败返回 1（与 Unix 惯例一致，Java 端通过 Process.exitValue() 获取）。
     """
     parser = argparse.ArgumentParser(
-        description="生成 GeoTIFF PNG 缩略图。"
+        description="生成 GeoTIFF 缩略图。"
     )
     parser.add_argument("input", help="本地 GeoTIFF 文件路径。")
-    parser.add_argument("output", help="输出 PNG 文件路径。")
+    parser.add_argument("output", help="输出 .webp 或 .png 文件路径。")
     parser.add_argument(
         "--max-size",
         type=int,

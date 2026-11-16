@@ -84,6 +84,10 @@ public class RsImageVO {
 
     /** 缩略图文件在 MinIO 中的对象键，对应 rs_image.thumbnail_object_key。 */
     private String thumbnailObjectKey;
+    /** 仅在详情显式请求且签名可用时返回。 */
+    private ThumbnailPreview thumbnailPreview;
+
+    public record ThumbnailPreview(String url, java.time.Instant expiresAt) {}
 
     /** 缩略图生成状态：PENDING / GENERATING / COMPLETED / FAILED，对应 rs_image.thumbnail_status。 */
     private String thumbnailStatus;

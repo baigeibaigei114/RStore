@@ -70,8 +70,12 @@ async function fetchResults(autoOpen: boolean, refreshSelected = false) {
   try {
     let records: LayerListItem[], count: number
     if (props.taskId) {
-      const [task, file] = await Promise.all([getTaskDetailApi(props.taskId, true), getTaskResultFileApi(props.taskId, true)])
-      const exact = mapTaskResult(task, file)
+      const result = await listLayersApi({ taskId: props.taskId, pageSize: 1 })
+      let exact = result.records?.find(layer => String(layer.taskId) === String(props.taskId))
+      if (!exact) {
+        const [task, file] = await Promise.all([getTaskDetailApi(props.taskId, true), getTaskResultFileApi(props.taskId, true)])
+        exact = mapTaskResult(task, file) ?? undefined
+      }
       if (!exact) throw new Error('Task map unavailable')
       records = [exact]; count = 1
     } else {

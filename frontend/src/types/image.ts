@@ -104,6 +104,7 @@ export interface ImageListItem {
 
 /** 影像完整详情（继承 ImageListItem，包含全部元数据） */
 export interface ImageDetail extends ImageListItem {
+  thumbnailPreview?: { url: string; expiresAt: string } | null
   /** 卫星名称 */
   satelliteName?: string
   /** 波段数量 */

@@ -241,6 +241,38 @@ class RsImageControllerUploadTest {
         verify(imageService, never()).getDownloadUrl(any());
     }
 
+    @Test
+    void detailSignsReadyThumbnailOnlyWhenRequested() throws Exception {
+        RsImageVO image = buildMockImageVO();
+        image.setThumbnailObjectKey("thumbnail/2026/05/1.webp");
+        when(imageService.getById(1L)).thenReturn(image);
+        when(imageService.getThumbnailUrl(1L))
+                .thenReturn(new FilePresignedUrlVO(image.getThumbnailObjectKey(), "http://minio/preview", 1800));
+
+        mockMvc.perform(get("/api/images/1").contextPath("/api"))
+                .andExpect(jsonPath("$.data.thumbnailPreview").doesNotExist());
+        verify(imageService, never()).getThumbnailUrl(any());
+
+        mockMvc.perform(get("/api/images/1").contextPath("/api").param("includeThumbnail", "true"))
+                .andExpect(jsonPath("$.data.thumbnailPreview.url").value("http://minio/preview"))
+                .andExpect(jsonPath("$.data.thumbnailPreview.expiresAt").isString());
+        verify(rateLimitService).check(eq("presigned-url:user:dev-user"), eq(60), eq(Duration.ofSeconds(60)));
+    }
+
+    @Test
+    void detailRemainsAvailableWhenPreviewIsRateLimited() throws Exception {
+        RsImageVO image = buildMockImageVO();
+        image.setThumbnailObjectKey("thumbnail/2026/05/1.png");
+        when(imageService.getById(1L)).thenReturn(image);
+        doThrow(new BusinessException(ResultCode.TOO_MANY_REQUESTS.getCode(), ResultCode.TOO_MANY_REQUESTS.getMessage()))
+                .when(rateLimitService).check(eq("presigned-url:user:dev-user"), eq(60), eq(Duration.ofSeconds(60)));
+
+        mockMvc.perform(get("/api/images/1").contextPath("/api").param("includeThumbnail", "true"))
+                .andExpect(jsonPath("$.data.id").value(1L))
+                .andExpect(jsonPath("$.data.thumbnailPreview").doesNotExist());
+        verify(imageService, never()).getThumbnailUrl(any());
+    }
+
     private RsImageVO buildMockImageVO() {
         RsImageVO imageVO = new RsImageVO();
         imageVO.setId(1L);

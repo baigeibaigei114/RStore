@@ -11,6 +11,10 @@ export interface LayerListItem {
   imageId: number
   /** 影像名称 */
   imageName?: string
+  footprintWkt?: string
+  footprintCrs?: string
+  opaqueRgb?: boolean
+  hasPredictedChanges?: boolean
   /** 影像删除时间（若影像已被删除则不为空） */
   imageDeletedAt?: string
   /** 任务类型 */
@@ -47,6 +51,8 @@ export interface LayerListItem {
 
 /** 图层分页搜索参数 */
 export interface LayerSearchParams {
+  /** 精确查询当前用户的任务结果 */
+  taskId?: number
   /** 当前页码 */
   pageNum?: number
   /** 每页记录数 */

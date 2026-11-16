@@ -33,12 +33,18 @@
 
             <el-image
               v-if="thumbnailUrl"
+              :key="thumbnailUrl"
               :src="thumbnailUrl"
               fit="contain"
               class="thumbnail-preview"
               :preview-src-list="[thumbnailUrl]"
+              @error="handlePreviewError"
             />
-            <el-empty v-else description="暂无缩略图" />
+            <el-empty v-else :description="previewLoading ? '正在获取缩略图…' : '暂无缩略图'">
+              <el-button v-if="image.thumbnailObjectKey && !previewLoading" link @click="refreshPreview">
+                重试预览
+              </el-button>
+            </el-empty>
 
             <p v-if="image.thumbnailErrorMessage" class="preview-note">暂时没有可用预览，影像信息仍可查看。</p>
           </el-card>
@@ -196,13 +202,13 @@
 
 <script setup lang="ts">
 import InputProvenance from '@/components/InputProvenance.vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   deleteImageApi,
-  getImageDetailApi,
+  getImageDetailWithThumbnailApi,
   getImageDownloadUrlApi,
   getImageThumbnailUrlApi,
   updateImageBandMappingApi,
@@ -220,6 +226,9 @@ const visibilitySaving = ref(false)
 const bandMappingSaving = ref(false)
 const image = ref<ImageDetail | null>(null)
 const thumbnailUrl = ref('')
+const previewLoading = ref(false)
+let detailRequest = 0
+let previewRetried = false
 const detailPanels = ref<string[]>([])
 const visibilityValue = ref<ImageVisibility>('PRIVATE')
 const bandMappingForm = reactive<ImageBandMappingUpdateParams>({})
@@ -246,26 +255,59 @@ const supportedTaskText = computed(() => {
   return image.value.supportedTaskTypes.join('、')
 })
 
-onMounted(() => {
-  fetchDetail()
-})
+watch(imageId, () => {
+  image.value = null
+  void fetchDetail()
+}, { immediate: true })
+onBeforeUnmount(() => { detailRequest++ })
 
 async function fetchDetail() {
+  const call = ++detailRequest
+  const id = imageId.value
   loading.value = true
   thumbnailUrl.value = ''
+  previewLoading.value = false
+  previewRetried = false
 
   try {
-    const detail = await getImageDetailApi(imageId.value)
+    const detail = await getImageDetailWithThumbnailApi(id)
+    if (call !== detailRequest) return
     image.value = detail
     visibilityValue.value = detail.visibility
     syncBandMapping(detail)
 
-    if (detail.thumbnailObjectKey) {
-      const presigned = await getImageThumbnailUrlApi(detail.id)
-      thumbnailUrl.value = presigned.url
+    if (detail.thumbnailPreview) {
+      if (Date.parse(detail.thumbnailPreview.expiresAt) > Date.now()) {
+        thumbnailUrl.value = detail.thumbnailPreview.url
+      } else {
+        void refreshPreview()
+      }
     }
+  } catch {
+    // The request interceptor shows the detail error.
   } finally {
-    loading.value = false
+    if (call === detailRequest) loading.value = false
+  }
+}
+
+function handlePreviewError() {
+  thumbnailUrl.value = ''
+  if (!previewRetried) void refreshPreview()
+}
+
+async function refreshPreview() {
+  const detail = image.value
+  if (!detail?.thumbnailObjectKey || previewLoading.value) return
+  const call = detailRequest
+  previewRetried = true
+  previewLoading.value = true
+  try {
+    const preview = await getImageThumbnailUrlApi(detail.id, true)
+    if (call === detailRequest) thumbnailUrl.value = preview.url
+  } catch {
+    // Keep the retry control available when the preview cannot be signed.
+  } finally {
+    if (call === detailRequest) previewLoading.value = false
   }
 }
 
