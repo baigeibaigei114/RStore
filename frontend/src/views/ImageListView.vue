@@ -2,9 +2,16 @@
   <section class="image-catalog">
     <div class="page-title">
       <span>{{ auth.isLoggedIn ? '我的影像' : '公开影像' }}</span>
-      <h2>选择要查看的影像</h2>
+      <h2>{{ auth.isLoggedIn ? '影像数据' : '公开影像' }}</h2>
       <p>{{ auth.isLoggedIn ? '按名称查找影像，打开详情后可开始区域分析。' : '按名称查找公开影像，查看采集信息和缩略图。' }}</p>
     </div>
+    <nav v-if="auth.isLoggedIn" class="data-nav" aria-label="数据工作区">
+      <RouterLink to="/images" aria-current="page">影像列表</RouterLink>
+      <RouterLink to="/images/upload">上传影像</RouterLink>
+      <RouterLink to="/ingestion">SAFE 入库</RouterLink>
+      <RouterLink to="/spatial-query">空间查询</RouterLink>
+      <RouterLink to="/map?panel=regions">监测区域</RouterLink>
+    </nav>
 
     <el-card class="filter-card" shadow="never">
       <el-form :model="queryForm" label-position="top">
@@ -18,7 +25,6 @@
             <el-button v-if="auth.isLoggedIn" :aria-expanded="moreFilters" aria-controls="image-advanced-filters" @click="moreFilters = !moreFilters">
               {{ moreFilters ? '收起筛选' : '更多筛选' }}{{ selectedFilterCount ? `（已设置 ${selectedFilterCount} 项）` : '' }}
             </el-button>
-            <el-button v-if="auth.isLoggedIn" :icon="UploadFilled" @click="router.push('/images/upload')">上传影像</el-button>
           </div>
         </div>
         <el-row v-if="auth.isLoggedIn" v-show="moreFilters" id="image-advanced-filters" :gutter="16">
@@ -167,7 +173,7 @@
 import { legacyAgentWrites } from '@/utils/legacyAgent'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Search, UploadFilled } from '@element-plus/icons-vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { parseAiQueryApi } from '@/api/ai'
 import { searchImagesApi, searchPublicImagesApi } from '@/api/image'
@@ -348,18 +354,18 @@ function imageStatusType(status: ImageStatus) {
 </script>
 
 <style scoped>
-.image-catalog { max-width: 1160px; --el-color-primary: #176b52; }
+.image-catalog { max-width: 1160px; --el-color-primary: var(--work-accent); }
 .basic-query { display: grid; grid-template-columns: minmax(200px, 1fr) auto; align-items: end; gap: 16px; }
 .basic-query .el-form-item { margin: 0; }
 .query-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .query-actions .el-button { margin: 0; }
 #image-advanced-filters { margin-top: 20px; }
-.optional-search { margin: 0 0 16px; padding: 0 20px; border: 1px solid #e4e7ed; border-radius: 8px; background: #fff; }
+.optional-search { margin: 0 0 16px; padding: 0 20px; border: 1px solid var(--work-border); border-radius: 8px; background: var(--work-panel); }
 .optional-search :deep(.el-collapse-item__header) { font-weight: 500; }
 .optional-search :deep(.el-collapse-item__wrap) { border-bottom: 0; }
-.ai-explanation { margin: 0 0 12px; color: #667085; }
+.ai-explanation { margin: 0 0 12px; color: var(--work-secondary); }
 .image-identity strong, .image-identity small { display: block; overflow-wrap: anywhere; }
 .image-identity strong { font-weight: 600; }
-.image-identity small { color: #667085; font-size: 12px; }
+.image-identity small { color: var(--work-secondary); font-size: 12px; }
 @media (max-width: 1000px) { .basic-query { grid-template-columns: 1fr; } }
 </style>

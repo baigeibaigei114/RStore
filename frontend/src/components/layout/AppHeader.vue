@@ -1,16 +1,18 @@
 <template>
-  <el-header class="app-header">
-    <div class="header-left">
-      <el-button text :icon="appStore.sidebarCollapsed ? Expand : Fold" :aria-label="appStore.sidebarCollapsed ? '展开导航' : '收起导航'" @click="appStore.toggleSidebar" />
-      <div>
-        <h1>{{ pageTitle }}</h1>
-        <p>面向区域植被监测的遥感分析与报告平台</p>
-      </div>
-    </div>
-
+  <header class="workbench-header">
+    <RouterLink class="workbench-brand" to="/dashboard" aria-label="遥感影像分析工作台首页">
+      <span class="workbench-mark" aria-hidden="true">遥感</span>
+      <strong>遥感影像分析工作台</strong>
+    </RouterLink>
+    <nav class="workbench-nav" aria-label="主导航">
+      <RouterLink v-for="item in navigation" :key="item.path" :to="item.path"
+        :class="{ 'nav-current': activeMenu === item.path }" :aria-current="activeMenu === item.path ? 'page' : undefined">
+        {{ item.label }}
+      </RouterLink>
+    </nav>
     <div class="header-actions">
       <el-dropdown v-if="authStore.isLoggedIn" @command="handleCommand">
-        <el-button text>
+        <el-button text class="account-button" aria-label="账号菜单">
           {{ authStore.displayName }}
           <el-icon class="el-icon--right"><ArrowDown /></el-icon>
         </el-button>
@@ -20,24 +22,32 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-button v-else text @click="router.push({ path: '/login', query: { redirect: route.fullPath } })">登录</el-button>
+      <RouterLink v-else class="workbench-login" :to="{ path: '/login', query: { redirect: route.fullPath } }">登录</RouterLink>
     </div>
-  </el-header>
+  </header>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { ArrowDown, Expand, Fold } from '@element-plus/icons-vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useAppStore } from '@/stores/app'
+import { ArrowDown } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
-const router = useRouter()
-const appStore = useAppStore()
 const authStore = useAuthStore()
 
-const pageTitle = computed(() => String(route.meta.title || '工作台'))
+const accountNavigation = [
+  { path: '/dashboard', label: '工作台' },
+  { path: '/map', label: '地图' },
+  { path: '/images', label: '数据' },
+  { path: '/tasks', label: '任务' },
+  { path: '/agent', label: '影像助手' },
+]
+const navigation = computed(() => authStore.isLoggedIn ? accountNavigation : [
+  { path: '/dashboard', label: '工作台' },
+  { path: '/images', label: '公开影像' },
+])
+const activeMenu = computed(() => String(route.meta.activeMenu || '/dashboard'))
 
 onMounted(() => {
   if (authStore.isLoggedIn && !authStore.userInfo) {

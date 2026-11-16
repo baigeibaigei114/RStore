@@ -1,0 +1,118 @@
+html.dark {
+  color-scheme: dark;
+  --work-bg: #15171b;
+  --work-header: #272b33;
+  --work-panel: #1e2229;
+  --work-inset: #191d23;
+  --work-hover: #2b3440;
+  --work-border: #353c47;
+  --work-text: #e6ecf4;
+  --work-secondary: #b5bfcd;
+  --work-muted: #96a4b7;
+  --work-accent: #6da7ff;
+  --work-selected: #202f45;
+  --work-warning: #efbd70;
+  --work-danger: #f29391;
+  --work-success: #83cfab;
+  --work-mono: "IBM Plex Mono", Consolas, monospace;
+  --work-header-height: 52px;
+  --el-bg-color: var(--work-panel);
+  --el-bg-color-page: var(--work-bg);
+  --el-bg-color-overlay: var(--work-header);
+  --el-text-color-primary: var(--work-text);
+  --el-text-color-regular: var(--work-secondary);
+  --el-text-color-secondary: var(--work-muted);
+  --el-text-color-placeholder: var(--work-muted);
+  --el-border-color: var(--work-border);
+  --el-border-color-light: var(--work-border);
+  --el-border-color-lighter: #303743;
+  --el-border-color-extra-light: #2b313a;
+  --el-fill-color-blank: var(--work-panel);
+  --el-fill-color-light: var(--work-inset);
+  --el-fill-color-lighter: #242b35;
+  --el-fill-color: var(--work-hover);
+  --el-color-primary: var(--work-accent);
+  --el-color-primary-light-3: #91bbff;
+  --el-color-primary-light-5: #4d79b8;
+  --el-color-primary-light-7: #385680;
+  --el-color-primary-light-8: #283e5d;
+  --el-color-primary-light-9: var(--work-selected);
+  --el-color-primary-dark-2: #548ce0;
+  --el-mask-color: rgb(13 17 24 / 78%);
+  color: var(--work-text);
+  background: var(--work-bg);
+  font-family: "Instrument Sans", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font-size: 14px;
+}
+
+html.dark :focus-visible { outline: 2px solid var(--work-accent); outline-offset: 3px; }
+html.dark .el-button--primary:not(.is-link, .is-plain, .is-text) {
+  --el-button-text-color: #111c2b;
+  --el-button-hover-text-color: #111c2b;
+  --el-button-active-text-color: #111c2b;
+  --el-button-disabled-text-color: #d8e2f0;
+}
+
+.app-layout { display: flex; flex-direction: column; min-height: 100dvh; background: var(--work-bg); }
+.app-main { width: 100%; flex: 1; min-width: 0; padding: 28px clamp(16px, 3.2vw, 50px) 36px; }
+.app-main--map { padding: 0; min-height: 0; }
+.workbench-header {
+  position: relative;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: minmax(222px, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  height: var(--work-header-height);
+  padding-inline: 20px;
+  background: var(--work-header);
+  border-bottom: 1px solid var(--work-border);
+}
+.workbench-brand { display: flex; align-items: center; gap: 9px; color: var(--work-text); font-size: 14px; text-decoration: none; }
+.workbench-brand strong { letter-spacing: .04em; white-space: nowrap; }
+.workbench-mark { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #49688f; border-radius: 6px; background: #233b58; color: #8ebaff; font-size: 10px; font-weight: 650; }
+.workbench-nav { display: flex; align-self: stretch; gap: 2px; min-width: 0; }
+.workbench-nav a { position: relative; display: grid; place-items: center; padding-inline: 15px; white-space: nowrap; color: var(--work-secondary); text-decoration: none; font-size: 13px; }
+.workbench-nav a:hover, .workbench-nav a.nav-current { color: var(--work-text); background: rgb(255 255 255 / 4%); }
+.workbench-nav a.nav-current::after { position: absolute; inset: auto 11px 0; height: 2px; background: var(--work-accent); content: ''; }
+.workbench-nav a:focus-visible { outline-offset: -3px; }
+.workbench-header .header-actions { justify-self: end; min-width: 0; }
+.account-button { max-width: min(19vw, 210px); }
+.account-button > span { overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+.workbench-login { display: block; padding: 7px 12px; border: 1px solid #5275a6; border-radius: 5px; color: var(--work-accent); text-decoration: none; }
+.workbench-login:hover { color: var(--work-text); background: var(--work-selected); }
+.page-title h2 { color: var(--work-text); font-size: clamp(22px, 2.4vw, 29px); }
+.page-title span { color: var(--work-accent); }
+.page-title p, .muted-text { color: var(--work-secondary); }
+.app-main a { color: var(--work-accent); }
+.el-empty__description p { color: var(--work-muted); }
+.el-card { --el-card-border-radius: 6px; }
+.el-card__header { --el-card-padding: 16px; }
+.el-pagination { max-width: 100%; flex-wrap: wrap; row-gap: 6px; }
+.el-table .cell, .work-break { overflow-wrap: anywhere; }
+.data-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; padding: 4px; border: 1px solid var(--work-border); border-radius: 6px; background: var(--work-panel); }
+.data-nav a { padding: 8px 12px; color: var(--work-secondary); border-radius: 4px; text-decoration: none; font-size: 13px; }
+.data-nav a:hover { background: var(--work-hover); color: var(--work-text); }
+.data-nav a[aria-current="page"] { color: var(--work-accent); background: var(--work-selected); }
+.login-view {
+  min-height: 100dvh;
+  background: linear-gradient(110deg, rgb(15 20 29 / 94%) 21%, rgb(21 29 41 / 73%)), url('../assets/poyang-workspace.webp') center / cover;
+}
+.login-panel { background: var(--work-panel); border: 1px solid var(--work-border); box-shadow: 0 18px 50px #0b101a77; }
+.login-brand .brand-mark { background: #233b58; color: var(--work-accent); }
+.login-brand h1 { color: var(--work-text); }
+.login-brand p { color: var(--work-secondary); }
+
+@media (max-width: 700px) {
+  html.dark { --work-header-height: 90px; }
+  .workbench-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 46px 44px; padding-inline: 12px; }
+  .workbench-nav { grid-row: 2; grid-column: 1 / -1; overflow-x: auto; scrollbar-width: none; }
+  .workbench-nav a { flex: 0 0 auto; padding-inline: clamp(10px, 3vw, 16px); }
+  .workbench-header .header-actions { grid-row: 1; grid-column: 2; }
+  .account-button { max-width: 32vw; }
+  .app-main { padding: 18px 12px 24px; }
+  .app-main--map { padding: 0; }
+  .detail-actions { flex-wrap: wrap; justify-content: flex-start; margin-top: 6px; }
+  .detail-actions .el-button { margin-left: 0; }
+  .data-nav { gap: 3px; }
+  .data-nav a { padding-inline: 8px; }
+}

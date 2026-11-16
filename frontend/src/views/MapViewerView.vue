@@ -1,70 +1,105 @@
 <template>
-  <section class="map-page">
-    <header class="map-heading"><div><h2>地图工作台</h2><p>查看分析结果，圈定监测范围。</p></div></header>
-    <div class="map-workspace" :class="{ 'panel-closed': !panelOpen }">
-      <div class="workspace-toolbar">
-        <nav class="work-modes" aria-label="切换地图工作">
-          <button v-for="item in modes" :key="item.key" type="button" :class="{ active: panelOpen && mode === item.key }"
-            :aria-pressed="panelOpen && mode === item.key" @click="openMode(item.key)"><el-icon><component :is="item.icon" /></el-icon>{{ item.label }}</button>
-        </nav>
-        <el-popover placement="bottom-end" :width="260" trigger="click">
-          <template #reference><el-button :icon="Setting" class="display-button">显示设置</el-button></template>
-          <div class="display-settings">
-            <h3>地图显示</h3>
-            <div class="base-toggle"><label for="map-base-toggle">参考底图</label><el-switch id="map-base-toggle" v-model="baseMapVisible" aria-label="参考底图" @change="setBaseLayerVisible(baseMapVisible)" /></div>
-            <p>圈定范围时，请以影像为准。</p>
-            <label for="map-opacity">影像不透明度</label>
-            <el-slider id="map-opacity" v-model="opacity" :disabled="!loadedLayer" :min="0" :max="100" aria-label="影像不透明度" @input="changeOpacity" />
-            <el-button v-if="loadedLayer" link @click="clearResult">移除当前结果</el-button>
-          </div>
-        </el-popover>
-      </div>
-      <div class="workspace-body">
-        <div class="map-canvas-frame">
-          <div ref="mapTarget" class="map-canvas" aria-label="监测地图画布" />
-          <div class="map-actions">
-            <el-button :icon="Aim" :disabled="!loadedLayer" :loading="locating" @click="locateLoadedLayer()">定位结果</el-button>
-            <el-button :icon="FullScreen" @click="resetView">全图</el-button>
-          </div>
-          <div v-if="loadedLayer" class="current-result">
-            <span>当前查看</span><strong>{{ mapResultTitle(loadedLayer) }}</strong><small>{{ mapResultDetail(loadedLayer) }}</small>
-            <small v-if="evidenceStatus" role="status">{{ evidenceStatus }}</small>
-            <small v-if="wmsFailed" role="status">当前地图图层暂时无法显示，可在结果面板刷新重试。</small>
-          </div>
-          <div v-else class="map-empty-hint"><el-icon><MapLocation /></el-icon><span>选择分析结果，或切换到区域开始圈定范围。</span></div>
+  <section class="map-page" aria-label="地图工作台">
+    <div class="workspace-body" :class="{ 'with-left': leftVisible, 'with-right': rightVisible }">
+      <aside id="map-left-panel" v-show="leftVisible" class="map-panel-left" aria-label="图层和监测区域" tabindex="-1">
+        <header class="pane-heading">
+          <h2>图层与区域</h2>
+          <el-button text :icon="Close" aria-label="收起图层与区域" @click="togglePanel('left')" />
+        </header>
+        <div class="pane-tabs" aria-label="图层和区域视图">
+          <button v-for="item in leftTabs" :key="item.id" type="button" :aria-pressed="leftTab === item.id" @click="leftTab = item.id">{{ item.label }}</button>
         </div>
-        <aside v-show="panelOpen" class="work-panel" :aria-label="modeTitle">
-          <header class="panel-heading"><div><span>地图工作</span><h3>{{ modeTitle }}</h3></div><el-button text :icon="Close" aria-label="收起工作面板" @click="panelOpen = false" /></header>
-          <div class="panel-content">
-            <MapResultPanel v-show="mode === 'results'" :task-id="routeTaskId" :image-id="routeImageId"
-              :initial-task-type="routeTaskType" :loaded-id="loadedLayer?.id" @select="loadResult" @all="router.replace('/map')">
-              <section v-if="loadedLayer?.taskType === 'BUILDING_CHANGE_DETECTION'" class="change-layers">
+        <div class="pane-scroll">
+          <section v-show="leftTab === 'layers'" class="layer-settings">
+            <h3>当前结果图层</h3>
+            <template v-if="loadedLayer">
+              <p class="layer-title">{{ mapResultTitle(loadedLayer) }}</p>
+              <p class="layer-caption">{{ mapResultDetail(loadedLayer) }}</p>
+              <label for="map-opacity">影像不透明度</label>
+              <el-slider id="map-opacity" v-model="opacity" :min="0" :max="100" aria-label="影像不透明度" @input="changeOpacity" />
+              <el-button link @click="clearResult">移除当前结果</el-button>
+              <section v-if="loadedLayer.taskType === 'BUILDING_CHANGE_DETECTION'" class="change-layers">
+                <h3>建筑物变化检测图层</h3>
                 <el-radio-group :model-value="period" aria-label="建筑物变化检测图层" @change="changeLayer">
                   <el-radio-button value="before">前期原图</el-radio-button>
                   <el-radio-button value="after">后期原图</el-radio-button>
                   <el-radio-button value="overlay">变化叠加</el-radio-button>
                 </el-radio-group>
-                <div v-if="period === 'overlay'" class="change-legend"><span aria-hidden="true"></span>预测变化</div>
-                <p v-if="detectionFailed.length" class="change-legend" role="status">
-                  {{ detectionFailed.includes('overlay') ? '变化叠加加载失败。' : '原图加载失败。' }}
-                  <el-button link @click="detection.select(period, true)">重试图层</el-button>
-                </p>
-                <p v-else-if="detectionPending || locating" class="change-legend" role="status">正在加载当前视窗…</p>
-                <p v-else-if="period === 'overlay' && loadedLayer.hasPredictedChanges === false" class="change-legend" role="status">没有预测变化。</p>
               </section>
-            </MapResultPanel>
-            <MonitoringRegionPanel v-show="mode === 'regions'" :map="map" :active="panelOpen && mode === 'regions'" :image-id="loadedLayer?.imageId" />
-            <MapAssetPanel v-show="mode === 'images'" :active="panelOpen && mode === 'images'" />
+            </template>
+            <p v-else class="layer-caption">在处理结果中选择要查看的图层。</p>
+          </section>
+          <MonitoringRegionPanel v-show="leftTab === 'regions'" :map="map" :active="leftTab === 'regions'"
+            :image-id="loadedLayer?.imageId" @analyze="openRegionForm" @drawing="regionDrawing = $event" />
+          <MapAssetPanel v-show="leftTab === 'images'" :active="leftVisible && leftTab === 'images'" />
+        </div>
+      </aside>
+
+      <div class="map-canvas-frame">
+        <div ref="mapTarget" class="map-canvas" aria-label="监测地图画布" tabindex="0" />
+        <div class="map-actions">
+          <div class="map-action-group">
+            <el-button id="map-left-toggle" size="small" :icon="Menu" aria-controls="map-left-panel" :aria-expanded="leftVisible" @click="togglePanel('left')">图层与区域</el-button>
+            <el-button id="map-right-toggle" size="small" :icon="DataAnalysis" aria-controls="map-right-panel" :aria-expanded="rightVisible" @click="togglePanel('right')">工具与结果</el-button>
           </div>
-        </aside>
+          <div class="map-action-group">
+            <el-button size="small" :icon="Aim" :disabled="!loadedLayer" :loading="locating" @click="locateLoadedLayer()">定位结果</el-button>
+            <el-button size="small" :icon="FullScreen" @click="resetView">全图</el-button>
+            <el-popover placement="bottom-end" :width="226" trigger="click">
+              <template #reference><el-button size="small" :icon="Setting">底图</el-button></template>
+              <div class="base-toggle"><label for="map-base-toggle">参考底图</label><el-switch id="map-base-toggle" v-model="baseMapVisible" aria-label="参考底图" @change="setBaseLayerVisible(baseMapVisible)" /></div>
+            </el-popover>
+          </div>
+        </div>
+        <div v-if="detectionFailed.length || wmsFailed" class="map-feedback" role="status">
+          {{ detectionFailed.includes('overlay') ? '变化叠加加载失败' : '图层加载失败' }}
+          <el-button link @click="retryLayer">重试图层</el-button>
+        </div>
+        <div v-if="loadedLayer?.taskType === 'BUILDING_CHANGE_DETECTION' && period === 'overlay' && !detectionFailed.length" class="map-legend">
+          <span v-if="loadedLayer.hasPredictedChanges !== false" class="legend-swatch" aria-hidden="true"></span>
+          {{ loadedLayer.hasPredictedChanges === false ? '没有预测变化' : '预测变化' }}
+        </div>
+        <footer class="map-status" aria-label="地图状态">
+          <span class="map-coordinate">{{ coordinateText }}</span><span class="map-level">级别 {{ zoom }}</span>
+          <span class="map-state" role="status">{{ regionDrawing ? '单击添加边界点，双击结束' : mapStatus }}</span>
+        </footer>
       </div>
+
+      <aside id="map-right-panel" v-show="rightVisible" class="map-panel-right" aria-label="工具箱和处理结果" tabindex="-1">
+        <header class="pane-heading">
+          <h2>{{ rightTab === 'results' ? '处理结果' : '工具箱' }}</h2>
+          <el-button text :icon="Close" aria-label="收起工具与结果" @click="togglePanel('right')" />
+        </header>
+        <div class="pane-tabs" aria-label="工具和结果视图">
+          <button type="button" :aria-pressed="rightTab === 'tools'" @click="rightTab = 'tools'">工具箱</button>
+          <button type="button" :aria-pressed="rightTab === 'results'" @click="rightTab = 'results'">处理结果</button>
+        </div>
+        <div class="pane-scroll">
+          <div v-show="rightTab === 'tools'">
+            <template v-if="regionForm">
+              <el-button link @click="regionForm = undefined">返回工具箱</el-button>
+              <RegionAnalysisForm embedded :key="regionForm.version" :initial-image-id="regionForm.imageId"
+                :initial-region-id="regionForm.regionId" @choose-region="showRegions" />
+            </template>
+            <AnalysisToolbox v-else-if="rightVisible && rightTab === 'tools'" stacked embedded-region @region="openRegionForm(loadedLayer?.imageId)" />
+          </div>
+          <div v-show="rightTab === 'results'">
+            <MapTaskSummary :task-id="loadedLayer?.taskId ?? routeTaskId"
+              :model="(loadedLayer?.taskType || routeTaskType) === 'BUILDING_CHANGE_DETECTION'" />
+            <MapResultPanel :task-id="routeTaskId" :image-id="routeImageId"
+              :initial-task-type="routeTaskType" :loaded-id="loadedLayer?.id" @select="loadResult" @all="router.replace('/map')" />
+          </div>
+        </div>
+      </aside>
     </div>
   </section>
 </template>
 
+
+
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Aim, Close, DataAnalysis, FullScreen, MapLocation, Picture, Setting } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Aim, Close, DataAnalysis, FullScreen, Menu, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import Feature from 'ol/Feature'
@@ -77,6 +112,9 @@ import type { Extent } from 'ol/extent'
 import MonitoringRegionPanel from '@/components/MonitoringRegionPanel.vue'
 import MapResultPanel from '@/components/map/MapResultPanel.vue'
 import MapAssetPanel from '@/components/map/MapAssetPanel.vue'
+import MapTaskSummary from '@/components/map/MapTaskSummary.vue'
+import AnalysisToolbox from '@/components/analysis/AnalysisToolbox.vue'
+import RegionAnalysisForm from '@/components/analysis/RegionAnalysisForm.vue'
 import { getImageDetailApi } from '@/api/image'
 import { getTaskResultEvidenceApi } from '@/api/ai'
 import { getLayerProxyWmsUrl } from '@/api/layer'
@@ -88,20 +126,29 @@ import { mapResultDetail, mapResultTitle } from '@/utils/mapPresentation'
 import { readResultEvidence, sectionLabels } from '@/utils/resultEvidence'
 import type { LayerListItem } from '@/types/layer'
 
-type WorkMode = 'results' | 'regions' | 'images'
-const modes = [{ key: 'results', label: '分析结果', icon: DataAnalysis }, { key: 'regions', label: '监测区域', icon: MapLocation }, { key: 'images', label: '影像浏览', icon: Picture }] as const
-const mode = ref<WorkMode>('results'), panelOpen = ref(true)
-const modeTitle = computed(() => modes.find(item => item.key === mode.value)!.label)
 const route = useRoute(), router = useRouter()
 const routeImageId = computed(() => positiveId(route.query.imageId))
 const routeTaskId = computed(() => positiveId(route.query.taskId))
 const routeTaskType = computed(() => typeof route.query.taskType === 'string' && ['NDVI', 'NDWI', 'CHANGE_DETECTION', 'BUILDING_CHANGE_DETECTION'].includes(route.query.taskType) ? route.query.taskType : '')
 const routeEvidence = computed(() => readResultEvidence(route.query.resultVersion, route.query.section))
+const leftTabs = [{ id: 'layers', label: '图层' }, { id: 'regions', label: '监测区域' }, { id: 'images', label: '影像' }] as const
+type Side = 'left' | 'right'
+const leftTab = ref<(typeof leftTabs)[number]['id']>(route.query.panel === 'regions' ? 'regions' : 'layers')
+const rightTab = ref<'tools' | 'results'>(routeTaskId.value || routeImageId.value ? 'results' : 'tools')
+const screen = window.matchMedia('(max-width: 900px)')
+const narrow = ref(screen.matches)
+const mobilePanel = ref<Side | undefined>(route.query.panel === 'regions' ? 'left' : routeTaskId.value || routeImageId.value ? 'right' : undefined)
+const leftOpen = ref(true), rightOpen = ref(true)
+const leftVisible = computed(() => narrow.value ? mobilePanel.value === 'left' : leftOpen.value)
+const rightVisible = computed(() => narrow.value ? mobilePanel.value === 'right' : rightOpen.value)
+const regionDrawing = ref(false)
+const regionForm = ref<{ imageId?: number; regionId?: number; version: number }>()
+let regionFormVersion = 0
 const mapTarget = ref<HTMLElement>(), loadedLayer = ref<LayerListItem>(), locating = ref(false)
 let resultExtent: Extent | undefined
 const opacity = ref(100), baseMapVisible = ref(true)
 const period = ref<DetectionPeriod>('overlay')
-const { map, initMap, setWmsLayers, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView, wmsFailed } = useOlMap({ center: [104, 35], zoom: 5 })
+const { map, initMap, setWmsLayers, removeWmsLayer, updateWmsOpacity, setBaseLayerVisible, resetView, wmsFailed, pointerLonLat, zoom } = useOlMap({ center: [104, 35], zoom: 5 })
 const detection = useDetectionWms()
 const { failed: detectionFailed, pending: detectionPending } = detection
 let locationRequest = 0, resize: ResizeObserver | undefined
@@ -110,7 +157,47 @@ const evidenceSource = new VectorSource()
 const evidenceLayer = new VectorLayer({ source: evidenceSource, zIndex: 20,
   style: new Style({ fill: new Fill({ color: '#ffbd343b' }), stroke: new Stroke({ color: '#ffb000', width: 3 }) }) })
 
-function openMode(next: WorkMode) { mode.value = next; panelOpen.value = true }
+const coordinateText = computed(() => pointerLonLat.value?.map(coordinate => coordinate.toFixed(5) + '°').join(' / ') || '经纬度 —')
+const mapStatus = computed(() => {
+  if (wmsFailed.value || detectionFailed.value.length) return '图层加载失败'
+  if (locating.value || detectionPending.value) return '正在加载当前视窗…'
+  return evidenceStatus.value || (loadedLayer.value ? '已加载结果图层' : '未选择结果图层')
+})
+
+function togglePanel(side: Side) {
+  const wasOpen = side === 'left' ? leftVisible.value : rightVisible.value
+  if (narrow.value) mobilePanel.value = mobilePanel.value === side ? undefined : side
+  else if (side === 'left') leftOpen.value = !leftOpen.value
+  else rightOpen.value = !rightOpen.value
+  void nextTick(() => document.getElementById(`map-${side}-${wasOpen ? 'toggle' : 'panel'}`)?.focus({ preventScroll: true }))
+}
+
+function showRegions() {
+  leftTab.value = 'regions'
+  leftOpen.value = true
+  if (narrow.value) mobilePanel.value = 'left'
+}
+
+function showResults() {
+  rightTab.value = 'results'
+  rightOpen.value = true
+  if (narrow.value) mobilePanel.value = 'right'
+}
+
+function openRegionForm(imageId?: number, regionId?: number) {
+  regionForm.value = { imageId, regionId, version: ++regionFormVersion }
+  rightTab.value = 'tools'
+  rightOpen.value = true
+  if (narrow.value) mobilePanel.value = 'right'
+}
+
+function retryLayer() {
+  if (loadedLayer.value?.taskType === 'BUILDING_CHANGE_DETECTION') detection.select(period.value, true)
+  else if (loadedLayer.value) loadResult(loadedLayer.value)
+}
+
+function resizePanels() { narrow.value = screen.matches }
+
 function loadResult(result: LayerListItem) {
   if (!result.qualifiedLayerName && !result.layerName) {
     ElMessage.warning('这份结果暂时无法显示，请换一份或稍后重试。')
@@ -229,35 +316,86 @@ function clearResult() {
   detection.clear()
   removeWmsLayer()
 }
-watch(routeTaskId, (next, previous) => { if (next && next !== previous) clearResult() })
+watch(routeTaskId, (next, previous) => {
+  if (next && next !== previous) { clearResult(); showResults() }
+})
+watch(routeImageId, id => { if (id) showResults() })
+watch(() => route.query.panel, panel => { if (panel === 'regions') showRegions() })
 function changeOpacity(value: number | number[]) {
   const fraction = (Array.isArray(value) ? value[0]! : value) / 100
   updateWmsOpacity(fraction)
   detection.setOpacity(fraction)
 }
 onMounted(() => {
+  screen.addEventListener('change', resizePanels)
   if (!mapTarget.value) return
   initMap(mapTarget.value).addLayer(evidenceLayer)
   resize = new ResizeObserver(() => map.value?.updateSize())
   resize.observe(mapTarget.value)
 })
-onBeforeUnmount(() => { locationRequest++; detection.clear(); evidenceSource.clear(); resize?.disconnect() })
+onBeforeUnmount(() => {
+  screen.removeEventListener('change', resizePanels)
+  locationRequest++
+  detection.clear()
+  evidenceSource.clear()
+  resize?.disconnect()
+})
 </script>
 
 <style scoped>
-.change-layers { margin: 6px 0 14px; }
-.change-layers :deep(.el-radio-button__inner) { padding-inline: 10px; }
-.change-legend { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: #52675c; font-size: 12px; }
-.change-legend span { width: 10px; height: 10px; border-radius: 2px; background: #d03832; }
-.map-page { --el-color-primary: #28634c; --el-color-primary-light-3: #62947a; --el-color-primary-light-9: #eff6f0; color: #263e32; }
-.map-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }.map-heading h2 { margin: 0; font-size: 23px; letter-spacing: -.5px; font-weight: 600; }.map-heading p { margin: 7px 0 0; color: #748479; font-size: 13px; }
-.map-workspace { height: calc(100dvh - 180px); min-height: 490px; display: flex; flex-direction: column; border: 1px solid #d7e0da; border-radius: 12px; overflow: hidden; background: #fff; }
-.workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e4ebe5; background: #fff; }
-.work-modes { display: flex; gap: 4px; padding: 3px; border-radius: 7px; background: #f2f5f1; }.work-modes button { display: flex; align-items: center; gap: 7px; padding: 9px 14px; font: inherit; font-size: 13px; border: 0; border-radius: 5px; color: #728276; background: transparent; cursor: pointer; }.work-modes button.active { color: #285b43; background: #fff; box-shadow: 0 1px 4px #24463116; }.work-modes button:focus-visible { outline: 2px solid #28634c; outline-offset: 2px; }
-.workspace-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; flex: 1; }.panel-closed .workspace-body { grid-template-columns: minmax(0, 1fr); }.map-canvas-frame { position: relative; min-width: 0; min-height: 0; background: #e5ebe4; }.map-canvas { width: 100%; height: 100%; min-height: 0; }.map-canvas :deep(.ol-full-screen) { display: none; }
-.map-actions { position: absolute; top: 13px; right: 13px; display: flex; gap: 7px; }.map-actions .el-button { margin: 0; box-shadow: 0 1px 5px #23442d13; border-color: #d4ded5; }.current-result { position: absolute; bottom: 38px; left: 18px; right: 18px; width: fit-content; max-width: calc(100% - 36px); display: grid; gap: 5px; padding: 12px 16px; border-left: 3px solid #397859; border-radius: 5px; background: #fffffff0; box-shadow: 0 3px 14px #263e3214; pointer-events: none; }.current-result span { font-size: 10px; letter-spacing: 1px; color: #78917e; }.current-result strong { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }.current-result small { color: #76877b; font-size: 11px; }.map-empty-hint { position: absolute; bottom: 40px; left: 18px; right: 18px; display: flex; align-items: center; gap: 9px; padding: 12px 14px; width: fit-content; max-width: calc(100% - 36px); background: #ffffffed; border: 1px solid #d6e1d7; border-radius: 7px; color: #697d6c; font-size: 12px; line-height: 1.8; pointer-events: none; }
-.work-panel { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #dde6df; background: #fff; }.panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px 20px 16px; }.panel-heading span { color: #8b9d8e; font-size: 10px; letter-spacing: 1px; }.panel-heading h3 { font-size: 17px; font-weight: 550; color: #294b39; margin: 6px 0 0; }.panel-content { padding: 0 20px 22px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.display-settings h3 { color: #294b39; margin: 2px 0 20px; font-size: 15px; }.display-settings label { font-size: 13px; color: #4b6456; }.display-settings p { font-size: 12px; color: #7a8b80; margin: 3px 0 20px; }.base-toggle { display: flex; align-items: center; justify-content: space-between; }.display-settings :deep(.el-slider) { margin: 8px 4px 14px; }
-@media (max-width: 1050px) { .map-workspace { height: auto; min-height: 0; }.workspace-body { display: flex; flex-direction: column; }.map-canvas-frame { height: 360px; flex-shrink: 0; }.work-panel { border-left: 0; border-top: 1px solid #dde6df; max-height: 420px; }.panel-heading { padding-top: 16px; }.work-modes button { padding: 9px 10px; }.workspace-toolbar { flex-wrap: wrap; gap: 8px; }.map-heading h2 { font-size: 20px; } }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+.map-page { height: calc(100dvh - var(--work-header-height)); min-height: 320px; }
+.workspace-body { position: relative; display: grid; grid-template-columns: 0 minmax(0, 1fr) 0; height: 100%; }
+.workspace-body.with-left { grid-template-columns: 224px minmax(0, 1fr) 0; }
+.workspace-body.with-right { grid-template-columns: 0 minmax(0, 1fr) 328px; }
+.workspace-body.with-left.with-right { grid-template-columns: 224px minmax(0, 1fr) 328px; }
+.map-panel-left, .map-panel-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; background: var(--work-panel); }
+.map-panel-left { grid-column: 1; grid-row: 1; border-right: 1px solid var(--work-border); }
+.map-panel-right { grid-column: 3; grid-row: 1; border-left: 1px solid var(--work-border); }
+.pane-heading { display: flex; align-items: center; justify-content: space-between; min-height: 46px; padding-inline: 13px 7px; border-bottom: 1px solid var(--work-border); }
+.pane-heading h2 { margin: 0; font-size: 14px; }
+.pane-tabs { display: flex; padding: 0 10px; border-bottom: 1px solid var(--work-border); }
+.pane-tabs button { flex: 1; min-width: 0; padding: 10px 4px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--work-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.pane-tabs button[aria-pressed="true"] { color: var(--work-accent); border-bottom-color: var(--work-accent); }
+.pane-scroll { min-height: 0; padding: 13px 12px 20px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.layer-settings { font-size: 12px; }
+.layer-settings h3 { margin: 0 0 9px; font-size: 13px; }
+.layer-title { margin: 0; overflow-wrap: anywhere; line-height: 1.55; }
+.layer-caption { margin: 6px 0 12px; color: var(--work-muted); line-height: 1.55; }
+.layer-settings label { color: var(--work-secondary); }
+.layer-settings :deep(.el-slider) { width: calc(100% - 10px); margin-inline: 5px; }
+.change-layers { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--work-border); }
+.change-layers :deep(.el-radio-group) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.change-layers :deep(.el-radio-button__inner) { width: 100%; padding: 8px 3px; font-size: 11px; }
+.change-layers :deep(.el-radio-button:focus-within) { z-index: 1; box-shadow: inset 0 0 0 2px var(--work-accent); }
+.legend-swatch { width: 9px; height: 9px; border-radius: 2px; background: #d03832; }
+.map-canvas-frame { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) 30px; grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; background: #242e3b; }
+.map-canvas { width: 100%; height: 100%; min-height: 0; }
+.map-canvas:focus-visible { outline-offset: -2px; }
+.map-canvas :deep(.ol-full-screen) { display: none; }
+.map-canvas :deep(.ol-zoom) { inset: auto 12px 37px auto; padding: 3px; background: #1e2229e8; border: 1px solid #515d6e; }
+.map-canvas :deep(.ol-zoom button) { color: var(--work-text); background: var(--work-hover); }
+.map-canvas :deep(.ol-scale-line) { bottom: 10px; background: #1b222dde; }
+.map-canvas :deep(.ol-scale-line-inner) { color: #e1e9f5; border-color: #b2c4db; font-family: var(--work-mono); }
+.map-canvas :deep(.ol-attribution) { bottom: 4px; background: #e3eaf0eb; }
+.map-actions { position: absolute; inset: 10px 10px auto; z-index: 3; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; pointer-events: none; }
+.map-action-group { display: flex; gap: 4px; pointer-events: auto; }
+.map-action-group .el-button, .map-action-group :deep(.el-button) { margin: 0; box-shadow: 0 2px 8px #0e172441; }
+.base-toggle { display: flex; align-items: center; justify-content: space-between; }
+.map-feedback { position: absolute; top: 43px; left: 10px; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 4px; color: var(--work-warning); background: #222832f2; font-size: 12px; }
+.map-legend { position: absolute; bottom: 64px; left: 10px; display: flex; align-items: center; gap: 7px; padding: 6px 8px; color: var(--work-text); background: #1b222de8; border: 1px solid var(--work-border); border-radius: 4px; font-size: 12px; }
+.map-status { display: flex; min-width: 0; align-items: center; gap: 14px; padding-inline: 10px; background: var(--work-inset); color: var(--work-secondary); border-top: 1px solid var(--work-border); font-size: 11px; }
+.map-coordinate, .map-level { font-family: var(--work-mono); white-space: nowrap; }
+.map-state { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) {
+  .workspace-body, .workspace-body.with-left, .workspace-body.with-right, .workspace-body.with-left.with-right { grid-template-columns: minmax(0, 1fr); }
+  .map-canvas-frame { grid-column: 1; }
+  .map-panel-left, .map-panel-right { position: absolute; z-index: 5; top: 68px; bottom: 94px; width: min(328px, calc(100% - 44px)); border: 1px solid var(--work-border); border-radius: 6px; box-shadow: 0 10px 24px #0d131c88; }
+  .map-panel-left { left: 7px; }
+  .map-panel-right { right: 7px; }
+  .map-actions { inset: 8px 6px auto; }
+  .map-canvas :deep(.ol-zoom) { bottom: 12px; }
+  .map-feedback { top: 67px; z-index: 6; }
+  .map-status { gap: 7px; padding-inline: 6px; font-size: 10px; }
+  .map-level { display: none; }
+}
 </style>

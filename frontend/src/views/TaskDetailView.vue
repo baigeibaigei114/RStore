@@ -41,9 +41,9 @@
     </el-card>
 
     <div class="detail-actions">
-      <el-button @click="router.push(listLocation)">返回列表</el-button>
+      <el-button @click="router.push(listLocation)">{{ route.query.from === 'map' ? '返回地图' : '返回列表' }}</el-button>
       <el-button :icon="Refresh" :loading="loading" @click="refreshAll">刷新</el-button>
-      <el-button v-if="resultFile?.status === 'PUBLISHED' && qualifiedResultLayerName" @click="openResultLayerInMap">查看地图</el-button>
+      <el-button v-if="resultFile?.status === 'PUBLISHED' && qualifiedResultLayerName" @click="openResultLayerInMap">在地图中查看</el-button>
       <el-button
         type="primary"
         :loading="resultDownloadLoading"
@@ -332,8 +332,14 @@ const aiReport = ref<AiTaskReport | null>(null)
 const logs = ref<TaskLog[]>([])
 
 const taskId = computed(() => String(route.params.id))
-const listLocation = computed(() => ({ path: '/tasks', query:
-  route.query.tab === 'model' || task.value?.taskType === 'BUILDING_CHANGE_DETECTION' ? { tab: 'model' } : {} }))
+const listLocation = computed(() => route.query.from === 'map'
+  ? { path: '/map', query: { taskId: taskId.value, imageId: task.value?.imageId, taskType: task.value?.taskType } }
+  : { path: '/tasks', query: {
+    ...(route.query.tab === 'model' || task.value?.taskType === 'BUILDING_CHANGE_DETECTION' ? { tab: 'model' } : {}),
+    ...(typeof route.query.page === 'string' ? { page: route.query.page } : {}),
+    ...(typeof route.query.size === 'string' ? { size: route.query.size } : {}),
+    selected: taskId.value,
+  } })
 const showAnswerHistory = computed(() => route.hash === '#result-answers-title' || route.query.history === 'result-answers')
 
 const regionSnapshot = computed(() => getRegionSnapshot(task.value))
@@ -581,13 +587,13 @@ function formatDateTime(value?: string) {
 </script>
 
 <style scoped>
-.analysis-result { max-width: 1080px; margin: 0 auto; --el-color-primary: #175b47; }
-.result-summary { border-top: 3px solid #175b47; margin-bottom: 20px; }
-.result-state { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #175b47; }
-.result-state span,.result-note { color: #6a7a70; font-size: 13px; line-height: 1.8; }
+.analysis-result { max-width: 1080px; margin: 0 auto; --el-color-primary: var(--work-accent); }
+.result-summary { border-top: 3px solid var(--work-border); margin-bottom: 20px; }
+.result-state { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--work-text); }
+.result-state span,.result-note { color: var(--work-secondary); font-size: 13px; line-height: 1.8; }
 .statistics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 22px 0 10px; }
-.statistics-grid > div { display: flex; flex-direction: column; gap: 10px; border-left: 2px solid #d8e4dc; padding-left: 20px; }
-.statistics-grid span { color: #566d5d; font-size: 14px; }.statistics-grid strong { font-size: 44px; font-weight: 500; color: #173e2e; font-variant-numeric: tabular-nums; }
-.statistics-grid small { font-size: 13px; color: #718477; }.result-feedback { margin-bottom: 16px; }.failure { color: #9a4e20; }
+.statistics-grid > div { display: flex; flex-direction: column; gap: 10px; border-left: 2px solid var(--work-border); padding-left: 20px; }
+.statistics-grid span { color: var(--work-secondary); font-size: 14px; }.statistics-grid strong { font-size: 44px; font-weight: 500; color: var(--work-text); font-variant-numeric: tabular-nums; }
+.statistics-grid small { font-size: 13px; color: var(--work-muted); }.result-feedback { margin-bottom: 16px; }.failure { color: var(--work-warning); }
 @media (max-width: 700px) { .statistics-grid { grid-template-columns: 1fr; }.result-state { align-items: flex-start; flex-direction: column; } }
 </style>

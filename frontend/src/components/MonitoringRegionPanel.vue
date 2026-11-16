@@ -38,7 +38,6 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { InfoFilled, Plus } from '@element-plus/icons-vue'
 import type Map from 'ol/Map'
@@ -51,7 +50,7 @@ import { listMonitoringRegionsApi, saveMonitoringRegionApi, type MonitoringRegio
 import { TOKEN_KEY } from '@/api/request'
 
 const props = withDefaults(defineProps<{ map?: Map; active?: boolean; imageId?: number }>(), { active: true })
-const router = useRouter()
+const emit = defineEmits<{ analyze: [imageId: number | undefined, regionId: number]; drawing: [active: boolean] }>()
 const regions = ref<MonitoringRegion[]>([]), selectedId = ref<number>(), editingId = ref<number>()
 const selectedRegion = computed(() => regions.value.find(region => region.id === selectedId.value))
 const name = ref(''), geometry = ref<RegionPolygon>(), drawing = ref(false), saving = ref(false), loading = ref(false), editing = ref(false), error = ref('')
@@ -69,6 +68,7 @@ watch(() => props.map, (map, oldMap) => {
 }, { immediate: true })
 // A hidden panel must never leave a drawing interaction on the shared canvas.
 watch(() => props.active, active => { if (!active && drawing.value) cancelEditor() })
+watch(drawing, active => emit('drawing', active))
 onMounted(loadRegions)
 onBeforeUnmount(() => { alive = false; request++; stopDrawing(); props.map?.removeLayer(layer) })
 
@@ -136,11 +136,10 @@ async function save() {
 }
 function analyze() {
   if (!selectedRegion.value || editing.value) return
-  void router.push({ path: '/tasks/create', query: { mode: 'region-ndvi', monitoringRegionId: selectedRegion.value.id,
-    ...(props.imageId ? { imageId: props.imageId } : {}) } })
+  emit('analyze', props.imageId, selectedRegion.value.id)
 }
 </script>
 
 <style scoped>
-.region-workflow { color: #344e3e; }.intro { margin: 0 0 20px; color: #74877a; font-size: 13px; line-height: 1.8; }.region-workflow :deep(.el-form-item__label) { font-size: 13px; color: #536b5c; }.region-summary { margin: 22px 0; padding: 18px 16px; border-left: 3px solid #5c8667; background: #f3f7f1; border-radius: 5px; }.saved-label { font-size: 10px; color: #7c927f; letter-spacing: 1px; }.region-summary h4 { font-weight: 550; font-size: 15px; margin: 10px 0 22px; overflow-wrap: anywhere; }.main-action { width: 100%; margin: 0 0 12px; }.region-summary > .el-button.is-link { display: flex; margin: 0 auto; font-size: 12px; }.new-region { display: grid; gap: 12px; border-top: 1px solid #e6ece5; margin-top: 24px; padding-top: 20px; }.new-region .el-button { margin: 0; }.edit-step { margin: 4px 0 18px; }.edit-step span { color: #8c9a83; font-size: 11px; }.edit-step h4 { margin: 10px 0 0; font-size: 17px; font-weight: 550; color: #31553d; }.draw-help { font-size: 14px; line-height: 1.8; margin: 0 0 16px; }.draw-note { display: flex; align-items: flex-start; gap: 9px; color: #8d7545; padding: 12px 13px; margin-bottom: 26px; border-radius: 6px; background: #f8f5ed; }.draw-note .el-icon { flex-shrink: 0; margin-top: 3px; }.draw-note p { margin: 0; font-size: 12px; line-height: 1.8; }.edit-actions { display: flex; justify-content: space-between; margin-top: 4px; }.edit-actions .el-button { margin: 0; }.quiet-note, .empty { font-size: 12px; color: #849385; line-height: 1.8; }.quiet-note { margin-top: 24px; }.feedback { color: #96612d; font-size: 13px; line-height: 1.8; margin: 0 0 16px; }
+.region-workflow { color: var(--work-text); }.intro { margin: 0 0 20px; color: var(--work-muted); font-size: 13px; line-height: 1.8; }.region-workflow :deep(.el-form-item__label) { font-size: 13px; color: var(--work-secondary); }.region-summary { margin: 22px 0; padding: 18px 16px; border-left: 3px solid var(--work-accent); background: var(--work-panel); border-radius: 5px; }.saved-label { font-size: 10px; color: var(--work-muted); letter-spacing: 1px; }.region-summary h4 { font-weight: 550; font-size: 15px; margin: 10px 0 22px; overflow-wrap: anywhere; }.main-action { width: 100%; margin: 0 0 12px; }.region-summary > .el-button.is-link { display: flex; margin: 0 auto; font-size: 12px; }.new-region { display: grid; gap: 12px; border-top: 1px solid var(--work-border); margin-top: 24px; padding-top: 20px; }.new-region .el-button { margin: 0; }.edit-step { margin: 4px 0 18px; }.edit-step span { color: var(--work-muted); font-size: 11px; }.edit-step h4 { margin: 10px 0 0; font-size: 17px; font-weight: 550; color: var(--work-text); }.draw-help { font-size: 14px; line-height: 1.8; margin: 0 0 16px; }.draw-note { display: flex; align-items: flex-start; gap: 9px; color: var(--work-warning); padding: 12px 13px; margin-bottom: 26px; border-radius: 6px; background: #362a24; }.draw-note .el-icon { flex-shrink: 0; margin-top: 3px; }.draw-note p { margin: 0; font-size: 12px; line-height: 1.8; }.edit-actions { display: flex; justify-content: space-between; margin-top: 4px; }.edit-actions .el-button { margin: 0; }.quiet-note, .empty { font-size: 12px; color: var(--work-muted); line-height: 1.8; }.quiet-note { margin-top: 24px; }.feedback { color: var(--work-warning); font-size: 13px; line-height: 1.8; margin: 0 0 16px; }
 </style>

@@ -1,9 +1,9 @@
 <template>
   <AgentView v-if="route.query.executionId || route.query.history === 'legacy-agent'" read-only />
   <section v-else class="assistant-page">
-    <h2>影像助手</h2>
+    <div class="page-title"><h2>影像助手</h2></div>
     <el-tabs v-model="mode">
-      <el-tab-pane label="一句话准备区域 NDVI" name="preparation">
+      <el-tab-pane label="准备区域 NDVI" name="preparation">
         <form class="assistant-form" @submit.prevent="prepare">
           <label for="analysis-goal">想分析哪个监测区？</label>
           <el-input id="analysis-goal" v-model="goal" type="textarea" :rows="3" maxlength="500" :disabled="busy"
@@ -46,7 +46,7 @@
           <el-button v-if="draft.coverage === 'FULL' || draft.coverage === 'UNKNOWN'" type="primary" @click="confirmDraft">去确认</el-button>
         </section>
       </el-tab-pane>
-      <el-tab-pane label="平台知识问答" name="knowledge">
+      <el-tab-pane label="平台与地理概念" name="knowledge">
         <form class="assistant-form" @submit.prevent="ask">
           <label for="platform-question">想了解什么？</label>
           <el-input id="platform-question" v-model="question" type="textarea" :rows="3" maxlength="500"
@@ -172,10 +172,10 @@ h2 { margin-block: 8px 22px; }
 .assistant-form { display: grid; justify-items: start; gap: 12px; margin-block: 14px 20px; }
 .assistant-form :deep(.el-select) { width: min(100%, 520px); }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; }
-.draft { padding: 18px 24px; margin-block: 20px; border-left: 3px solid #3b7859; background: #f3f7f0; }
+.draft { padding: 18px 24px; margin-block: 20px; border-left: 3px solid var(--work-accent); background: var(--work-panel); }
 .draft dl { margin-top: 0; }
-.draft dl div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid #dbe5da; }
-.draft dt { color: #506258; }
+.draft dl div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--work-border); }
+.draft dt { color: var(--work-secondary); }
 .draft dd { margin: 0; overflow-wrap: anywhere; }
 .draft details { margin-block: 12px; }
 .draft summary { cursor: pointer; }

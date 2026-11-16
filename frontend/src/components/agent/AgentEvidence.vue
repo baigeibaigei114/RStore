@@ -65,15 +65,15 @@ function metricValue(reference: string) {
 </script>
 
 <style scoped>
-.evidence { line-height: 1.8; color: #23382e; }
+.evidence { line-height: 1.8; color: var(--work-text); }
 .section-title { font-size: 14px; margin: 20px 0 8px; }
-.insufficient { padding: 12px 16px; background: #f9efd6; border-left: 3px solid #ae7d24; margin-bottom: 18px; }
-.claim { border-left: 2px solid #9caf8e; padding-left: 14px; margin: 16px 0; }.claim p { margin: 0; white-space: pre-wrap; }
-.reference-link { border: 0; padding: 3px 8px 3px 0; background: transparent; color: #2f674b; cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.insufficient { padding: 12px 16px; background: #362a24; border-left: 3px solid var(--work-accent); margin-bottom: 18px; }
+.claim { border-left: 2px solid var(--work-accent); padding-left: 14px; margin: 16px 0; }.claim p { margin: 0; white-space: pre-wrap; }
+.reference-link { border: 0; padding: 3px 8px 3px 0; background: transparent; color: var(--work-text); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
 .metric-refs { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; font-variant-numeric: tabular-nums; }
-.provenance, .limitations { font-size: 12px; color: #6c766e; }.limitations { padding-left: 18px; }
-.sources-heading { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin: 24px 0 12px; font-size: 13px; }.sources-heading span { color: #6c766e; font-size: 12px; }
-.source { border-top: 1px solid #dce3d8; padding: 12px 0; }.source summary { cursor: pointer; font-size: 14px; }.source summary span { font-size: 11px; margin-left: 8px; color: #788572; }
-.source-section { font-size: 12px; margin: 12px 0 6px; }blockquote { margin: 0; padding: 12px 16px; border-left: 3px solid #a9bb99; background: #f0f3eb; white-space: pre-wrap; font-size: 13px; }
-.source a { color: #2f674b; font-size: 12px; }.source-version { font-size: 10px; color: #748174; margin-top: 12px; }.source-version dd { overflow-wrap: anywhere; margin-left: 0; }
+.provenance, .limitations { font-size: 12px; color: var(--work-secondary); }.limitations { padding-left: 18px; }
+.sources-heading { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin: 24px 0 12px; font-size: 13px; }.sources-heading span { color: var(--work-secondary); font-size: 12px; }
+.source { border-top: 1px solid var(--work-border); padding: 12px 0; }.source summary { cursor: pointer; font-size: 14px; }.source summary span { font-size: 11px; margin-left: 8px; color: var(--work-muted); }
+.source-section { font-size: 12px; margin: 12px 0 6px; }blockquote { margin: 0; padding: 12px 16px; border-left: 3px solid var(--work-accent); background: var(--work-hover); white-space: pre-wrap; font-size: 13px; }
+.source a { color: var(--work-text); font-size: 12px; }.source-version { font-size: 10px; color: var(--work-muted); margin-top: 12px; }.source-version dd { overflow-wrap: anywhere; margin-left: 0; }
 </style>

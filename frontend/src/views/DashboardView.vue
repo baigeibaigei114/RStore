@@ -1,43 +1,59 @@
 <template>
   <section class="analysis-desk">
-    <header class="desk-heading"><span>区域植被监测 / 工作台</span><p v-if="auth.isLoggedIn">一次观测，从这里开始</p></header>
-    <div v-if="!auth.isLoggedIn" class="guest-introduction">
-      <div class="introduction">
-        <h1>浏览公开遥感影像</h1>
-        <p>查看公开样本的采集信息、覆盖范围和缩略图。</p>
-        <el-button type="primary" size="large" @click="router.push('/images')">浏览公开影像</el-button>
-      </div>
-    </div>
-    <template v-else>
+    <header class="desk-heading"><h1>工作台</h1></header>
     <div class="desk-main">
-      <div class="introduction"><span class="eyebrow">单期区域 NDVI</span><h1>选择一景影像，<br>看见区域的植被绿度。</h1><p>确认影像和监测区域，提交分析。<br>计算完成后，在同一页查看真实统计。</p>
-        <el-button v-if="sample" type="primary" size="large" @click="startSample">用示例数据开始</el-button>
-        <el-button v-else type="primary" size="large" @click="chooseOwn">选择我的影像和区域</el-button>
-        <button v-if="sample" class="text-action" @click="chooseOwn">选择我的影像和区域 →</button>
-        <p v-if="loading" class="subtle">正在检查示例素材…</p><p v-else-if="sampleError" class="subtle">{{ sampleError }} <el-button link @click="load">重新检查</el-button></p>
+      <div class="introduction">
+        <template v-if="auth.isLoggedIn">
+          <p class="capability">单期区域 NDVI</p>
+          <h2>查看区域植被绿度</h2>
+          <p>选择影像与监测区域，查看有效像素的植被绿度统计。</p>
+          <div v-if="sample" class="sample-pair">
+            <span>影像</span><strong>{{ sample.image.imageName }}</strong>
+            <span>监测区</span><strong>{{ sample.region.name }}</strong>
+          </div>
+          <div class="desk-actions">
+            <el-button v-if="sample" type="primary" size="large" @click="startSample">用示例数据开始</el-button>
+            <el-button v-else type="primary" size="large" @click="chooseOwn">选择我的影像和区域</el-button>
+            <el-button v-if="sample" link @click="chooseOwn">选择自己的素材</el-button>
+          </div>
+          <p v-if="loading && !sample" class="subtle" role="status">正在读取示例素材…</p>
+          <p v-else-if="sampleError" class="subtle">{{ sampleError }} <el-button link @click="load">重新检查</el-button></p>
+        </template>
+        <template v-else>
+          <h2>浏览公开遥感影像</h2>
+          <p>查看公开样本的采集信息、覆盖范围和缩略图。</p>
+          <div class="desk-actions"><el-button type="primary" size="large" @click="router.push('/images')">浏览公开影像</el-button></div>
+        </template>
       </div>
-      <aside class="sample-panel"><div class="sample-label">示例观测 / Sentinel-2</div><div class="sample-contour" aria-hidden="true"><svg viewBox="0 0 300 150"><path d="M14 125L45 70 100 82 154 16 211 45 280 20M4 145L68 115 95 135 167 56 238 76 296 35M15 30L80 18 120 43 182 23 239 8"/><rect x="80" y="42" width="140" height="86"/></svg></div>
-        <template v-if="sample"><h3>{{ sample.image.imageName }}</h3><p>{{ sample.image.acquisitionTime?.slice(0, 10) || '未记录日期' }} · 已通过 NDVI 准入</p><div class="sample-region">{{ sample.region.name }}<br><small>版本 {{ sample.region.version }} · 已保存区域</small></div></template>
-        <template v-else><h3>用真实素材完成一次分析</h3><p>示例需要当前账号有权限的影像和已保存区域。你也可以选择自己的素材开始。</p></template>
-      </aside>
+      <figure class="study-image">
+        <img :src="studyImage" alt="鄱阳湖附近水体与农田的 Sentinel-2 影像预览" width="500" height="500" fetchpriority="high">
+        <figcaption><span>鄱阳湖影像预览</span><small>Copernicus Sentinel‑2 · 2024‑11‑29</small></figcaption>
+      </figure>
     </div>
-    <section class="recent"><div><span class="eyebrow">最近一次分析</span>
+    <div v-if="auth.isLoggedIn" class="desk-links">
+      <section class="recent"><div><span class="capability">最近一次分析</span>
       <h3>{{ recent?.imageName || (recentError ? '最近分析暂不可用' : recentLoaded ? '从第一次分析开始' : '正在读取最近分析') }}</h3>
       <p v-if="recent">{{ taskStatusText(recent.status) }}</p>
       <p v-else-if="!recentError">{{ recentLoaded ? '提交后可从这里继续查看状态与结果。' : '读取完成后，可从这里继续查看状态与结果。' }}</p>
       <p v-if="recentError" role="status">{{ recentError }}</p></div>
       <div class="recent-actions"><el-button v-if="recent" @click="router.push(`/tasks/${recent.id}`)">{{ recentError ? '查看已读分析' : isActiveStatus(recent.status) ? '继续查看' : '查看结果' }}</el-button>
       <el-button v-if="recentError && !expired" :loading="loading" @click="load">重试读取</el-button></div>
-    </section>
+      </section>
+      <RouterLink class="map-entry" to="/map">
+        <span class="entry-icon"><el-icon><MapLocation /></el-icon></span>
+        <span><strong>地图工作台</strong><small>查看影像图层与编辑监测区域</small></span>
+        <el-icon class="entry-arrow"><ArrowRight /></el-icon>
+      </RouterLink>
+    </div>
     <el-alert v-if="expired" title="登录已过期，请重新登录后继续。" type="warning" :closable="false"><el-button @click="relogin">重新登录并返回</el-button></el-alert>
-    <footer class="desk-footer"><span>进阶操作</span><router-link to="/images">影像资产</router-link><router-link to="/map">地图与画区</router-link><router-link to="/ingestion">SAFE 入库</router-link><router-link to="/agent">影像助手</router-link></footer>
-    </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ArrowRight, MapLocation } from '@element-plus/icons-vue'
+import studyImage from '@/assets/poyang-workspace.webp'
 import { getImageDetailApi, searchImagesApi } from '@/api/image'
 import { getMonitoringRegionApi, listMonitoringRegionsApi, type MonitoringRegion } from '@/api/monitoringRegion'
 import { listTasksApi } from '@/api/task'
@@ -105,13 +121,42 @@ function relogin() { auth.logout(); void router.push({ path: '/login', query: { 
 </script>
 
 <style scoped>
-.analysis-desk { max-width: 1120px; margin: 0 auto; color: #193e30; --el-color-primary: #175b47; }
-.desk-heading { display: flex; justify-content: space-between; border-bottom: 1px solid #dbe4de; padding-bottom: 16px; font-size: 13px; letter-spacing: .08em; }.desk-heading p { margin: 0; color: #77847b; }
-.desk-main { display: grid; grid-template-columns: 1.2fr 1fr; background: #fff; margin: 24px 0; border: 1px solid #e2e9e4; }
-.guest-introduction { background: #fff; margin: 24px 0; border: 1px solid #e2e9e4; }
-.introduction { padding: 36px; }.eyebrow { color: #6e8276; font-size: 12px; letter-spacing: .14em; }.introduction h1 { font-family: 'Noto Serif SC','Source Han Serif SC','SimSun',serif; font-size: clamp(26px, 2.5vw, 36px); line-height: 1.5; margin: 16px 0; font-weight: 600; }.introduction p { color: #67796c; line-height: 1.9; font-size: 14px; }
-.text-action { display: block; border: 0; background: none; padding: 16px 0 0; color: #175b47; cursor: pointer; }.sample-panel { padding: 24px 32px; background: #edf3ee; }.sample-label { font-size: 11px; letter-spacing: .14em; color: #6b806f; }.sample-panel h3 { font-size: 17px; margin: 8px 0; }.sample-panel p { font-size: 13px; color: #6a7c70; line-height: 1.8; }.sample-region { border-top: 1px solid #d4dfd5; padding-top: 14px; font-size: 14px; line-height: 1.8; }.sample-contour { height: 110px; }.sample-contour svg { height: 100%; width: 100%; fill: none; stroke: #b3c7b7; stroke-width: 1.5; }.sample-contour rect { stroke: #175b47; stroke-width: 2; fill: #175b470a; }
-.recent { border-top: 1px solid #dbe4de; border-bottom: 1px solid #dbe4de; padding: 20px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }.recent h3 { margin: 8px 0; font-size: 17px; }.recent p,.subtle { font-size: 13px !important; color: #718074; }.desk-footer { display: flex; flex-wrap: wrap; gap: 22px; padding: 22px 0; font-size: 13px; }.desk-footer span { color: #859187; }.desk-footer a { color: #536c5c; }
-.recent-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }.recent-actions .el-button { margin: 0; }
-@media (max-width: 800px) { .desk-main { grid-template-columns: 1fr; }.introduction { padding: 24px; }.sample-contour { display: none; }.desk-heading p { display: none; } }
+.analysis-desk { max-width: 1296px; margin: 0 auto; }
+.desk-heading h1 { margin: 0 0 19px; font-size: 24px; font-weight: 650; letter-spacing: .03em; }
+.desk-main { display: grid; grid-template-columns: minmax(320px, .85fr) minmax(0, 1.15fr); min-height: 392px; border: 1px solid var(--work-border); border-radius: 8px; overflow: hidden; background: var(--work-panel); }
+.introduction { display: grid; align-content: center; justify-items: start; padding: clamp(24px, 4.4vw, 68px); min-width: 0; }
+.introduction h2 { margin: 4px 0 13px; font-size: clamp(26px, 3vw, 42px); line-height: 1.25; letter-spacing: -.035em; }
+.introduction p, .recent p { margin: 0; line-height: 1.7; color: var(--work-secondary); }
+.capability { color: var(--work-accent) !important; font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.introduction .capability { margin-bottom: 12px; }
+.sample-pair { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 14px; align-items: start; margin-top: 20px; font-size: 12px; }
+.sample-pair span { color: var(--work-muted); }
+.sample-pair strong { overflow-wrap: anywhere; font-weight: 550; }
+.desk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 23px; }
+.desk-actions .el-button { margin-left: 0; }
+.introduction .subtle { margin-top: 10px; font-size: 12px; color: var(--work-muted); }
+.study-image { position: relative; margin: 0; min-width: 0; min-height: 235px; overflow: hidden; background: #293642; }
+.study-image img { position: absolute; width: 100%; height: 100%; object-fit: cover; object-position: 54% 46%; }
+.study-image::after { position: absolute; inset: 0; background: linear-gradient(90deg, #151d29ab, transparent 29%), linear-gradient(0deg, #111822de, transparent 45%); content: ''; }
+.study-image figcaption { position: absolute; z-index: 1; right: 22px; bottom: 18px; display: grid; gap: 4px; text-align: right; }
+.study-image figcaption span { color: #f1f5fa; font-size: 13px; }
+.study-image figcaption small { color: #d3dfea; font: 11px var(--work-mono); }
+.desk-links { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr); gap: 14px; margin-top: 16px; }
+.recent, .map-entry { display: flex; align-items: center; justify-content: space-between; gap: 15px; border: 1px solid var(--work-border); border-radius: 7px; padding: 19px 22px; background: var(--work-panel); }
+.recent h3 { margin: 6px 0; font-size: 17px; overflow-wrap: anywhere; }
+.recent p { font-size: 12px; }
+.recent-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.recent-actions .el-button { margin: 0; }
+.map-entry { justify-content: flex-start; color: var(--work-text); text-decoration: none; }
+.map-entry:hover { border-color: var(--work-accent); background: var(--work-hover); }
+.map-entry strong, .map-entry small { display: block; }
+.map-entry small { margin-top: 5px; color: var(--work-muted); }
+.entry-icon { display: grid; flex: 0 0 40px; height: 40px; place-items: center; border: 1px solid #47678e; border-radius: 6px; color: var(--work-accent); background: var(--work-selected); font-size: 19px; }
+.entry-arrow { margin-left: auto; color: var(--work-muted); }
+@media (max-width: 720px) {
+  .desk-main, .desk-links { grid-template-columns: 1fr; min-height: 0; }
+  .introduction { padding: 24px 19px; }
+  .study-image { min-height: 196px; }
+  .recent, .map-entry { padding: 15px; }
+}
 </style>

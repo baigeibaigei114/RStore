@@ -31,7 +31,7 @@ const router = createRouter({
         { path: 'agent', name: 'Agent', component: ImagingAssistantView, meta: {
           title: '影像助手', activeMenu: '/agent',
         } },
-        { path: 'ingestion', name: 'SafeIngestion', component: IngestionView, meta: { title: '产品入库', activeMenu: '/ingestion' } },
+        { path: 'ingestion', name: 'SafeIngestion', component: IngestionView, meta: { title: '产品入库', activeMenu: '/images' } },
         {
           path: 'dashboard',
           name: 'Dashboard',
@@ -48,7 +48,7 @@ const router = createRouter({
           path: 'images/upload',
           name: 'ImageUpload',
           component: ImageUploadView,
-          meta: { title: '影像上传', activeMenu: '/images/upload' },
+          meta: { title: '影像上传', activeMenu: '/images' },
         },
         {
           path: 'images/:id',
@@ -66,7 +66,7 @@ const router = createRouter({
           path: 'spatial-query',
           name: 'SpatialQuery',
           component: SpatialQueryView,
-          meta: { title: '空间查询', activeMenu: '/spatial-query' },
+          meta: { title: '空间查询', activeMenu: '/images' },
         },
         {
           path: 'tasks',

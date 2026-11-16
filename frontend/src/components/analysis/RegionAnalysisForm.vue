@@ -1,6 +1,6 @@
 <template>
-  <section class="region-analysis">
-    <div class="page-title"><span>区域分析 / 01</span><h2>单期区域 NDVI</h2><p>确认一景影像与一个区域，查看这次观测的植被绿度。</p></div>
+  <section class="region-analysis" :class="{ 'region-analysis--embedded': embedded }">
+    <div class="page-title"><h2>单期区域 NDVI</h2><p v-if="!embedded">确认一景影像与一个区域，查看这次观测的植被绿度。</p></div>
     <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon class="feedback" />
     <div v-if="expired" class="feedback"><el-button @click="relogin">重新登录并返回</el-button></div>
     <div v-else-if="needsReview && !intent" class="feedback">
@@ -41,7 +41,8 @@
             <p v-else-if="regionError" class="field-error">{{ regionError }} <el-button link @click="loadRegions">重试读取</el-button></p>
             <p v-else-if="!regions.length">还没有已保存的监测区域。</p>
             <p v-if="selectedRegion">{{ selectedRegion.name }} · 版本 {{ selectedRegion.version }}<br>统计区域内的像素；区域必须完整位于影像内。</p>
-            <router-link to="/map">去地图保存区域</router-link>
+            <el-button v-if="embedded" link @click="emit('choose-region')">在地图上选择区域</el-button>
+            <router-link v-else to="/map?panel=regions">去地图保存区域</router-link>
           </div>
         </div>
         <div class="analysis-actions"><el-button type="primary" size="large" :loading="submitting" :disabled="!canSubmit || !!intent" @click="submit">{{ submitting ? '正在提交' : '开始分析' }}</el-button>
@@ -49,7 +50,7 @@
       </el-form>
       <el-collapse class="technical"><el-collapse-item title="波段与来源详情" name="source"><p>红光波段 {{ selectedImage?.bandMapping?.red ?? '—' }} / 近红外波段 {{ selectedImage?.bandMapping?.nir ?? '—' }}</p><InputProvenance v-if="selectedImage" :raw="selectedImage.metadataJson" /></el-collapse-item></el-collapse>
     </el-card>
-    <p class="footnote">NDVI 描述植被绿度，单期均值不能直接判断作物健康或预测产量。<router-link to="/tasks">查看全部任务</router-link></p>
+    <p v-if="!embedded" class="footnote">NDVI 描述植被绿度，单期均值不能直接判断作物健康或预测产量。<router-link to="/tasks">查看全部任务</router-link></p>
   </section>
 </template>
 
@@ -68,6 +69,8 @@ import type { ImageDetail, ImageListItem } from '@/types/image'
 import type { TaskSubmitParams } from '@/types/task'
 
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const props = defineProps<{ embedded?: boolean; initialImageId?: number; initialRegionId?: number }>()
+const emit = defineEmits<{ 'choose-region': [] }>()
 const account = ref(''), imageId = ref<number>(), regionId = ref<number>()
 const images = ref<ImageListItem[]>([]), regions = ref<MonitoringRegion[]>([]), selectedImage = ref<ImageDetail>()
 const imageLoading = ref(false), regionLoading = ref(false), admissionLoading = ref(false), submitting = ref(false)
@@ -93,8 +96,10 @@ onMounted(async () => {
     intent.value = readIntent(sessionStorage, user.userId)
     let draft: { imageId?: number; regionId?: number; version?: number } = {}
     try { draft = JSON.parse(sessionStorage.getItem(draftKey()) || '{}') } catch { /* No valid draft. */ }
-    imageId.value = positiveId(route.query.imageId) ?? positiveId(draft.imageId)
-    regionId.value = positiveId(route.query.monitoringRegionId) ?? positiveId(draft.regionId)
+    const initialImage = props.embedded ? props.initialImageId : positiveId(route.query.imageId)
+    const initialRegion = props.embedded ? props.initialRegionId : positiveId(route.query.monitoringRegionId)
+    imageId.value = initialImage ?? positiveId(draft.imageId)
+    regionId.value = initialRegion ?? positiveId(draft.regionId)
     const identity = route.query.imageIdentity
     const expectedRegionVersion = positiveId(route.query.regionVersion)
     if (imageId.value && typeof identity === 'string' && /^[a-f0-9]{64}$/.test(identity)) {
@@ -106,7 +111,7 @@ onMounted(async () => {
       needsReview.value = true
       error.value = '助手草稿中的监测区已更新，请重新读取并核对素材。'
     }
-    if (!route.query.monitoringRegionId && selectedRegion.value && draft.version && draft.version !== selectedRegion.value.version) {
+    if (!initialRegion && selectedRegion.value && draft.version && draft.version !== selectedRegion.value.version) {
       regionId.value = undefined
       error.value = '原区域已变更，请重新选择并核对范围。影像选择已保留。'
     }
@@ -232,7 +237,7 @@ async function sendOriginal(payload: TaskSubmitParams) {
     // Keep an accepted record even if saving taskId fails: replay remains safe.
     intent.value = { version: 1, accountId: account.value, payload, taskId: result.taskId }
     try { saveIntent(sessionStorage, account.value, payload, result.taskId) } catch { /* Original pending request is already durable. */ }
-    await router.push(`/tasks/${result.taskId}`)
+    await router.push({ path: `/tasks/${result.taskId}`, query: props.embedded ? { from: 'map' } : {} })
     // Once the task URL is reached, it is the durable recovery entry. Do not
     // make the next explicit analysis reuse an already accepted request.
     if (router.currentRoute.value.path === `/tasks/${result.taskId}` && auth.userInfo?.userId === account.value) {
@@ -251,7 +256,10 @@ async function recover() {
   submitting.value = true; error.value = ''
   try {
     if (!await confirmAccount() || !intent.value) return
-    if (intent.value.taskId) { await router.push(`/tasks/${intent.value.taskId}`); return }
+    if (intent.value.taskId) {
+      await router.push({ path: `/tasks/${intent.value.taskId}`, query: props.embedded ? { from: 'map' } : {} })
+      return
+    }
     await sendOriginal(intent.value.payload)
   } catch (cause) { showError(cause) }
   finally { submitting.value = false }
@@ -263,12 +271,17 @@ function newAnalysis() {
 </script>
 
 <style scoped>
-.region-analysis { max-width: 1050px; margin: 0 auto; --el-color-primary: #175b47; }
-.analysis-card { border-top: 3px solid #175b47; }
+.region-analysis { max-width: 1050px; margin: 0 auto; --el-color-primary: var(--work-accent); }
+.analysis-card { border-top: 3px solid var(--work-border); }
 .selection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding: 12px 0 24px; }
-.selection-grid p, .footnote { color: #586860; line-height: 1.8; font-size: 14px; }
-.analysis-actions { display: flex; gap: 20px; align-items: center; border-top: 1px solid #e5ebe7; padding-top: 24px; }
-.analysis-actions span { color: #66766c; font-size: 13px; }.technical { margin-top: 24px; }
-.field-error { color: #9a551b !important; }.feedback { margin-bottom: 18px; }.recovery { background: #f0f6f2; }
+.selection-grid p, .footnote { color: var(--work-secondary); line-height: 1.8; font-size: 14px; }
+.analysis-actions { display: flex; gap: 20px; align-items: center; border-top: 1px solid var(--work-border); padding-top: 24px; }
+.analysis-actions span { color: var(--work-secondary); font-size: 13px; }.technical { margin-top: 24px; }
+.field-error { color: var(--work-warning) !important; }.feedback { margin-bottom: 18px; }.recovery { background: var(--work-panel); }
 @media (max-width: 750px) { .selection-grid { grid-template-columns: 1fr; gap: 18px; }.analysis-actions { align-items: flex-start; flex-direction: column; } }
+.region-analysis--embedded .page-title h2 { margin-block: 8px; font-size: 17px; }
+.region-analysis--embedded .selection-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.region-analysis--embedded .analysis-card :deep(.el-card__body) { padding: 11px; }
+.region-analysis--embedded .analysis-actions { align-items: flex-start; flex-direction: column; gap: 9px; padding-top: 12px; }
+.region-analysis--embedded .selection-grid p { font-size: 12px; }
 </style>

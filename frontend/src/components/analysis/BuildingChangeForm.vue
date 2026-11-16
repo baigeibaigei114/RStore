@@ -167,7 +167,7 @@ onBeforeUnmount(() => lifetime.abort())
 .building-form { max-width: 820px; }
 .sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sources :deep(.el-select) { width: 100%; }
-.sources p { margin: 5px 0 0; color: #506258; }
+.sources p { margin: 5px 0 0; color: var(--work-secondary); }
 .actions { display: flex; gap: 12px; margin: 16px 0; }
 @media (max-width: 650px) { .sources { grid-template-columns: 1fr; gap: 0; } }
 </style>

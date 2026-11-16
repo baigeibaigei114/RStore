@@ -542,14 +542,15 @@ function formatDateTime(value?: string) {
 </script>
 
 <style scoped>
-.image-detail { max-width: 1160px; --el-color-primary: #176b52; }
+.image-detail { max-width: 1160px; --el-color-primary: var(--work-accent); }
 .detail-actions { justify-content: flex-start; flex-wrap: wrap; margin: 0 0 20px; }
 .detail-actions .el-button { margin: 0; }
 .image-overview { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; }
 .image-overview > .detail-card { min-width: 0; }
-.preview-note { color: #667085; font-size: 13px; line-height: 1.8; }
-.advanced-panels { padding: 0 20px; border: 1px solid #e4e7ed; border-radius: 8px; background: #fff; }
+.preview-note { color: var(--work-secondary); font-size: 13px; line-height: 1.8; }
+.advanced-panels { padding: 0 20px; border: 1px solid var(--work-border); border-radius: 8px; background: var(--work-panel); }
 .advanced-panels :deep(.el-collapse-item__header) { font-size: 14px; font-weight: 500; }
 .advanced-panels :deep(.el-collapse-item__wrap) { border-bottom: 0; }
 @media (max-width: 900px) { .image-overview { grid-template-columns: 1fr; } }
+.overview-summary :deep(.el-descriptions__label) { white-space: nowrap; }
 </style>

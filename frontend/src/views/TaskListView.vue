@@ -7,17 +7,7 @@
       <el-tab-pane label="普通计算" name="compute" />
       <el-tab-pane label="模型检测" name="model" />
     </el-tabs>
-    <div v-if="tab === 'compute'" class="launch-actions" aria-label="发起普通计算">
-      <el-button type="primary" @click="router.push('/tasks/create?mode=region-ndvi')">区域 NDVI</el-button>
-      <el-button @click="router.push('/tasks/create?taskType=NDWI')">NDWI</el-button>
-      <el-button @click="router.push('/tasks/create?taskType=CHANGE_DETECTION')">波段差值变化检测</el-button>
-    </div>
-    <div v-else class="launch-actions">
-      <el-button type="primary" :disabled="!modelEnabled" :loading="modelLoading"
-        @click="router.push('/tasks/create?taskType=BUILDING_CHANGE_DETECTION')">建筑物变化检测</el-button>
-      <span v-if="modelError">{{ modelError }}</span>
-      <span v-else-if="!modelLoading && !modelEnabled">模型检测暂未启用</span>
-    </div>
+    <div class="launch-actions" aria-label="分析工具"><AnalysisToolbox :group="tab" /></div>
 
     <el-card class="table-card" shadow="never">
       <template #header>
@@ -42,7 +32,7 @@
       <p v-if="lastRead" class="last-read">最近成功读取：{{ lastRead }}<span v-if="paused"> · 自动更新已暂停，可点击刷新继续读取</span></p>
       <el-skeleton v-if="loading && !hasLoaded" :rows="5" animated />
       <ul v-else-if="taskList.length" class="analysis-list" aria-label="分析记录">
-        <li v-for="task in taskList" :key="task.id" class="analysis-row">
+        <li v-for="task in taskList" :key="task.id" class="analysis-row" :class="{ 'analysis-row--selected': String(task.id) === route.query.selected }">
           <div class="analysis-subject">
             <h3>{{ task.imageName || '未命名影像' }}</h3>
             <p>{{ taskTypeText(task.taskType) }}</p>
@@ -51,7 +41,7 @@
             <el-tag :type="taskStatusType(task.status)" effect="plain">{{ taskStatusText(task.status) }}</el-tag>
             <time :datetime="task.submittedAt">{{ formatDateTime(task.submittedAt) }}</time>
           </div>
-          <el-button @click="router.push({ path: `/tasks/${task.id}`, query: tab === 'model' ? { tab } : {} })">
+          <el-button @click="openTask(task.id)">
             {{ task.status === 'SUCCESS' ? '查看结果' : isActiveStatus(task.status) ? '继续查看' : '查看详情' }}
           </el-button>
         </li>
@@ -78,28 +68,30 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getBuildingChangeOptionsApi, listTasksApi } from '@/api/task'
+import { listTasksApi } from '@/api/task'
+import AnalysisToolbox from '@/components/analysis/AnalysisToolbox.vue'
 import type { TaskListItem, TaskStatus, TaskType } from '@/types/task'
 import { useAuthStore } from '@/stores/auth'
-import { isUnauthorized } from '@/utils/regionAnalysis'
+import { isUnauthorized, positiveId } from '@/utils/regionAnalysis'
 import { createRefreshController, isActiveStatus, taskStatusText } from '@/utils/taskPresentation'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const tab = computed(() => route.query.tab === 'model' ? 'model' : 'compute')
-const modelLoading = ref(false), modelEnabled = ref(false), modelError = ref('')
+const returnPage = () => positiveId(route.query.page) ?? 1
+const returnPageSize = () => [10, 20, 50].find(size => String(size) === route.query.size) ?? 10
 const loading = ref(false)
 const autoRefresh = ref(true)
 const taskList = ref<TaskListItem[]>([])
 const connectionError = ref(''), expired = ref(false), lastRead = ref('')
 const hasLoaded = ref(false), paused = ref(false)
 let alive = true, generation = 0
-let confirmedPage = { pageNum: 1, pageSize: 10 }
+let confirmedPage = { pageNum: returnPage(), pageSize: returnPageSize() }
 
 const pagination = reactive({
-  pageNum: 1,
-  pageSize: 10,
+  pageNum: returnPage(),
+  pageSize: returnPageSize(),
   total: 0,
 })
 
@@ -127,28 +119,19 @@ watch([() => auth.userInfo?.userId, tab], () => {
   hasLoaded.value = false
   loading.value = false
   connectionError.value = ''; expired.value = false; lastRead.value = ''
-  pagination.pageNum = 1; pagination.total = 0
-  confirmedPage = { pageNum: 1, pageSize: pagination.pageSize }
+  pagination.pageNum = returnPage(); pagination.total = 0
+  confirmedPage = { pageNum: pagination.pageNum, pageSize: pagination.pageSize }
   if (alive && auth.isLoggedIn) refreshTasks()
   else if (alive) { expired.value = true; connectionError.value = '登录已过期，请重新登录后继续查看。' }
 })
 
-watch([tab, () => auth.userInfo?.userId], async ([selected], _, onCleanup) => {
-  if (selected !== 'model') return
-  const controller = new AbortController()
-  onCleanup(() => controller.abort())
-  modelLoading.value = true
-  modelEnabled.value = false
-  modelError.value = ''
-  try {
-    const settings = await getBuildingChangeOptionsApi(controller.signal)
-    if (!controller.signal.aborted) modelEnabled.value = settings.enabled
-  } catch {
-    if (!controller.signal.aborted) modelError.value = '暂时无法读取模型状态，请刷新重试'
-  } finally {
-    if (!controller.signal.aborted) modelLoading.value = false
-  }
-}, { immediate: true })
+function openTask(id: number) {
+  void router.push({ path: `/tasks/${id}`, query: {
+    ...(tab.value === 'model' ? { tab: 'model' } : {}),
+    ...(pagination.pageNum > 1 ? { page: pagination.pageNum } : {}),
+    ...(pagination.pageSize !== 10 ? { size: pagination.pageSize } : {}),
+  } })
+}
 
 function changeTab(name: string | number) {
   void router.replace({ path: '/tasks', query: name === 'model' ? { tab: 'model' } : {} })
@@ -254,26 +237,32 @@ function formatDateTime(value?: string) {
 
 <style scoped>
 .analysis-history { max-width: 1160px; }
-.list-feedback { margin-bottom: 16px; padding: 12px 16px; border-left: 3px solid #d7a04a; background: #fffaeb; color: #73511a; }
+.list-feedback { margin-bottom: 16px; padding: 12px 16px; border-left: 3px solid var(--work-accent); background: #362a24; color: var(--work-warning); }
 .list-feedback p { margin: 0; line-height: 1.7; }
 .list-feedback .el-button { margin-top: 10px; }
-.last-read { margin: 0 0 16px; color: #667085; font-size: 12px; line-height: 1.7; }
+.last-read { margin: 0 0 16px; color: var(--work-secondary); font-size: 12px; line-height: 1.7; }
 .card-header, .table-toolbar { flex-wrap: wrap; gap: 12px; }
 .launch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 4px 20px; }
 .launch-actions .el-button { margin-left: 0; }
 .analysis-list { margin: 0; padding: 0; list-style: none; }
-.analysis-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; align-items: center; gap: 24px; padding: 20px 0; border-bottom: 1px solid #eaecf0; }
+.analysis-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; align-items: center; gap: 24px; padding: 20px 0; border-bottom: 1px solid var(--work-border); }
 .analysis-row:first-child { padding-top: 4px; }
 .analysis-row:last-child { border-bottom: 0; }
 .analysis-subject { min-width: 0; }
 .analysis-subject h3 { margin: 0 0 7px; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
-.analysis-subject p { margin: 0; color: #667085; font-size: 13px; overflow-wrap: anywhere; }
+.analysis-subject p { margin: 0; color: var(--work-secondary); font-size: 13px; overflow-wrap: anywhere; }
 .analysis-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.analysis-state time { color: #667085; font-size: 12px; }
+.analysis-state time { color: var(--work-secondary); font-size: 12px; }
 .pagination-bar :deep(.el-pagination) { flex-wrap: wrap; gap: 8px; }
 @media (max-width: 900px) {
   .analysis-row { grid-template-columns: minmax(0, 1fr) auto; gap: 14px; }
   .analysis-subject { grid-column: 1 / -1; }
   .analysis-row > .el-button { justify-self: end; }
+}
+.analysis-row--selected { border-left: 2px solid var(--work-accent); background: var(--work-selected); }
+.launch-actions :deep(.analysis-tools) { width: 100%; }
+@media (max-width: 560px) {
+  .launch-actions :deep(.analysis-tools) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .launch-actions :deep(.tool-icon), .launch-actions :deep(.tool-arrow) { display: none; }
 }
 </style>

@@ -1,13 +1,10 @@
 <template>
-  <el-container class="app-layout">
-    <AppSidebar />
-    <el-container class="app-content">
-      <AppHeader />
-      <el-main class="app-main">
-        <router-view v-if="auth.isLoggedIn || route.meta.public" :key="auth.isLoggedIn ? 'account' : 'guest'" />
-      </el-main>
-    </el-container>
-  </el-container>
+  <div class="app-layout">
+    <AppHeader />
+    <main class="app-main" :class="{ 'app-main--map': route.name === 'MapViewer' }">
+      <router-view v-if="auth.isLoggedIn || route.meta.public" :key="auth.isLoggedIn ? 'account' : 'guest'" />
+    </main>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -16,7 +13,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { SESSION_EXPIRED_EVENT, TOKEN_KEY } from '@/api/request'
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from './AppHeader.vue'
-import AppSidebar from './AppSidebar.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
