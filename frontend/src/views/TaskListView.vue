@@ -236,7 +236,6 @@ function formatDateTime(value?: string) {
 </script>
 
 <style scoped>
-.analysis-history { max-width: 1160px; }
 .list-feedback { margin-bottom: 16px; padding: 12px 16px; border-left: 3px solid var(--work-accent); background: #362a24; color: var(--work-warning); }
 .list-feedback p { margin: 0; line-height: 1.7; }
 .list-feedback .el-button { margin-top: 10px; }

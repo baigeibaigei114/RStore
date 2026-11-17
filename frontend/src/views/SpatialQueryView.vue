@@ -144,13 +144,15 @@
             </el-form-item>
           </el-form>
 
-          <div class="map-panel-actions spatial-actions">
-            <el-button @click="handleClear">重置</el-button>
-            <el-button v-if="spatialMode === 'bbox'" type="primary" @click="handleStartDraw">开始框选</el-button>
-            <el-button type="success" :loading="loading || regionDetailLoading" :disabled="!canSearch" @click="fetchImages">
-              检索
-            </el-button>
-          </div>
+          <template #footer>
+            <div class="map-panel-actions spatial-actions">
+              <el-button @click="handleClear">重置</el-button>
+              <el-button v-if="spatialMode === 'bbox'" type="primary" @click="handleStartDraw">开始框选</el-button>
+              <el-button type="success" :loading="loading || regionDetailLoading" :disabled="!canSearch" @click="fetchImages">
+                检索
+              </el-button>
+            </div>
+          </template>
         </el-card>
       </div>
 

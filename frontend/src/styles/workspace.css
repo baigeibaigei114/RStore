@@ -69,7 +69,20 @@ html.dark .el-button--primary:not(.is-link, .is-plain, .is-text) {
 }
 .workbench-brand { display: flex; align-items: center; gap: 9px; color: var(--work-text); font-size: 14px; text-decoration: none; }
 .workbench-brand strong { letter-spacing: .04em; white-space: nowrap; }
-.workbench-mark { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #49688f; border-radius: 6px; background: #233b58; color: #8ebaff; font-size: 10px; font-weight: 650; }
+.workbench-mark {
+  display: grid;
+  flex: 0 0 29px;
+  width: 29px;
+  height: 29px;
+  grid-template: repeat(2, 6px) / repeat(2, 6px);
+  place-content: center;
+  gap: 2px;
+  border: 1px solid #49688f;
+  border-radius: 6px;
+  background: #233b58;
+}
+.workbench-mark > span { border-radius: 1px; background: #b6c8df; }
+.workbench-mark > span:nth-child(2) { background: var(--work-accent); }
 .workbench-nav { display: flex; align-self: stretch; gap: 2px; min-width: 0; }
 .workbench-nav a { position: relative; display: grid; place-items: center; padding-inline: 15px; white-space: nowrap; color: var(--work-secondary); text-decoration: none; font-size: 13px; }
 .workbench-nav a:hover, .workbench-nav a.nav-current { color: var(--work-text); background: rgb(255 255 255 / 4%); }

@@ -1,7 +1,9 @@
 <template>
   <header class="workbench-header">
     <RouterLink class="workbench-brand" to="/dashboard" aria-label="遥感影像分析工作台首页">
-      <span class="workbench-mark" aria-hidden="true">遥感</span>
+      <span class="workbench-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </span>
       <strong>遥感影像分析工作台</strong>
     </RouterLink>
     <nav class="workbench-nav" aria-label="主导航">

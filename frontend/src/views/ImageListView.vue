@@ -354,7 +354,6 @@ function imageStatusType(status: ImageStatus) {
 </script>
 
 <style scoped>
-.image-catalog { max-width: 1160px; --el-color-primary: var(--work-accent); }
 .basic-query { display: grid; grid-template-columns: minmax(200px, 1fr) auto; align-items: end; gap: 16px; }
 .basic-query .el-form-item { margin: 0; }
 .query-actions { display: flex; flex-wrap: wrap; gap: 8px; }

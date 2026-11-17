@@ -515,6 +515,13 @@ body {
   padding: 16px 20px;
 }
 
+.spatial-toolbar .el-card__footer {
+  flex: 0 0 auto;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--work-border);
+  background: var(--el-card-bg-color);
+}
+
 .spatial-toolbar .el-form-item {
   margin-bottom: 14px;
 }
@@ -556,13 +563,7 @@ body {
 
 .spatial-actions {
   flex-wrap: wrap;
-  position: sticky;
-  bottom: 0;
-  justify-content: flex-end;
-  margin: 12px -20px -16px;
-  padding: 12px 20px 16px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.78), var(--work-panel) 32%);
-  border-top: 1px solid var(--work-border);
+  margin-top: 0;
 }
 
 .spatial-actions .el-button {
@@ -708,16 +709,19 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .spatial-map,
+  .spatial-map {
+    min-height: 0;
+  }
+
   .spatial-ol-map {
-    min-height: 620px;
-    height: 620px;
+    min-height: 0;
+    height: clamp(260px, 46dvh, 420px);
   }
 
   .spatial-toolbar {
     position: static;
     width: auto;
-    max-height: none;
+    max-height: min(560px, 75dvh);
     margin: 12px;
   }
 
