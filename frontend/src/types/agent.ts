@@ -1,3 +1,5 @@
+import type { TaskStatus } from './task'
+
 export type AgentStatus = 'RUNNING' | 'NEEDS_INPUT' | 'WAITING_CONFIRMATION' | 'EXPIRED' | 'WAITING_TASK'
   | 'READY_TO_EXPLAIN' | 'EXPLAINING' | 'SUCCEEDED' | 'INSUFFICIENT_EVIDENCE' | 'FAILED' | 'UNSUPPORTED' | 'CANCELED'
 
@@ -30,7 +32,7 @@ export interface AgentExecution {
   requestId?: string; executionId: string; version: number; status: AgentStatus; question: string | null
   unsupportedReason: string | null; missingFields: string[]; imageCandidates: ImageCandidate[]; regionCandidates: RegionCandidate[]
   hasMoreCandidates: boolean; operation: { operationId: string; kind: string; deadline: string } | null
-  draft: AgentDraft | null; task: { taskId: string; status: string; progress: number } | null
+  draft: AgentDraft | null; task: { taskId: string; status: TaskStatus; progress: number } | null
   explanation: AgentExplanation | null; error: { errorCode: string; message: string; retryable: boolean } | null
   budget: { modelCalls: number; toolCalls: number }
 }
@@ -40,14 +42,3 @@ export interface AgentStep {
   input: Record<string, unknown> | null; output: Record<string, unknown> | null
   startedAt: string; endedAt: string | null; durationMs?: number
 }
-export interface CreateExecution { clientRequestId: string; text: string }
-export interface MessageExecution {
-  clientRequestId: string; expectedVersion: number; text?: string; selectedImageId?: string; selectedRegionId?: string
-}
-export type PendingAction =
-  | { kind: 'create'; body: CreateExecution }
-  | { kind: 'message'; executionId: string; body: MessageExecution }
-  | { kind: 'confirm'; executionId: string; body: { draftVersion: number; draftHash: string } }
-  | { kind: 'explanation'; executionId: string; body: { clientRequestId: string } }
-  | { kind: 'retry'; executionId: string; body: { clientRequestId: string; expectedVersion: number } }
-  | { kind: 'cancel'; executionId: string; body: { expectedVersion: number } }

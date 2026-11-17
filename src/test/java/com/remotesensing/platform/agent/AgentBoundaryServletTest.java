@@ -76,11 +76,11 @@ class AgentBoundaryServletTest {
         for (String prefix : new String[]{"/api/agent", "/api/agent;v=1", "/api/%61gent;v=1"}) {
             for (String suffix : new String[]{"/executions", "/answers", "/executions/"+id+"/confirm"}) {
                 JsonNode response = post(prefix+suffix,"{}");
-                assertThat(response.path("code").asInt()).isEqualTo(200);
+                assertThat(response.path("code").asInt()).isEqualTo(403);
                 assertThatCode(() -> UUID.fromString(response.path("data").path("requestId").asText())).doesNotThrowAnyException();
             }
         }
-        verify(service,times(3)).create(any()); verify(service,times(3)).answer(any()); verify(service,times(3)).confirm(eq(id),any());
+        verifyNoInteractions(service);
     }
     @Configuration(proxyBeanMethods=false) @EnableWebMvc
     static class Mvc {
@@ -91,15 +91,12 @@ class AgentBoundaryServletTest {
         }
         @Bean AgentService service() {
             AgentService service = mock(AgentService.class);
-            when(service.create(any())).thenAnswer(i -> AgentJson.object().put("executionId",UUID.randomUUID().toString()));
             when(service.answer(any())).thenAnswer(i -> AgentJson.object().put("summary","安全测试回答"));
-            when(service.confirm(anyString(),any())).thenAnswer(i -> AgentJson.object().put("taskId","synthetic-task"));
             return service;
         }
         @Bean AgentController controller(AgentService service, CurrentUserContext users) {
             AgentProperties properties = new AgentProperties();
-            properties.setLegacyWritesEnabled(true);
-            return new AgentController(service,users,mock(RateLimitService.class),properties);
+            return new AgentController(service);
         }
         @Bean AgentAdvice advice() { return new AgentAdvice(); }
     }

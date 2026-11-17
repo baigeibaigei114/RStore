@@ -8,7 +8,7 @@ from app.config import Settings
 from app.errors import AgentError
 from app.main import create_app
 from app.model import strict_json
-from app.schemas import DecisionRequest
+from app.schemas import PreparationRequest
 from app.service import AgentService
 
 TOKEN = "test-only-internal-token-32-characters-long"
@@ -33,9 +33,8 @@ def headers():
     return {"X-Internal-Token": TOKEN, "X-Request-Id": str(uuid4())}
 
 
-def decision_body():
-    return {"schemaVersion": 1, "operationId": str(uuid4()), "goal": "分析已保存区域的NDVI",
-            "selectionContext": {}, "observations": [], "remainingCalls": 3}
+def preparation_body():
+    return {"schemaVersion": 1, "goal": "分析已保存区域的NDVI"}
 
 
 def test_internal_auth_and_request_id_before_any_model():
@@ -53,7 +52,7 @@ def test_internal_auth_and_request_id_before_any_model():
 def test_unknown_or_identity_fields_fail_before_model(extra):
     model = ModelDouble()
     with TestClient(create_app(Settings(internal_token=TOKEN), AgentService(None, None, model))) as client:
-        response = client.post("/internal/v1/decisions", headers=headers(), json=decision_body() | extra)
+        response = client.post("/internal/v1/preparation", headers=headers(), json=preparation_body() | extra)
         assert response.status_code == 400
         assert "other" not in response.text
     assert model.calls == 0
@@ -72,40 +71,15 @@ def test_body_limit():
         assert client.post("/internal/v1/answers", headers=headers(), content="x" * 65537).status_code == 413
 
 
-@pytest.mark.parametrize("action", [
-    {"kind": "CALL_TOOL", "tool": "submitTask", "arguments": {}},
-    {"kind": "CALL_TOOL", "tool": "searchImages", "arguments": {"sql": "DELETE"}},
-    {"kind": "CALL_TOOL", "tool": "searchImages", "arguments": {"maxCloudPercent": 101}},
-    {"kind": "PROPOSE_NDVI", "imageId": "31", "monitoringRegionId": "1", "params": {"redBand": 3, "nirBand": 4}},
-    {"kind": "PROPOSE_NDVI", "imageId": "i1", "monitoringRegionId": "r1", "params": {"redBand": 3.0, "nirBand": 4}},
-])
-def test_illegal_action_or_argument_rejected(action):
-    service = AgentService(None, None, ModelDouble(action))
-    with pytest.raises(AgentError, match="模型"):
-        service.decision(DecisionRequest.model_validate(decision_body()))
 
 
-def test_opaque_handles_and_explicit_selection():
-    body = decision_body()
-    body["selectionContext"] = {"imageCandidates": [{"id": "31", "name": "样本"}, {"id": "32", "name": "另一影像"}],
-                                "regionCandidates": [{"id": "1", "name": "区域", "version": 2}]}
-    model = ModelDouble({"kind": "PROPOSE_NDVI", "imageId": "i1", "monitoringRegionId": "r1",
-                         "params": {"redBand": 3, "nirBand": 4}})
-    service = AgentService(None, None, model)
-    with pytest.raises(AgentError, match="选择"):
-        service.decision(DecisionRequest.model_validate(body))
-    body["selectionContext"]["selectedImageId"] = "31"
-    result = service.decision(DecisionRequest.model_validate(body))
-    assert result["action"]["imageId"] == "31"
-    assert '"id"' not in str(model.last_payload)
-    assert model.last_payload["selectedImage"] == "i1"
 
 
 def test_sensitive_goal_not_sent():
     model = ModelDouble()
-    body = decision_body() | {"goal": "password=never-send-this"}
+    body = preparation_body() | {"goal": "password=never-send-this"}
     with pytest.raises(AgentError, match="凭据"):
-        AgentService(None, None, model).decision(DecisionRequest.model_validate(body))
+        AgentService(None, None, model).preparation(PreparationRequest.model_validate(body))
     assert model.calls == 0
 
 
@@ -120,7 +94,7 @@ def test_strict_json_rejects_duplicate_and_nonfinite():
 def test_protocol_literal_integers_do_not_coerce(version):
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
-        DecisionRequest.model_validate(decision_body() | {"schemaVersion": version})
+        PreparationRequest.model_validate(preparation_body() | {"schemaVersion": version})
 
 
 def test_unconfigured_model_does_not_call_provider():

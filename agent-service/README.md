@@ -1,6 +1,6 @@
 # 影像助手 Agent/RAG 内部服务
 
-独立 FastAPI 服务承载受控 JSON 动作与内置知识检索，不提交遥感任务。浏览器只访问 Java；Java负责JWT/owner、白名单工具、草稿确认、预算、幂等与Task/Outbox关联，Worker保持确定性计算。
+独立 FastAPI 服务从一句话提取区域 NDVI 查询条件，并提供有来源的内置知识问答。浏览器只访问 Java；Java 负责 JWT/owner、素材查询、准入和覆盖核对。用户在原表单确认后，由原任务服务处理幂等提交和 Task/Outbox，Worker 保持确定性计算。
 支持已有标准化影像和已保存区域的单期NDVI；不提供作物诊断、产量预测、多期分析或任意文档上传。
 
 ## 依赖
@@ -37,13 +37,15 @@ uv sync --frozen
 
 1. `src/main/resources/db/upgrade/20261003_task_lease.sql`
 2. `src/main/resources/db/upgrade/20261014_agent_ndvi.sql`
-3. `src/main/resources/db/upgrade/20261111_result_analysis.sql`（部署任务结果页问答前执行）
-4. `src/main/resources/db/upgrade/20261111_result_analysis_turns.sql`（先暂停旧版任务结果问答写入，再执行轮次迁移并启动支持连续追问的版本）
-5. `src/main/resources/db/upgrade/20261111_result_analysis_spatial.sql`（开启分区解读前执行，使用业务库现有 PostGIS）
+3. `src/main/resources/db/upgrade/20261111_result_analysis.sql`（保留任务结果问答历史表）
+4. `src/main/resources/db/upgrade/20261111_result_analysis_turns.sql`（为历史问答补齐轮次；迁移前暂停旧版本写入）
+5. `src/main/resources/db/upgrade/20261111_result_analysis_spatial.sql`（历史分区证据，使用业务库现有 PostGIS）
 
 `/agent` 默认提供一句话准备区域 NDVI 和平台知识问答。Java 的新入口在 `/api/agent/imaging-assistant/` 下。准备接口只返回素材草稿。原区域 NDVI 表单提交时，Java 在同一事务核对草稿素材及区域版本。已受理的请求通过原幂等键找回任务。
 
-旧执行链接 `/agent?executionId=…` 和旧任务结果的 `#result-answers-title` 锚点可只读查看历史。任务详情从现有报告表读取旧报告。尚未创建报告表的环境使用 `src/main/resources/db/upgrade/20260526_ai_report.sql`。任务结果问答的 POST 已停止生成。旧执行写入的开关独立于新入口，历史读取不依赖模型配置。
+旧执行链接 `/agent?executionId=…`、`/agent?history=legacy-agent` 和旧任务结果的 `#result-answers-title` 锚点可只读查看历史。任务详情从现有报告表读取旧报告。尚未创建报告表的环境使用 `src/main/resources/db/upgrade/20260526_ai_report.sql`。旧执行、旧报告和结果问答的 POST 固定拒绝，不再提供恢复生成的开关，历史读取不依赖模型配置。
+
+历史 GET 不推进执行状态，不恢复模型调用。旧执行中途停下的记录显示归档状态，已关联任务仍可打开任务详情；结果问答中未完成的轮次只在读取时显示为未完成，数据库记录保持原样。为等待业务库实际状态分布和任务关联审计，启动时最多收敛 100 条已过期旧操作的恢复逻辑暂时保留；它不调用模型，失败也不会关闭新版知识问答。历史表、字段与增量迁移继续保留。
 
 NDWI 解读使用整幅结果影像的共同有效像素。先升级接收新统计的 Java 后端，再升级 Worker。旧 NDWI 结果缺少源波段掩膜证据时保留地图和文件；水体面积还需要分类结果和面积口径。
 
@@ -65,10 +67,10 @@ uv run python -m app.knowledge.sync --manifest knowledge/manifest.json
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-内部接口位于 `/internal/v1/`。影像助手使用 POST preparation 和 POST answers。请求要求 `X-Internal-Token` 和 UUID `X-Request-Id`，请求及响应各限 64 KiB。ready 不调用收费 Provider。
+内部接口位于 `/internal/v1/`，保留 GET health、GET ready、POST preparation 和 POST answers。旧 decisions、explanations、result-answers 路由已删除。请求要求 `X-Internal-Token` 和 UUID `X-Request-Id`，请求及响应各限 64 KiB。ready 不调用收费 Provider。
 Java启用`agent` profile并设置`AGENT_ENABLED=true`、`AGENT_BASE_URL`和同一个内部token；具体基础设施配置通过外部环境提供。`compose.agent.yml`可与根Compose合并，无宿主端口映射，模型snapshot只读挂载。
 
-模型无自动重试。返回动作必须通过严格schema、预算和白名单；引用必须来自当次检索，原文quote匹配且摘要逐字对应主张。解释数值来自Java保存的真实统计，不由模型生成；安全错误不回显原始异常或敏感请求。
+模型无自动重试。准备接口只能返回查询条件，不能返回资源 ID、权限或任务指令；Java 重新核对匹配素材。知识回答必须通过严格 schema 和引用验证，原文 quote 匹配且答案逐字对应主张，不携带个人任务数值；安全错误不回显原始异常或敏感请求。旧解读中的统计和引用继续从已保存内容读取。
 
 ## 本地验证与边界
 
@@ -81,6 +83,6 @@ uv run mypy app
 ```
 
 默认跳过需要真实embedding/隔离PG的集成节点；显式配置`AGENT_RUN_INTEGRATION=1`和专用测试库后才能执行，禁止指向日常业务库。测试不自动发起收费模型调用。
-前端按 `frontend/` 现有 npm 锁构建。准备草稿最多调用一次模型，人工挑选候选及核对更新后的素材使用 Java 读取接口。验收时从同一侧栏起点分别计时，记录到可提交表单的总耗时、模型回合耗时及人工查询与选择次数。
+前端按 `frontend/` 现有 npm 锁构建，并运行 `npm test`（包含 `.test.mjs` 和 `agentSession.test.ts`）。准备草稿最多调用一次模型，人工挑选候选及核对更新后的素材使用 Java 读取接口。验收时从同一工作台起点分别计时，记录到可提交表单的总耗时、模型回合耗时及人工查询与选择次数。
 
 当前有隔离环境验证；既有业务环境的协调迁移/部署、真实MQ/MinIO/Redis故障演练、生产负载及科学真值评估尚未最终验收。不要将单期均值当作作物健康结论，也不要将引用合法性等同于开放问题普遍正确率。

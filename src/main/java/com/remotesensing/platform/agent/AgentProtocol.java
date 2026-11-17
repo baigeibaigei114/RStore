@@ -3,66 +3,16 @@ package com.remotesensing.platform.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import java.net.URI;
-import java.time.OffsetDateTime;
 import java.util.*;
 import static com.remotesensing.platform.agent.AgentJson.*;
 
-/** Java independently validates internal output before any tool or persisted explanation. */
+/** Java independently validates internal output before returning a sourced knowledge answer. */
 public final class AgentProtocol {
-    public static final Set<String> METRICS = Set.of("statistics.mean", "statistics.min", "statistics.max",
-            "statistics.totalPixelCount", "statistics.validPixelCount", "statistics.invalidPixelCount",
-            "statistics.validPixelRatio", "coverageRatio");
     private AgentProtocol() {}
 
-    public static JsonNode action(JsonNode output) {
+    public static ObjectNode generated(JsonNode output) {
         try {
-            fields(output, "requestId", "action", "usage", "modelRequested", "modelReturned", "elapsedMs");
-            JsonNode action = output.path("action");
-            String kind = text(action, "kind", 30);
-            switch (kind) {
-                case "ASK_USER" -> {
-                    fields(action, "kind", "question", "missingFields");
-                    sensitive(text(action, "question", 500));
-                    JsonNode missing = action.path("missingFields");
-                    require(missing.isArray() && missing.size() <= 3);
-                    missing.forEach(value -> require(value.isTextual() && Set.of("imageId", "monitoringRegionId", "goalClarification").contains(value.asText())));
-                }
-                case "UNSUPPORTED" -> { fields(action, "kind", "message"); sensitive(text(action, "message", 500)); }
-                case "PROPOSE_NDVI" -> {
-                    fields(action, "kind", "imageId", "monitoringRegionId", "params");
-                    id(action, "imageId"); id(action, "monitoringRegionId");
-                    fields(action.path("params"), "redBand", "nirBand");
-                    require(integer(action.path("params"), "redBand", 1) == 3 && integer(action.path("params"), "nirBand", 1) == 4);
-                }
-                case "CALL_TOOL" -> {
-                    fields(action, "kind", "tool", "arguments");
-                    String tool = text(action, "tool", 30);
-                    JsonNode args = action.path("arguments");
-                    if (tool.equals("searchImages")) {
-                        fields(args, "keyword", "startTime", "endTime", "sensor", "maxCloudPercent");
-                        sensitive(optionalText(args, "keyword", 100)); sensitive(optionalText(args, "sensor", 50));
-                        String start = optionalText(args, "startTime", 50), end = optionalText(args, "endTime", 50);
-                        OffsetDateTime first = start == null ? null : OffsetDateTime.parse(start);
-                        OffsetDateTime last = end == null ? null : OffsetDateTime.parse(end);
-                        require(first == null || last == null || !first.isAfter(last));
-                        JsonNode cloud = args.path("maxCloudPercent");
-                        require(cloud.isMissingNode() || cloud.isNull() || (cloud.isNumber() && Double.isFinite(cloud.doubleValue())
-                                && cloud.doubleValue() >= 0 && cloud.doubleValue() <= 100));
-                    } else {
-                        require(tool.equals("listRegions")); fields(args, "keyword"); sensitive(optionalText(args, "keyword", 100));
-                    }
-                }
-                default -> throw input();
-            }
-            return action;
-        } catch (AgentFailure | java.time.format.DateTimeParseException e) { throw invalid(); }
-    }
-
-    public static ObjectNode generated(JsonNode output, boolean explanation) {
-        try {
-            if (explanation) fields(output, "requestId", "knowledgeIndexId", "summary", "claims", "limitations", "insufficientEvidence",
-                    "citations", "distances", "usage", "modelRequested", "modelReturned", "elapsedMs");
-            else fields(output, "requestId", "knowledgeIndexId", "answer", "claims", "insufficientEvidence", "citations", "distances",
+            fields(output, "requestId", "knowledgeIndexId", "answer", "claims", "insufficientEvidence", "citations", "distances",
                     "usage", "modelRequested", "modelReturned", "elapsedMs");
             String index = hashField(output, "knowledgeIndexId");
             JsonNode citations = output.path("citations");
@@ -92,12 +42,8 @@ public final class AgentProtocol {
             boolean insufficient = output.path("insufficientEvidence").booleanValue();
             JsonNode claims = output.path("claims");
             require(claims.isArray() && claims.size() <= 8);
-            String narrative = text(output, explanation ? "summary" : "answer", 1000);
+            String narrative = text(output, "answer", 1000);
             sensitive(narrative);
-            if (explanation) {
-                require(output.path("limitations").isArray() && output.path("limitations").isEmpty());
-                require(narrative.codePoints().noneMatch(Character::isDigit));
-            }
             if (insufficient) require(claims.isEmpty() && narrative.equals("知识库中没有足够信息"));
             else {
                 require(!claims.isEmpty());
@@ -117,16 +63,14 @@ public final class AgentProtocol {
                     require(requested.equals(quoted));
                     JsonNode metrics = claim.path("metricRefs");
                     if (!metrics.isMissingNode()) {
-                        require(metrics.isArray() && metrics.size() <= 8 && (explanation || metrics.isEmpty()));
-                        metrics.forEach(metric -> require(metric.isTextual() && METRICS.contains(metric.asText())));
+                        require(metrics.isArray() && metrics.isEmpty());
                     }
                 }
                 require(narrative.equals(String.join("；", texts)));
             }
             ObjectNode safe = object().put("knowledgeIndexId", index).put("insufficientEvidence", insufficient)
-                    .put(explanation ? "summary" : "answer", narrative);
+                    .put("answer", narrative);
             safe.set("claims", claims.deepCopy()); safe.set("citations", citations.deepCopy());
-            if (explanation) safe.set("limitations", array());
             return safe;
         } catch (AgentFailure | IllegalArgumentException e) { throw invalid(); }
     }

@@ -46,8 +46,6 @@ app:
   rate-limit:
     ai-query-limit: 20
     ai-query-window-seconds: 60
-    ai-report-limit: 3
-    ai-report-window-seconds: 300
   ai:
     enabled: true
     provider: openai-compatible

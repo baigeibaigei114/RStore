@@ -9,19 +9,11 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.agent")
 public class AgentProperties {
     private boolean enabled = false;
-    private boolean legacyWritesEnabled = false;
     private String baseUrl = "http://agent-service:8000";
     private String internalToken = "";
-    private String model = "deepseek-v4-flash";
     private int connectSeconds = 3;
     private int requestSeconds = 35;
     private int roundSeconds = 30;
-    private int operationSeconds = 90;
-    private int draftMinutes = 15;
-    private int roundModelCalls = 3;
-    private int roundToolCalls = 2;
-    private int totalModelCalls = 12;
-    private int totalToolCalls = 8;
     private int concurrentCalls = 2;
     private int ownerRateLimit = 10;
     private int ownerRateSeconds = 60;

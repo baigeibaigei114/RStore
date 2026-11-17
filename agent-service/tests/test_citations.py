@@ -1,7 +1,7 @@
 import pytest
 
 from app.errors import AgentError
-from app.schemas import GeneratedAnswer, GeneratedExplanation, Statistics
+from app.schemas import GeneratedAnswer
 from app.service import AgentService
 
 
@@ -34,23 +34,3 @@ def test_invalid_reference_or_unbound_claim_rejected(change):
         output["insufficientEvidence"] = True
     with pytest.raises(AgentError):
         AgentService.validate_grounding(GeneratedAnswer.model_validate(output), retrieval())
-
-
-def test_zero_mean_is_valid_but_missing_or_bad_statistics_is_not():
-    stats = {"totalPixelCount": 10, "validPixelCount": 8, "invalidPixelCount": 2,
-             "validPixelRatio": 0.8, "min": -0.3, "mean": 0.0, "max": 0.5}
-    assert Statistics.model_validate(stats).mean == 0
-    from pydantic import ValidationError
-    with pytest.raises(ValidationError):
-        Statistics.model_validate(stats | {"mean": float("nan")})
-    with pytest.raises(ValidationError):
-        Statistics.model_validate(stats | {"validPixelCount": 0})
-
-
-def test_explanation_numeric_literal_cannot_override_statistics():
-    value = answer()
-    text = "均值为0.99"
-    claim = value["claims"][0] | {"text": text}
-    output = {"summary": text, "claims": [claim], "limitations": [], "insufficientEvidence": False}
-    with pytest.raises(AgentError):
-        AgentService.validate_grounding(GeneratedExplanation.model_validate(output), retrieval(), explanation=True)

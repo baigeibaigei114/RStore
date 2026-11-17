@@ -23,7 +23,7 @@ public class TaskResultAnswerController {
     public Result<JsonNode> get(@PathVariable long taskId,
                                 @RequestParam(required = false) String version,
                                 @RequestParam(required = false) Integer beforeTurn) {
-        return Result.success(service.get(taskId, version, beforeTurn).put("canAsk", false));
+        return Result.success(service.get(taskId, version, beforeTurn));
     }
 
     @PostMapping

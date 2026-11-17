@@ -23,9 +23,9 @@ class LegacyPlanRetirementTest {
     }
     @Test void legacyPathsHaveNoHandlerWhileSharedAiAndNewAgentMappingsRemain() throws Exception {
         var users = mock(CurrentUserContext.class);
-        var ai = new AiController(mock(AiQueryParseService.class),mock(AiReportService.class),mock(RateLimitService.class),new RateLimitProperties(),users,new AgentProperties());
+        var ai = new AiController(mock(AiQueryParseService.class),mock(AiReportService.class),mock(RateLimitService.class),new RateLimitProperties(),users);
         var agentService = mock(AgentService.class);
-        var mvc = MockMvcBuilders.standaloneSetup(ai,new AgentController(agentService,users,mock(RateLimitService.class),new AgentProperties()))
+        var mvc = MockMvcBuilders.standaloneSetup(ai,new AgentController(agentService))
                 .setControllerAdvice(new com.remotesensing.platform.exception.GlobalExceptionHandler()).build();
         for (var request : List.of(get("/api/ai/plans"),post("/api/ai/plans"),get("/api/ai/plans/1"),patch("/api/ai/plans/1/confirm"),patch("/api/ai/plans/1/cancel")))
             mvc.perform(request.contextPath("/api")).andExpect(status().isNotFound());

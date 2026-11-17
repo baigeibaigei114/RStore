@@ -22,12 +22,11 @@ class LegacyAgentReadOnlyTest {
     private final AgentService agent = mock(AgentService.class);
     private final AiReportService reports = mock(AiReportService.class);
     private final RateLimitService rate = mock(RateLimitService.class);
-    private final AgentProperties config = new AgentProperties();
     private final CurrentUserContext users = mock(CurrentUserContext.class);
 
     private MockMvc mvc() {
-        return MockMvcBuilders.standaloneSetup(new AgentController(agent, users, rate, config),
-                new AiController(mock(AiQueryParseService.class), reports, rate, new RateLimitProperties(), users, config))
+        return MockMvcBuilders.standaloneSetup(new AgentController(agent),
+                new AiController(mock(AiQueryParseService.class), reports, rate, new RateLimitProperties(), users))
                 .setControllerAdvice(new AgentAdvice()).build();
     }
 
@@ -51,17 +50,6 @@ class LegacyAgentReadOnlyTest {
         mvc.perform(get(execution).requestAttr(AgentBoundary.REQUEST_ID, UUID.randomUUID().toString()))
                 .andExpect(jsonPath("$.data.executionId").value(id));
         mvc.perform(get("/ai/reports/from-task/7")).andExpect(jsonPath("$.data.summary").value("保存的报告"));
-        verify(reports, never()).generateFromTask(any());
     }
 
-    @Test
-    void rollbackFlagRestoresTheExistingWriteRoute() throws Exception {
-        config.setLegacyWritesEnabled(true);
-        when(users.getAuthenticatedUserId()).thenReturn("owner");
-        when(agent.create(any())).thenReturn(AgentJson.object().put("executionId", "draft"));
-        mvc().perform(post("/agent/executions").contentType("application/json").content("{}")
-                .requestAttr(AgentBoundary.REQUEST_ID, UUID.randomUUID().toString()))
-                .andExpect(jsonPath("$.data.executionId").value("draft"));
-        verify(agent).create(any());
-    }
 }

@@ -24,12 +24,9 @@ class AgentBoundaryTest {
         CurrentUserContext users = new CurrentUserContext(tokens,auth,blacklist);
         when(tokens.parseToken("synthetic-jwt")).thenReturn(new JwtTokenService.JwtUser("owner-a","a","USER","jti",Long.MAX_VALUE));
         service = mock(AgentService.class);
-        when(service.create(any())).thenReturn(AgentJson.object().put("executionId", UUID.randomUUID().toString()));
         when(service.answer(any())).thenAnswer(i -> AgentJson.object().put("summary", "安全测试回答"));
-        when(service.confirm(anyString(),any())).thenAnswer(i -> AgentJson.object().put("taskId", "synthetic-task"));
         AgentProperties properties = new AgentProperties();
-        properties.setLegacyWritesEnabled(true);
-        mvc = MockMvcBuilders.standaloneSetup(new AgentController(service,users,mock(RateLimitService.class),properties))
+        mvc = MockMvcBuilders.standaloneSetup(new AgentController(service))
                 .setControllerAdvice(new AgentAdvice()).addFilters(new AgentBoundary(users)).build();
     }
     @Test void devHeaderAndWorkerHeaderCannotAuthenticateAgent() throws Exception {
@@ -71,10 +68,10 @@ class AgentBoundaryTest {
             for (String suffix : new String[]{"/executions", "/answers", "/executions/"+id+"/confirm"})
                 mvc.perform(post(URI.create(prefix+suffix)).contextPath("/api").header("Authorization","Bearer synthetic-jwt")
                         .contentType("application/json").content("{}"))
-                        .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(403))
                         .andExpect(jsonPath("$.data.requestId").isNotEmpty());
         }
-        verify(service,times(3)).create(any()); verify(service,times(3)).answer(any()); verify(service,times(3)).confirm(eq(id),any());
+        verifyNoInteractions(service);
     }
     @Test void matrixPathsStillRequireJwtBeforeReadingBody() throws Exception {
         mvc.perform(post("/api/agent;v=1/answers").contextPath("/api").header("X-User-Id","owner-a")

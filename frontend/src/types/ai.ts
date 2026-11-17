@@ -74,10 +74,3 @@ export interface TaskResultAnswerState {
   hasEarlier: boolean
   historyVersions: string[]
 }
-
-export interface TaskResultQuestion {
-  requestId: string
-  resultVersion: string
-  expectedTurn: number
-  question: string
-}

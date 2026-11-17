@@ -1,5 +1,5 @@
 <template>
-  <AgentView v-if="route.query.executionId || route.query.history === 'legacy-agent'" read-only />
+  <AgentView v-if="route.query.executionId || route.query.history === 'legacy-agent'" />
   <section v-else class="assistant-page">
     <div class="page-title"><h2>影像助手</h2></div>
     <el-tabs v-model="mode">

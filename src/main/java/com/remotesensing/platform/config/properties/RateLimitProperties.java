@@ -31,7 +31,4 @@ public class RateLimitProperties {
     private int aiQueryLimit = 20;
     private long aiQueryWindowSeconds = 60;
 
-    private int aiReportLimit = 3;
-    private long aiReportWindowSeconds = 300;
-
 }

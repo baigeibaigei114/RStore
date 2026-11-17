@@ -106,10 +106,7 @@
         <el-card class="detail-card" shadow="never">
           <template #header>
             <div class="card-header">
-              <span>{{ legacyAgentWrites ? 'AI 分析报告' : '历史分析报告' }}</span>
-              <el-tag v-if="legacyAgentWrites" :type="task?.status === 'SUCCESS' ? 'success' : 'info'" effect="plain">
-                {{ task?.status === 'SUCCESS' ? '可生成' : '等待任务成功' }}
-              </el-tag>
+              <span>历史分析报告</span>
             </div>
           </template>
 
@@ -117,10 +114,10 @@
             <el-button
               type="primary"
               :loading="aiReportLoading"
-              :disabled="legacyAgentWrites ? task?.status !== 'SUCCESS' : !task"
+              :disabled="!task"
               @click="loadAiReport"
             >
-              {{ legacyAgentWrites ? '生成 AI 报告' : '查看历史报告' }}
+              查看历史报告
             </el-button>
           </div>
 
@@ -155,8 +152,8 @@
             </div>
           </template>
 
-          <el-empty v-else-if="legacyAgentWrites || aiReportChecked"
-            :description="legacyAgentWrites ? '暂无 AI 报告，成功任务可手动生成' : '此任务没有已保存的报告'" />
+          <el-empty v-else-if="aiReportChecked"
+            description="此任务没有已保存的报告" />
         </el-card>
 
         <InputProvenance v-if="task?.taskType === 'NDVI'" :raw="task.params" snapshot />
@@ -300,8 +297,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { generateTaskReportApi, getSavedTaskReportApi } from '@/api/ai'
-import { legacyAgentWrites } from '@/utils/legacyAgent'
+import { getSavedTaskReportApi } from '@/api/ai'
 import {
   getTaskDetailApi,
   getTaskResultDownloadUrlApi,
@@ -465,10 +461,6 @@ async function downloadTaskResult() {
 
 async function loadAiReport() {
   if (!task.value || aiReportLoading.value) return
-  if (legacyAgentWrites && task.value?.status !== 'SUCCESS') {
-    ElMessage.warning('任务成功后才能生成 AI 报告')
-    return
-  }
 
   const requestedTask = taskId.value, epoch = generation
   const request = new AbortController()
@@ -476,21 +468,14 @@ async function loadAiReport() {
   const stillCurrent = () => alive && generation === epoch && !request.signal.aborted
   aiReportLoading.value = true
   try {
-    const report = legacyAgentWrites ? await generateTaskReportApi(requestedTask, true, request.signal)
-      : await getSavedTaskReportApi(requestedTask, request.signal)
+    const report = await getSavedTaskReportApi(requestedTask, request.signal)
     if (!stillCurrent()) return
     aiReport.value = report
     aiReportChecked.value = true
-    if (legacyAgentWrites) ElMessage.success('AI 报告已生成')
   } catch (error) {
     if (!stillCurrent()) return
     if (isUnauthorized(error)) { showConnectionError(error); return }
-    const message = error instanceof Error ? error.message : 'AI 服务暂不可用，请稍后重试'
-    if (message.includes('统计元数据')) {
-      ElMessage.warning('该任务缺少统计元数据，暂无法生成报告')
-    } else {
-      ElMessage.error(message || 'AI 服务暂不可用，请稍后重试')
-    }
+    ElMessage.error('暂时无法读取历史报告，请稍后重试。')
   } finally {
     if (reportRead === request) reportRead = undefined
     if (stillCurrent()) aiReportLoading.value = false

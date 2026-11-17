@@ -10,12 +10,7 @@ import org.apache.ibatis.annotations.Mapper;
 public interface RsAnalysisReportMapper {
 
     /**
-     * 插入 AI 分析报告记录，插入后回填自增 ID。
-     */
-    int insert(RsAnalysisReport report);
-
-    /**
-     * 按任务、用户和报告类型查询已有报告，用于避免重复调用模型。
+     * 按任务、用户和报告类型读取已保存的历史报告。
      */
     RsAnalysisReport selectByTaskOwnerAndType(RsAnalysisReport report);
 }

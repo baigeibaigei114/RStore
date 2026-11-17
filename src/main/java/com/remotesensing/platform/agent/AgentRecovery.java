@@ -15,8 +15,7 @@ public class AgentRecovery {
         if (!properties.isEnabled()) return;
         try { service.recoverExpired(); }
         catch (DataAccessException error) {
-            properties.setEnabled(false);
-            org.slf4j.LoggerFactory.getLogger(AgentRecovery.class).warn("Agent recovery unavailable; generation disabled errorType={}", error.getClass().getSimpleName());
+            org.slf4j.LoggerFactory.getLogger(AgentRecovery.class).warn("Legacy history recovery unavailable errorType={}", error.getClass().getSimpleName());
         }
     }
 }

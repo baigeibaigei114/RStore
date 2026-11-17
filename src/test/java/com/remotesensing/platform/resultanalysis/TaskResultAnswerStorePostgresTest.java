@@ -5,10 +5,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,7 +14,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 @EnabledIfEnvironmentVariable(named = "RESULT_ANALYSIS_TEST_PORT", matches = "[0-9]+")
 class TaskResultAnswerStorePostgresTest {
     @Test
-    void migratesExistingAnswerAndReservesOnlyOneConcurrentNextTurn() throws Exception {
+    void migratesSavedTurnsAndReadsOwnerScopedHistoryWithoutMutatingUnfinishedRows() throws Exception {
         String port = System.getenv("RESULT_ANALYSIS_TEST_PORT");
         var source = new DriverManagerDataSource("jdbc:postgresql://127.0.0.1:" + port + "/postgres",
                 "result_analysis_test", System.getenv("RESULT_ANALYSIS_TEST_PASSWORD"));
@@ -38,26 +34,21 @@ class TaskResultAnswerStorePostgresTest {
         jdbc.execute(Files.readString(upgrades.resolve("20261111_result_analysis_turns.sql")));
 
         var store = new TaskResultAnswerStore(jdbc);
-        assertEquals(1, store.find("owner", 7, first).number());
+        assertEquals(1, store.history("owner", 7, version, Integer.MAX_VALUE, 30).get(0).number());
         assertTrue(store.history("another", 7, version, Integer.MAX_VALUE, 30).isEmpty());
-        var pool = Executors.newFixedThreadPool(2);
-        var barrier = new CyclicBarrier(2);
-        Callable<Boolean> send = () -> {
-            barrier.await(5, TimeUnit.SECONDS);
-            return store.reserve("owner", 7, UUID.randomUUID(), version, "它的分母是多少", 90, 1);
-        };
-        try {
-            var one = pool.submit(send);
-            var two = pool.submit(send);
-            assertNotEquals(one.get(10, TimeUnit.SECONDS), two.get(10, TimeUnit.SECONDS));
-        } finally {
-            pool.shutdownNow();
-        }
+        assertTrue(store.versions("another", 7).isEmpty());
+        jdbc.update("""
+                INSERT INTO task_result_answer
+                    (owner_id,task_id,request_id,result_version,question,status,expires_at,turn_number)
+                VALUES ('owner',7,?,?,'未完成的历史问题','RUNNING',CURRENT_TIMESTAMP + INTERVAL '1 hour',2)
+                """, UUID.randomUUID(), version);
         var page = store.history("owner", 7, version, Integer.MAX_VALUE, 30);
         assertEquals(2, page.size());
         assertEquals(2, page.get(0).number());
-        assertEquals("RUNNING", page.get(0).status());
-        assertFalse(store.reserve("owner", 7, UUID.randomUUID(), version, "继续", 90, 2));
-        assertEquals(first, store.previousComplete("owner", 7, version, 2).requestId());
+        assertEquals("FAILED", page.get(0).status());
+        assertTrue(page.get(0).error().contains("历史解读未完成"));
+        assertEquals(first, store.history("owner", 7, version, 2, 30).get(0).requestId());
+        assertEquals(java.util.List.of(version), store.versions("owner", 7));
+        assertEquals("RUNNING", jdbc.queryForObject("SELECT status FROM task_result_answer WHERE turn_number=2", String.class));
     }
 }

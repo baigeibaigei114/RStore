@@ -86,7 +86,7 @@ public class AnalysisPreparation {
         result.put("moreImages", moreImages).put("moreRegions", regionMatches.size() > MAX_CHOICES);
         if (imageChoices.isEmpty() || regionMatches.isEmpty()) return result.put("status", "NO_MATCH");
         if (imageChoices.size() != 1 || moreImages || regionId == null) return result.put("status", "CHOOSE");
-        MonitoringRegionVO region = resources.region(regionId, owner, false);
+        MonitoringRegionVO region = resources.region(regionId, owner);
         if (!region.getVersion().equals(regionMatches.get(0).getVersion())) {
             throw new AgentFailure("RESOURCE_CHANGED", "监测区域已更新，请重新准备分析", 409, true);
         }
@@ -96,8 +96,8 @@ public class AnalysisPreparation {
 
     public ObjectNode select(JsonNode body, String owner) {
         fields(body, "imageId", "monitoringRegionId");
-        RsImage image = resources.image(id(body, "imageId"), owner, false);
-        MonitoringRegionVO region = resources.region(id(body, "monitoringRegionId"), owner, false);
+        RsImage image = resources.image(id(body, "imageId"), owner);
+        MonitoringRegionVO region = resources.region(id(body, "monitoringRegionId"), owner);
         return draft(image, region);
     }
 

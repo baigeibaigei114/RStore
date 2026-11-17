@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.remotesensing.platform.agent.AgentProperties;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.config.TestConfig;
 import com.remotesensing.platform.dto.RemoteSensingTaskMessage.TaskType;
@@ -19,12 +18,10 @@ import com.remotesensing.platform.service.RateLimitService;
 import com.remotesensing.platform.service.AiQueryParseService;
 import com.remotesensing.platform.service.AiReportService;
 import com.remotesensing.platform.vo.AiQueryIntentVO;
-import com.remotesensing.platform.vo.AiReportVO;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,9 +46,6 @@ class AiControllerTest {
 
     @MockBean
     private AiReportService aiReportService;
-
-    @MockBean
-    private AgentProperties agentProperties;
 
     @Autowired
     private RateLimitService rateLimitService;
@@ -92,26 +86,11 @@ class AiControllerTest {
     }
 
     @Test
-    @DisplayName("任务报告生成接口返回报告")
-    void generateReportShouldReturnReport() throws Exception {
-        when(agentProperties.isLegacyWritesEnabled()).thenReturn(true);
-        AiReportVO report = new AiReportVO();
-        report.setId(1L);
-        report.setTaskId(10L);
-        report.setReportType("NDVI");
-        report.setSummary("该区域整体植被覆盖可能较好。");
-        report.setReportJson(Map.of("riskLevel", "LOW"));
-        when(aiReportService.generateFromTask(10L)).thenReturn(report);
-
-        mockMvc.perform(post("/api/ai/reports/from-task/10")
-                        .contextPath("/api"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
-                .andExpect(jsonPath("$.data.id").value(1L))
-                .andExpect(jsonPath("$.data.reportJson.riskLevel").value("LOW"));
-
-        verify(aiReportService).generateFromTask(10L);
-        verify(rateLimitService).check("ai-report:user:dev-user", 3, Duration.ofSeconds(300));
+    @DisplayName("旧报告写入被拒绝且不调用模型或存储")
+    void retiredReportWriteDoesNotCallService() throws Exception {
+        mockMvc.perform(post("/api/ai/reports/from-task/10").contextPath("/api"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(403));
+        org.mockito.Mockito.verifyNoInteractions(aiReportService, rateLimitService);
     }
 
     @Test

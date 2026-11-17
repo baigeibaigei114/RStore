@@ -23,10 +23,12 @@ python scripts\parse_metadata.py D:\data\sample.tif
 生成缩略图：
 
 ```powershell
-python scripts\generate_thumbnail.py D:\data\sample.tif D:\data\sample_thumb.png
+python scripts\generate_thumbnail.py D:\data\sample.tif D:\data\sample_thumb.webp
 ```
 
-成功输出示例：
+默认预览使用 WebP；脚本也支持 `.png`，已有 PNG 预览继续可读。元数据解析统一使用 `scripts/parse_metadata.py`；`bounds` 是 WGS84 范围，`originalBounds` 保留原始 CRS 范围。Java 的同步解析和 Compose 均使用此入口。
+
+元数据成功输出示例（节选）：
 
 ```json
 {

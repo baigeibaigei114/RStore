@@ -15,10 +15,7 @@ from app.knowledge.store import PgKnowledgeStore
 from app.model import JsonModel, strict_json
 from app.schemas import (
     AnswerRequest,
-    DecisionRequest,
-    ExplanationRequest,
     PreparationRequest,
-    ResultAnswerRequest,
 )
 from app.service import AgentService
 
@@ -133,21 +130,9 @@ def create_app(settings=None, service=None):
     def ready(request: Request):
         return result(request, request.app.state.service.ready())
 
-    @app.post("/internal/v1/decisions")
-    def decisions(body: DecisionRequest, request: Request):
-        return result(request, request.app.state.service.decision(body))
-
     @app.post("/internal/v1/answers")
     def answers(body: AnswerRequest, request: Request):
         return result(request, request.app.state.service.answer(body))
-
-    @app.post("/internal/v1/explanations")
-    def explanations(body: ExplanationRequest, request: Request):
-        return result(request, request.app.state.service.explanation(body))
-
-    @app.post("/internal/v1/result-answers")
-    def result_answers(body: ResultAnswerRequest, request: Request):
-        return result(request, request.app.state.service.result_answer(body))
 
     @app.post("/internal/v1/preparation")
     def preparation(body: PreparationRequest, request: Request):

@@ -1,6 +1,5 @@
 package com.remotesensing.platform.controller;
 
-import com.remotesensing.platform.agent.AgentProperties;
 import com.remotesensing.platform.common.Result;
 import com.remotesensing.platform.common.ResultCode;
 import com.remotesensing.platform.common.CurrentUserContext;
@@ -23,8 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * AI 能力控制器。
  *
- * <p>提供自然语言影像检索解析和任务结果分析报告两个 AI 辅助接口。
- * LLM 仅负责"理解自然语言"和"生成自然语言描述"，不参与实际数据查询或任务执行。
+ * <p>提供自然语言影像检索解析和历史任务报告读取。
+ * LLM 仅负责"理解自然语言"，不参与实际数据查询或任务执行。
  * 限流按用户维度独立控制，防止高频调用耗尽模型 API 配额。</p>
  */
 @RestController
@@ -36,20 +35,17 @@ public class AiController {
     private final RateLimitService rateLimitService;
     private final RateLimitProperties rateLimitProperties;
     private final CurrentUserContext currentUserContext;
-    private final AgentProperties agentProperties;
 
     public AiController(AiQueryParseService aiQueryParseService,
                         AiReportService aiReportService,
                         RateLimitService rateLimitService,
                         RateLimitProperties rateLimitProperties,
-                        CurrentUserContext currentUserContext,
-                        AgentProperties agentProperties) {
+                        CurrentUserContext currentUserContext) {
         this.aiQueryParseService = aiQueryParseService;
         this.aiReportService = aiReportService;
         this.rateLimitService = rateLimitService;
         this.rateLimitProperties = rateLimitProperties;
         this.currentUserContext = currentUserContext;
-        this.agentProperties = agentProperties;
     }
 
     /**
@@ -68,22 +64,10 @@ public class AiController {
         return Result.success(aiQueryParseService.parse(requestDTO.getText()));
     }
 
-    /**
-     * 根据任务结果统计元数据生成中文分析报告。
-     *
-     * <p>要求任务必须处于 SUCCESS 状态且结果文件包含统计元数据（mean、std 等）。
-     * 每次调用会生成新报告并持久化到 {@code rs_analysis_report} 表，历史报告不受影响。</p>
-     *
-     * @param taskId 已成功的处理任务 ID
-     * @return AI 生成的分析报告（摘要、关键发现、风险等级、建议）
-     */
+    /** Retired write route retained as an explicit compatibility response. */
     @PostMapping("/reports/from-task/{taskId}")
     public Result<AiReportVO> generateReportFromTask(@PathVariable Long taskId) {
-        if (!agentProperties.isLegacyWritesEnabled()) {
-            return Result.fail(ResultCode.FORBIDDEN.getCode(), "旧报告已改为历史查看，请从任务详情解读结果");
-        }
-        checkAiReportRateLimit();
-        return Result.success(aiReportService.generateFromTask(taskId));
+        return Result.fail(ResultCode.FORBIDDEN.getCode(), "旧报告已改为历史查看，请查看任务统计或已保存解读");
     }
 
     @GetMapping("/reports/from-task/{taskId}")
@@ -103,16 +87,4 @@ public class AiController {
         );
     }
 
-    /**
-     * AI 报告生成限流，比查询解析更严格 —— 报告生成涉及较多 output token，
-     * 调用成本更高，因此窗口更长、限制更严格。
-     */
-    private void checkAiReportRateLimit() {
-        String userId = currentUserContext.getCurrentUserId();
-        rateLimitService.check(
-                "ai-report:user:" + userId,
-                rateLimitProperties.getAiReportLimit(),
-                Duration.ofSeconds(rateLimitProperties.getAiReportWindowSeconds())
-        );
-    }
 }
